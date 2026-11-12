@@ -1,6 +1,6 @@
 # Claude Pet — Full product reference
 
-Canonical website: https://claude-pet.yeongyu.me/
+Canonical website: https://token-pet.yeongyu.me/
 Reference release: v1.1.0, published 2026-10-06T00:25:29Z (2026-10-06 09:25 KST).
 Reference updated: 2026-10-06.
 
@@ -86,7 +86,7 @@ Both macOS and Windows check GitHub hourly, beginning one hour after launch. The
 
 Local logs are read on the user's computer, for spike detection only, and only numbers are used. The existing Claude Code credential is sent to Anthropic, and the existing Codex credential to OpenAI, only to request account usage. Update checking and downloading contact GitHub. Those paths do not upload prompts, transcripts or source code. The app also reads its settings, assets and installed resources; it is not an offline-only program.
 
-The website at claude-pet.yeongyu.me is separate from the app. It runs Google Analytics 4 on every page to count visits and how the page is used (link clicks, scrolling, demo interactions, page speed); measurement is not optional there. The app never contacts the website or Google.
+The website at token-pet.yeongyu.me is separate from the app. It runs Google Analytics 4 on every page to count visits and how the page is used (link clicks, scrolling, demo interactions, page speed); measurement is not optional there. The app never contacts the website or Google.
 
 Optional API cost mode, per provider, reports organization costs and a configured budget: Anthropic Console costs for Claude Code (Anthropic Admin API key) and OpenAI organization costs for Codex (OpenAI Admin API key). This is separate from subscription limits. Configured Admin API keys are stored in plaintext in ~/.claude_pet.json, under the user profile on Windows.
 
@@ -96,8 +96,8 @@ Claude Pet is open source under the MIT License (see LICENSE in the repository).
 
 ## Canonical links
 
-Website: https://claude-pet.yeongyu.me/
-Website privacy: https://claude-pet.yeongyu.me/privacy.html
+Website: https://token-pet.yeongyu.me/
+Website privacy: https://token-pet.yeongyu.me/privacy.html
 Repository: https://github.com/BrilliantTiger/claude-pet
 License: https://github.com/BrilliantTiger/claude-pet/blob/main/LICENSE
 Published release: https://github.com/BrilliantTiger/claude-pet/releases/tag/v1.1.0

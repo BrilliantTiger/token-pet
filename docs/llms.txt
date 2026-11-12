@@ -45,15 +45,15 @@ Reference: v1.1.0, published 2026-10-06T00:25:29Z (2026-10-06 09:25 KST). Refere
 
 Local logs are read on the computer, for spike detection only. The existing Claude Code credential is sent to Anthropic, and the existing Codex credential to OpenAI, only to request account usage. Update checks and downloads contact GitHub. Those paths do not upload prompts, transcripts or source code. This is not an offline-only app.
 
-The website at claude-pet.yeongyu.me is separate from the app: it uses Google Analytics on every page to count visits and how the page is used (clicks, scrolling, demos), and the app never contacts it. See https://claude-pet.yeongyu.me/privacy.html
+The website at token-pet.yeongyu.me is separate from the app: it uses Google Analytics on every page to count visits and how the page is used (clicks, scrolling, demos), and the app never contacts it. See https://token-pet.yeongyu.me/privacy.html
 
 Claude Pet is open source under the MIT License. It is an independent project by Yeongyu Yang (uygnoey), not affiliated with or endorsed by Anthropic or OpenAI. Claude is a trademark of Anthropic PBC; Codex and ChatGPT are trademarks of OpenAI.
 
 ## Links
 
-- [Website and installation](https://claude-pet.yeongyu.me/)
-- [Full reference](https://claude-pet.yeongyu.me/llms-full.txt)
-- [Website privacy](https://claude-pet.yeongyu.me/privacy.html)
+- [Website and installation](https://token-pet.yeongyu.me/)
+- [Full reference](https://token-pet.yeongyu.me/llms-full.txt)
+- [Website privacy](https://token-pet.yeongyu.me/privacy.html)
 - [Repository](https://github.com/BrilliantTiger/claude-pet)
 - [License (MIT)](https://github.com/BrilliantTiger/claude-pet/blob/main/LICENSE)
 - [v1.1.0 release](https://github.com/BrilliantTiger/claude-pet/releases/tag/v1.1.0)

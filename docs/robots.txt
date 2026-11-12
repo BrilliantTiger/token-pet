@@ -1,4 +1,4 @@
-# Claude Pet — https://claude-pet.yeongyu.me/
+# Claude Pet — https://token-pet.yeongyu.me/
 # All crawlers welcome, including search, AI answer-engine and AI assistant crawlers.
 # A plain-text product reference for language models: /llms.txt and /llms-full.txt
 
@@ -82,4 +82,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://claude-pet.yeongyu.me/sitemap.xml
+Sitemap: https://token-pet.yeongyu.me/sitemap.xml
