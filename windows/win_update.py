@@ -89,6 +89,7 @@ PORTABLE_REQUIRED = (
     # 클라이언트에 불평 없이 설치된다. 그러면 필은 빈 여백만 그리고 아무도 이유를 못 댄다.
     os.path.join("_internal", "logos", "claude.svg"),
     os.path.join("_internal", "logos", "openai.svg"),
+    os.path.join("_internal", "logos", "gemini.svg"),
     RELEASE_MARKER,
 )
 
