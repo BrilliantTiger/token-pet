@@ -4480,6 +4480,10 @@ def codex_window_seconds(lane):
 #     "remaining_fraction", "reset_time"}]}]}}} 모양이고, 묶음은 "Gemini Models"(버킷 gemini-weekly·
 #     gemini-5h)와 "Claude and GPT models"(3p-weekly·3p-5h) 둘이었다.
 #   · 전에 쓰던 HTTP 두 엔드포인트에는 Gemini 묶음의 값이 없었다(모델별 비율이 1.0 에 머물렀다).
+#   · agy 1.5.11 은 SSH 를 감지하면(SSH_TTY·SSH_CLIENT·SSH_CONNECTION 중 하나라도 있으면) 토큰
+#     저장소를 키체인에서 파일로 바꾼다 — 로그에 "Using file-based token storage because SSH session
+#     detected". 그래서 SSH_TTY=1 로 띄우면 키체인으로 로그인된 사용자가 "Authentication required" 가
+#     된다(같은 때 SSH_* 없이는 SUCCESS). 브라우저를 막으려고 SSH_TTY 를 쓸 수 없는 까닭이다.
 #   · 로그인하지 않은 agy 는(agy 쪽 검토 세션의 샌드박스 재현과 바이너리 확인 — 우리가 직접 본 것이
 #     아니다) stdout 없이 stderr 에 "Authentication required. Please visit the URL to log in: …" 를 쓰고
 #     60초를 기다리며, SSH_* 환경변수가 없으면 기본 브라우저에 로그인 탭을 연다. `-p /usage` 를 띄우는
@@ -4490,8 +4494,9 @@ def codex_window_seconds(lane):
 #   2. agy 는 프로세스다 — 자주 띄우지 않는다. 자동으로는 GEMINI_AUTO_SEC(300초)에 한 번 이하,
 #      사용자가 펫·필을 누른 뒤에는 바로, 단 마지막 실행에서 GEMINI_CLICK_MIN_SEC(60초)은 지나야 한다.
 #      Gemini 를 숨기면 띄우지 않는다(start_gemini_refresh), 주 새로고침 경로에서 기다리지도 않는다.
-#   3. 셸을 거치지 않고, 중립 폴더(gemini_cli_cwd)에서, GEMINI_AGY_TIMEOUT 안에 끝나게, SSH_TTY=1 로
-#      (브라우저를 열지 못하게) 자기 프로세스 그룹으로 띄우고, 끝낼 때는 그룹째 끝내고 거둔다.
+#   3. 셸을 거치지 않고, 중립 폴더(gemini_cli_cwd)에서, GEMINI_AGY_TIMEOUT 안에 끝나게, 브라우저를
+#      열지 못하게(_agy_env — PATH 맨 앞의 아무것도 하지 않는 `open`), 자기 프로세스 그룹으로 띄우고,
+#      끝낼 때는 그룹째 끝내고 거둔다.
 #   5. **로그인 안 된 agy 를 띄우지 않는다**(대표님: "로그인 안 하면 표시 안 하면 되는 거야! 왜 로그인을
 #      재시도해"). 항목도 폴백 파일도 없으면 실행 0회·필에 아무것도 없음·우클릭 메뉴에 "Gemini
 #      로그인(agy)". 항목은 있는데 agy 가 로그인을 요구하면 그 즉시 끝내고 자동 실행을 멈춘다 — 지문
@@ -4517,11 +4522,12 @@ GEMINI_CLI_DIRNAME = "claudepet-agy"
 # t: 마지막으로 agy 를 띄운 시각, ok_t: 마지막 '성공' 응답 시각, click: 60초 하한만 지키고 바로 읽으라
 # (사용자가 눌렀거나 로그인 지문이 바뀌었다 — fetch_gemini_usage 가 띄우며 내린다), click_check: 누른
 # 뒤 로그인 지문을 아직 다시 보지 않았다, cwd: 임시 폴더의 고정 이름을 쓸 수 없을 때 한 번 만든 폴더.
+# open_dir: 아무것도 하지 않는 `open` 을 둔 폴더(_gemini_fake_open_dir).
 # check_t: 마지막으로 로그인 지문을 본 시각, login: 그때의 판단(None 모름 | True | False), marker: 그
 # 지문, auth_failed_marker: agy 가 로그인을 요구했을 때의 지문 — None 이 아니면 자동 실행이 멈춰 있다.
 _gemini_cache = {"t": 0.0, "rows": None, "ok_t": None, "click": False, "click_check": False,
                  "cwd": None, "check_t": 0.0, "login": None, "marker": None,
-                 "auth_failed_marker": None}
+                 "auth_failed_marker": None, "open_dir": None}
 # Gemini 조회 상태. last_error: None(성공) | "not_installed"(agy 없음) | "timeout" | "agy_failed"
 # (0 아닌 종료·실행 실패) | "parse"(JSON 이 아니거나 쓸 버킷이 없다) | "status"(SUCCESS 가 아닌 답) |
 # "login"(로그인 안 됨 — 항목이 없거나 agy 가 로그인을 요구했다). auth_error 는 "login" 일 때만 True —
@@ -4671,8 +4677,9 @@ def agy_usage_buckets(payload):
 
 
 def _gemini_edge_rules():
-    """테스트·계약이 정하지 않은 경계의 규칙을 **한곳에** 모은다(Coordinator 결정, agy 가 a~g 모두
-    동의 — 2026-11-18 확정). 아래 코드는 이 표만 읽는다.
+    """테스트·계약이 정하지 않은 경계의 규칙을 **한곳에** 모은다(Coordinator 결정, agy 동의 —
+    2026-11-18 확정). 아래 코드는 이 표만 읽는다. 경계 f(ANTIGRAVITY_APP_DATA_DIR 아래의 폴백 파일)는
+    뺐다 — agy CLI 는 그 변수를 토큰 파일 위치로 쓰지 않는다.
 
       a fallback_gone_is_change  멈춘 동안 폴백 파일이 **사라지는** 것도 지문 변화로 본다.
       b menu_login_retries       우클릭 "Gemini 로그인(agy)" 을 누른 것을 재시도 신호로 본다(False:
@@ -4682,12 +4689,11 @@ def _gemini_edge_rules():
                                  행·깃발 유지) | "present" | "absent".
       e no_agy_status            agy 가 설치돼 있지 않을 때의 last_error — "not_installed" | "login".
                                  agy 가 없으면 키체인도 보지 않으므로 항목이 있든 없든 이 값이다.
-      f app_data_dir_fallback    환경에 ANTIGRAVITY_APP_DATA_DIR 가 있으면 그 아래 폴백 파일도 본다.
       g no_color                 백그라운드 agy 의 env 에 NO_COLOR=1 도 넣는다.
     """
     return {"fallback_gone_is_change": True, "menu_login_retries": False,
             "run_when_locked_unknown": False, "security_unknown": "skip",
-            "no_agy_status": "not_installed", "app_data_dir_fallback": True, "no_color": True}
+            "no_agy_status": "not_installed", "no_color": True}
 
 
 def _find_agy_cli():
@@ -4759,15 +4765,10 @@ def _gemini_item_mdat():
 
 
 def _gemini_fallback_paths(rules):
-    """agy 의 파일 폴백 저장소(키체인을 못 쓰는 환경)가 있을 자리들."""
-    paths = [os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-cli",
-                          GEMINI_FALLBACK_NAME)]
-    extra = os.environ.get("ANTIGRAVITY_APP_DATA_DIR")
-    if extra and rules["app_data_dir_fallback"]:
-        path = os.path.join(extra, GEMINI_FALLBACK_NAME)
-        if path not in paths:
-            paths.append(path)
-    return paths
+    """agy 의 파일 폴백 저장소(키체인을 못 쓰는 환경)가 있을 자리들 — 늘 홈 아래 한 곳이다
+    (agy CLI 는 ANTIGRAVITY_APP_DATA_DIR 를 토큰 파일 위치로 쓰지 않는다)."""
+    return [os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-cli",
+                         GEMINI_FALLBACK_NAME)]
 
 
 def _gemini_login_marker(rules):
@@ -4822,8 +4823,8 @@ def compute_gemini_onboard_state(runtime=None):
 def start_gemini_login():
     """우클릭 "Gemini 로그인(agy)" — Terminal 에서 `agy` 를 연다(사용자가 직접 로그인한다).
 
-    `agy -p /usage` 가 아니다(그건 한 번 묻고 끝난다). SSH_TTY 도 넣지 않는다 — 사용자가 고른
-    로그인에서는 브라우저가 열려야 한다. 로그인이 끝나면 agy 가 키체인을 다시 쓰고, 다음 확인이
+    `agy -p /usage` 가 아니다(그건 한 번 묻고 끝난다). 가짜 `open`(_agy_env)도 쓰지 않는다 — 사용자가
+    고른 로그인에서는 브라우저가 열려야 한다. 로그인이 끝나면 agy 가 키체인을 다시 쓰고, 다음 확인이
     그 지문 변화를 보고 스스로 다시 읽는다."""
     binp = _find_agy_cli()
     q = lambda x: json.dumps(x, ensure_ascii=False)
@@ -4856,11 +4857,71 @@ def _agy_wants_login(stderr):
     return any(h in text for h in _AGY_LOGIN_HINTS)
 
 
+_GEMINI_FAKE_OPEN = "#!/bin/sh\nexit 0\n"
+
+
+def _gemini_fake_open_ok(folder):
+    """folder 가 우리 전용 폴더(진짜 폴더, 0700, 소유자 본인)이고 그 안의 `open` 이 우리가 쓴 그대로인가."""
+    try:
+        st = os.lstat(folder)
+        if not (stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid()
+                and stat.S_IMODE(st.st_mode) == 0o700):
+            return False
+        path = os.path.join(folder, "open")
+        fst = os.lstat(path)
+        if not (stat.S_ISREG(fst.st_mode) and fst.st_uid == os.getuid()
+                and stat.S_IMODE(fst.st_mode) == 0o700):
+            return False
+        with open(path, encoding="utf-8") as f:
+            return f.read(len(_GEMINI_FAKE_OPEN) + 1) == _GEMINI_FAKE_OPEN
+    except (OSError, ValueError):
+        return False
+
+
+def _gemini_fake_open_dir():
+    """아무것도 하지 않는 `open` 하나만 든 전용 폴더의 경로, 만들 수 없으면 None.
+
+    로그인이 필요해진 agy 는 `open <주소>` 로 기본 브라우저에 로그인 탭을 연다. 백그라운드 실행의 PATH
+    맨 앞에 이 폴더를 두면 그 `open` 이 여기서 끝난다 — 인자를 무시하고 0 으로. 폴더는 한 번 만들어
+    다시 쓰되(mkdtemp, 0700), **부를 때마다 확인한다**: 폴더나 파일이 지워졌거나(임시 폴더는 시스템이
+    치울 수 있다) 우리가 쓴 그대로가 아니면 새 폴더를 다시 만든다. 없으면 PATH 의 다음 open
+    (/usr/bin/open)으로 넘어가 브라우저가 열리기 때문이다. 앱은 이 폴더를 지우지 않는다 — 떠 있는 agy 가
+    쓰는 중일 수 있다."""
+    folder = _gemini_cache.get("open_dir")
+    if folder and _gemini_fake_open_ok(folder):
+        return folder
+    try:
+        folder = tempfile.mkdtemp(prefix="claudepet-open-")      # 0700
+        fd = os.open(os.path.join(folder, "open"),
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(_GEMINI_FAKE_OPEN)
+        os.chmod(os.path.join(folder, "open"), 0o700)            # umask 와 무관하게
+    except OSError as e:
+        _dbg("gemini fetch: fake open not made", type(e).__name__)
+        return None
+    if not _gemini_fake_open_ok(folder):
+        return None
+    _gemini_cache["open_dir"] = folder
+    return folder
+
+
 def _agy_env(rules):
-    """백그라운드 agy 의 환경 — os.environ 의 **사본**에 SSH_TTY=1. agy 는 SSH_* 가 있으면 로그인이
-    필요해도 기본 브라우저를 열지 않는다(agy 1.5.10). 앱 자신의 환경은 바꾸지 않는다."""
+    """백그라운드 agy 의 환경(os.environ 의 **사본** — 앱 자신의 환경은 바꾸지 않는다), 만들 수 없으면 None.
+
+      · SSH_CLIENT·SSH_TTY·SSH_CONNECTION 은 사본에서 지운다 — agy 는 SSH 를 감지하면 토큰 저장소를
+        키체인에서 파일로 바꿔 로그인된 사용자를 "로그인 필요"로 본다(위 머리 주석의 관측).
+      · PATH 맨 앞에 아무것도 하지 않는 `open` 의 폴더(_gemini_fake_open_dir) — 로그인이 필요해진 agy 가
+        브라우저를 열지 못한다. 나머지 PATH 는 원래 순서 그대로.
+      · NO_COLOR=1 — stderr 의 로그인 문구에 색 코드가 섞이지 않게.
+    가짜 open 을 만들지 못하면 None — 브라우저를 막지 못한 채로는 띄우지 않는다."""
+    folder = _gemini_fake_open_dir()
+    if folder is None:
+        return None
     env = dict(os.environ)
-    env["SSH_TTY"] = "1"
+    for key in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION"):
+        env.pop(key, None)
+    env["PATH"] = folder + os.pathsep + env.get("PATH", os.defpath)
     if rules["no_color"]:
         env["NO_COLOR"] = "1"
     return env
@@ -4915,10 +4976,13 @@ def _agy_exec(agy, rules):
     자기 세션(프로세스 그룹)으로 띄우고, 두 파이프를 스레드로 읽으면서 기다린다. stderr 에 로그인하라는
     말이 보이면 **그 즉시** 그룹을 끝낸다 — 그 실행이 agy 의 로그인 절차(60초 대기)를 열어 둔 것이다.
     GEMINI_AGY_TIMEOUT 을 넘겨도 끝낸다. 어느 경우든 거둔 뒤에 돌아온다. 상한은 time.monotonic 으로 잰다."""
+    env = _agy_env(rules)          # 띄우기 직전에 — 가짜 open 이 지워졌으면 여기서 다시 만든다
+    if env is None:
+        return None
     try:
         proc = subprocess.Popen([agy] + list(GEMINI_AGY_ARGS), stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                cwd=gemini_cli_cwd(), env=_agy_env(rules), start_new_session=True)
+                                cwd=gemini_cli_cwd(), env=env, start_new_session=True)
     except Exception as e:
         _dbg("gemini fetch: agy did not run", type(e).__name__)
         return None
