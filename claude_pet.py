@@ -8920,7 +8920,11 @@ def run_gui():
         pw = int(PW0 * g["scale"])
         ph = int(PH0 * g["scale"])
         want = int(g.get("pill_w") or PILL_W)
-        w = max(pw + BTN_R * 2 + 16, want + 2 * SUMMARY_EDGE)
+        # 세 번째 항은 roam_pill_rect 의 필 폭 하한(SUMMARY_MIN_W)이 들어갈 자리다. 이게 없으면
+        # 펫이 작고(배율 0.3) 내용이 짧을 때 W 가 그보다 좁아지고, 120pt 로 그려지는 필이
+        # 창 crop 밖으로 나가 테두리나 글자가 잘린다(`조회 중…` 은 W=99 에서 12pt 가 잘렸다).
+        w = max(pw + BTN_R * 2 + 16, want + 2 * SUMMARY_EDGE,
+                SUMMARY_MIN_W + 2 * SUMMARY_EDGE)
         h = ph + GAP + pill_band() + 4
         return pw, ph, w, h
 
@@ -9461,8 +9465,12 @@ def run_gui():
         받으므로 "접힘이 믿는 폭 == 필이 주는 폭"이 **구성상** 성립한다. 경계심으로 맞추는
         게 아니라 한 숫자를 두 곳이 읽는다.
         """
+        # 바닥(SUMMARY_MIN_W)은 **필 폭**의 하한이지 글자 자리의 하한이 아니다. 예전에는 글자
+        # 예산에도 같은 120 을 깔아, 필이 120~164pt 일 때 접힘이 실제 글자 자리(76~120pt)보다
+        # 넓은 120pt 를 믿고 넘치는 줄을 접지 않았다 — 그 줄은 필 오른쪽 밖으로 나가 창에
+        # 잘렸다(TOK-42). 이제 roam_pill_rect 가 이 W 에서 내줄 수 있는 최대 글자 자리 그대로다.
         room = max(SUMMARY_MIN_W, geom()[2] - 2 * SUMMARY_EDGE)
-        return max(SUMMARY_MIN_W, room - 2 * PILL_PAD - SUMMARY_LOGO_W)
+        return room - 2 * PILL_PAD - SUMMARY_LOGO_W
 
     def _widest_digit(_cache=[]):
         """필 글꼴에서 가장 넓은 숫자 글리프. 한 번만 재고 함수가 들고 있는다.
@@ -9751,13 +9759,22 @@ def run_gui():
         # 접힘은 지금 예산에 맞춰 줄을 나누므로 결과는 언제나 예산 안이고, 그러면
         # "더 필요하다"는 신호가 나올 자리가 없다. 그래서 펼친 상태의 폭으로 창을 먼저
         # 키우고(화면이 끝이다), 그 다음에 새 예산으로 접는다 — 화면보다 넓을 때만 접힌다.
+        #
+        # 줄 모양은 summary_lines 에게 **물어서** 얻는다(Windows 포트와 같은 방식). 예산을
+        # 무한으로 주면 아무것도 접히지 않으므로 돌아오는 것이 접히기 전의 진짜 줄이고,
+        # 게이지가 하나일 때의 인라인(리셋을 ' · 3d 10h' 로 같은 줄에)도 이미 반영돼 있다.
+        # 예전에는 roam_summary_runs 의 첫 줄과 리셋 줄을 **인라인 전에** 따로 쟀다. 그러면
+        # 게이지 하나짜리 줄은 실제보다 좁게 잡혀(ko '주간 34% · 3d 10h': 그려지는 줄 88.8pt,
+        # 잡힌 폭 69.3pt) 필이 그만큼 덜 넓어지고, 줄 끝이 필 밖으로 나가 창에 잘렸다(TOK-42).
+        #
+        # 각 줄은 **그 줄을 그리는 글꼴**로 잰다 — 판정은 그리기와 같은 줄 단위 규칙(줄 전체가
+        # sub 면 9.5pt). 인라인된 리셋 run 은 kind 가 "sub" 라도 11pt 줄 안에 산다.
+        measure_sub = lambda v: astr(v, F_SUMMARY_SUB).size().width
         need = 0.0
-        for _pid, segs in groups:
-            m, sub = roam_summary_runs(segs, t)
-            # 리셋 줄은 작은 글꼴로 그려지므로 **그 글꼴로 잰다.** 큰 글꼴로 재면 필이
-            # 필요보다 넓어진다 — 리셋 줄이 가장 긴 줄인 경우가 실제로 있다.
-            need = max(need, sum(_stable_w(txt) for txt, _k in m))
-            need = max(need, sum(_stable_w(txt, F_SUMMARY_SUB) for txt, _k in sub))
+        for _pid, lines in summary_lines(groups, measure, float("inf"), measure_sub):
+            for line in lines:
+                font = F_SUMMARY_SUB if all(k == "sub" for _t, k in line) else F_SUMMARY
+                need = max(need, sum(_stable_w(txt, font) for txt, _k in line))
         # 폭 결정은 state 훅을 거친다 — roam_release·autostart_read 와 같은 이유다.
         # 이 함수는 창 없는 시험이 손으로 만든 state 로 구동하고, 훅이 그냥 없으면 그
         # 시험의 scope 가 그대로 유지된다. 훅이 없으면 **예산이 무한**이라 접지 않는다 —
@@ -9768,9 +9785,8 @@ def run_gui():
         # 되돌려 준다. 이 한 줄이 없으면 예산이 두 번 깎여, 가장 긴 줄이 딱 로고 폭만큼
         # 넘쳐 접힌다. 화면에서는 마지막 게이지의 라벨과 값이 갈라지는 것으로 보였다.
         budget = (hook(need) + SUMMARY_LOGO_W) if hook is not None else float("inf")
-        # 리셋 줄은 9.5pt 로 그려지므로 **9.5pt 자로 잰다.** 11pt 로 재면 잰 폭이 실제보다
-        # 커서 리셋 줄이 일찍 접힌다 — 접는 자와 그리는 글꼴이 어긋나던 결함이다.
-        measure_sub = lambda v: astr(v, F_SUMMARY_SUB).size().width
+        # 리셋 줄은 9.5pt 로 그려지므로 **9.5pt 자(measure_sub, 위)로 잰다.** 11pt 로 재면 잰
+        # 폭이 실제보다 커서 리셋 줄이 일찍 접힌다 — 접는 자와 그리는 글꼴이 어긋나던 결함이다.
         blocks = summary_lines(groups, measure, budget, measure_sub)
         # 폭도 **그 줄을 그리는 글꼴로** 잰다. 판정은 그리기 쪽과 같은 규칙(줄 전체가 sub).
         text_w = 0.0
