@@ -138,15 +138,23 @@ def _rt(**over):
 
 
 def _segment(test, rt, rows, auth_error=False, last_error=None, lang="en", windows=None):
-    """gemini_summary_segment 를 한 번. GEMINI_STATUS 도 같은 상태로 맞추고, 그룹 window 표
-    GEMINI_GROUP_WINDOWS 를 이 테스트의 값으로 둔다(파서가 채웠을 표)."""
+    """gemini_summary_segment 를 한 번. GEMINI_STATUS 도 같은 상태로 맞추고, 그룹 window 표를 이
+    테스트의 값으로 준다. 표가 구간에 닿는 길은 정하지 않는다(리뷰 2차 R2-4 — 조회 경로가 나른다):
+    모듈 표 GEMINI_GROUP_WINDOWS 로도 두고, 구간이 `windows` 인자를 받으면 그것으로도 넘긴다."""
+    import inspect
     fn = _require("gemini_summary_segment")
     claude_pet.L["lang"] = lang
     status = {"auth_error": bool(auth_error), "last_error": last_error}
     table = dict(GROUP_WINDOWS if windows is None else windows)
+    kw = {"auth_error": auth_error}
+    try:
+        if "windows" in inspect.signature(fn).parameters:
+            kw["windows"] = dict(table)
+    except (TypeError, ValueError):
+        pass
     with mock.patch.object(claude_pet, "GEMINI_STATUS", status, create=True), \
             mock.patch.object(claude_pet, "GEMINI_GROUP_WINDOWS", table, create=True):
-        return fn(rt, rows, auth_error=auth_error)
+        return fn(rt, rows, **kw)
 
 
 def _en_group(window):
@@ -320,14 +328,14 @@ class GeminiSegmentTests(_Guard):
         self.assertEqual(_labels(en), [_en_group("weekly"), _en_group("5h"),
                                        _en_group(None), _en_group(None)])
 
-    def test_the_parser_records_each_group_window_for_the_segment(self):
-        """끝에서 끝: parse_gemini_quota(quota, summary) 가 서버의 window 를 GEMINI_GROUP_WINDOWS 에
-        적고, 그 행을 구간에 넣으면 window 대로 라벨이 붙는다. bucketId 에는 window 가 없다.
-        Rivals: 파서가 표를 안 채움(구간이 전부 "Claude·GPT"); 구간이 표 대신 bucketId 를 읽음."""
+    def test_parse_gemini_quota_is_pure(self):
+        """리뷰 2차 R2-4: parse_gemini_quota(quota, summary) 는 모듈 상태를 바꾸지 않는다 —
+        GEMINI_GROUP_WINDOWS 도, 그 밖의 어떤 모듈 수준 dict·list·set 도. 같은 입력이면 같은 출력이다.
+        window 가 라벨까지 가는 길은 조회 경로다(tests/test_gemini_keychain_quiet.py 의
+        test_group_labels_follow_the_server_window_through_the_fetch_path).
+        Rival: 8eb4ccb — 파서가 GEMINI_GROUP_WINDOWS[bucketId] = window 를 적는다(같은 파서를 다른 곳에서
+        부르면 필의 라벨이 바뀐다)."""
         parse = _require("parse_gemini_quota")
-        table = _require("GEMINI_GROUP_WINDOWS")
-        snap = dict(table)
-        self.addCleanup(lambda: (table.clear(), table.update(snap)))
         summary = {"groups": [{"displayName": "Claude and GPT models", "buckets": [
             {"bucketId": "q-1", "window": "weekly", "resetTime": "2026-11-25T03:45:42Z",
              "remainingFraction": 0.9},
@@ -335,14 +343,17 @@ class GeminiSegmentTests(_Guard):
              "remainingFraction": 0.1}]}]}
         quota = {"buckets": [{"modelId": "gemini-3-flash", "tokenType": "WTUS",
                               "remainingFraction": 0.25, "resetTime": "2026-11-18T08:45:41Z"}]}
-        rows = parse(quota, summary)
-        self.assertEqual(table.get("q-1"), "weekly")
-        self.assertEqual(table.get("q-2"), "5h")
-        claude_pet.L["lang"] = "en"
-        seg = _require("gemini_summary_segment")(_rt(gemini_gauges=["group"]), rows,
-                                                  auth_error=False)
-        self.assertIsNotNone(seg)
-        self.assertEqual(_labels(seg), [_en_group("weekly"), _en_group("5h")])
+
+        def snapshot():
+            return {name: repr(value) for name, value in vars(claude_pet).items()
+                    if isinstance(value, (dict, list, set)) and not name.startswith("__")}
+
+        before = snapshot()
+        first = parse(quota, summary)
+        changed = sorted(k for k, v in snapshot().items() if before.get(k) != v)
+        self.assertEqual(changed, [], "parse_gemini_quota 가 모듈 상태를 바꿨다: %r" % changed)
+        self.assertEqual(parse(quota, summary), first)
+        self.assertEqual([r[0] for r in first or ()][-2:], ["gemini_group:q-1", "gemini_group:q-2"])
 
     def test_values_resets_and_no_spike_mark(self):
         """pct 는 float 그대로, 리셋은 지금 기준 카운트다운(fmt_countdown 과 같은 문자열), 리셋이

@@ -128,6 +128,7 @@ class _Keychain:
         self.expiry = None
         self.mode = "ok"
         self.reads = []          # agy 항목을 읽은 시각(시계 기준)
+        self.timeouts = []       # 그 읽기마다 subprocess.run 에 준 timeout
         self.other = []
         self.blocked = []
 
@@ -148,9 +149,15 @@ class _Keychain:
             res = subprocess.CompletedProcess(argv, 1, conv(""), conv(""))
         else:
             self.reads.append(self.clock.time())
+            self.timeouts.append(k.get("timeout"))
             if self.mode == "timeout":
                 raise subprocess.TimeoutExpired(argv, k.get("timeout") or 5)
-            if self.mode == "cancel":
+            if self.mode == "deny":
+                # errSecAuthFailed(-25293) — 사용자가 '거부'를 눌렀다. security 의 종료 코드는 하위 바이트 51.
+                res = subprocess.CompletedProcess(
+                    argv, 51, conv(""), conv("security: SecKeychainSearchCopyNext: The user name or "
+                                             "passphrase you entered is not correct.\n"))
+            elif self.mode == "cancel":
                 res = subprocess.CompletedProcess(
                     argv, 128, conv(""), conv("security: SecKeychainSearchCopyNext: "
                                               "User canceled the operation.\n"))
@@ -194,6 +201,7 @@ class _CloudCode:
         self.keychain = keychain
         self.expiry_of = {}
         self.rejected = set()
+        self.summary = {"groups": []}
         self.requests = []       # (시각, 엔드포인트, 토큰)
         self.hang = None
 
@@ -216,7 +224,7 @@ class _CloudCode:
                                  "remainingFraction": 0.5,
                                  "resetTime": "2027-01-15T08:00:00Z"}]}
         elif endpoint == "retrieveUserQuotaSummary":
-            body = {"groups": []}
+            body = self.summary
         else:
             raise urllib.error.HTTPError(url, 404, "nope", {}, io.BytesIO(b"{}"))
         return _Resp(json.dumps(body).encode())
@@ -389,7 +397,10 @@ class RememberedCredentialTests(_QuietCase):
         self.clock.now = max(self.clock.now, last_exp + 1)
         n_req = len(self.server.requests)
         tail = self.run_until(self.clock.now + 3600)
-        self.assertTrue(all(rows is None for _t, rows in tail))
+        # 만료 뒤 120초 유예(Coordinator 결정 2026-11-18, AgyLazyRefreshTests 머리말) 동안은 마지막 행이
+        # 남을 수 있다. 유예 + 한 번의 60초 재시도(180초)가 지나면 빈 행이어야 한다.
+        self.assertTrue(all(rows is None for t, rows in tail if t >= last_exp + 180),
+                        "agy 를 닫고 만료 180초가 지나도 옛 행이 남았다")
         self.assertEqual(self.server.requests[n_req:], [], "만료된 토큰을 보냈다")
         self.assertEqual(self.status().get("last_error"), "expired")
         self.assertTrue(all(g >= 60 for g in _gaps(self.kc.reads)),
@@ -441,7 +452,8 @@ class RememberedCredentialTests(_QuietCase):
 class StopOnPromptTests(_QuietCase):
 
     def test_a_timeout_or_cancel_stops_automatic_reads_until_the_user_acts(self):
-        """첫 읽기가 시간 초과(프롬프트가 떠 있는 동안 security 가 기다린 모양)나 사용자 취소(128)면:
+        """첫 읽기가 시간 초과(프롬프트가 떠 있는 동안 security 가 기다린 모양), 사용자 취소(128), 사용자
+        거부(51 = errSecAuthFailed 의 하위 바이트, 리뷰 2차 R2-1)면:
           · 10분 동안 자동 읽기 0번(첫 읽기 뒤), 행 None, 상태 last_error "keychain_blocked"
             ('자격증명 없음'과 구별된다 — 그쪽은 last_error 를 이렇게 두지 않는다).
           · 사용자가 직접 누르면(allow_keychain_prompt) 2분 안에 다시 읽고 행이 돌아온다.
@@ -449,7 +461,7 @@ class StopOnPromptTests(_QuietCase):
         Rivals: e5cde29(실패를 '없음'으로 보고 60초마다 다시 security — 프롬프트가 계속 뜬다);
         멈추되 상태를 안 남김; 사용자가 눌러도 안 풀림."""
         _require("allow_keychain_prompt")
-        for mode in ("timeout", "cancel"):
+        for mode in ("timeout", "cancel", "deny"):
             with self.subTest(mode=mode):
                 self.setUp_fresh()
                 self.issue("tok-A", self.clock.time() + 7200)
@@ -487,6 +499,76 @@ class StopOnPromptTests(_QuietCase):
         self.clock.now += 10_000
 
 
+class KeychainReadPolicyTests(_QuietCase):
+    """리뷰 2차(R2-2·R2-3) — 사용자가 직접 다시 시도한 읽기의 시간 제한과, agy 가 없는 Mac 의 물러서기."""
+
+    def test_a_user_initiated_read_waits_long_and_an_automatic_one_does_not(self):
+        """자동 읽기는 짧은 timeout(60초 미만 — 30초 새로고침 워커를 붙들지 않게), 사용자가 직접 누른 뒤의
+        읽기(_keychain_prompt_allowed() 참)는 60초 이상(_token_from_cli 처럼 — 사람이 프롬프트에 답할 시간).
+        자동 값 자체(5초)는 고정하지 않는다.
+        Rivals: 8eb4ccb(언제나 5초 — 사용자가 프롬프트에 답하는 사이 시간 초과로 또 막힘); 언제나 60초
+        (자동 읽기가 프롬프트 앞에서 1분씩 멈춤)."""
+        self.issue("tok-A", T0 + 7200)
+        self.kc.mode = "timeout"
+        self.fetch()
+        self.assertEqual(len(self.kc.timeouts), 1)
+        auto = self.kc.timeouts[0]
+        self.assertIsInstance(auto, (int, float), "자동 읽기에 timeout 이 없다")
+        self.assertLess(auto, 60, "자동 읽기의 timeout 이 %r초다" % auto)
+        self.clock.now += 600
+        self.kc.mode = "ok"
+        self.user_refresh()
+        rows = self.fetch()
+        self.assertEqual(len(self.kc.timeouts), 2, "사용자가 누른 뒤 바로 읽지 않았다")
+        self.assertGreaterEqual(self.kc.timeouts[1] or 0, 60,
+                                "사용자가 시작한 읽기의 timeout 이 %r초다" % self.kc.timeouts[1])
+        self.assertTrue(rows)
+
+    def test_a_mac_without_agy_backs_off_and_a_click_still_reads(self):
+        """항목 없음(security 종료 44 = errSecItemNotFound): 자동 다시 읽기는 1800초 이상 간격 — 두 시간 동안
+        어느 한 시간 창에도 3번 이하. 사용자가 누르면 그 조회에서 바로 읽고, 그새 항목이 생겼으면 행이 나온다.
+        누르지 않아도 항목이 생기면 다음 물러서기 읽기(≤ 1800초 + 한 번의 조회 주기) 안에 잡힌다. 잡힌 뒤로는
+        보통 일정(유효한 토큰 → 한 시간에 3번 이하).
+        Rivals: 8eb4ccb(기억이 없으면 조회마다 = 180초마다 security — agy 없는 Mac 에서 시간당 20번);
+        물러서는 동안 사용자 클릭도 무시."""
+        self.kc.mode = "missing"
+        out = self.run_until(T0 + 7200)
+        reads = list(self.kc.reads)
+        self.assertTrue(all(rows is None for _t, rows in out))
+        self.assertTrue(all(g >= 1800 for g in _gaps(reads)), "물러서기 간격: %r" % _gaps(reads))
+        for start in range(int(T0), int(T0 + 7200) - 3600 + 1, 300):
+            n = sum(1 for r in reads if start <= r < start + 3600)
+            self.assertLessEqual(n, 3, "agy 없는 Mac 에서 한 시간(%d~)에 security %d번" % (start - T0, n))
+        # 사용자가 agy 에 로그인하고 펫을 누른다 — 그 조회에서 바로 읽는다. 60초 하한은 클릭에도 그대로라
+        # (계약 4) 마지막 물러서기 읽기에서 2분 뒤에 누른다.
+        self.clock.now = max(self.clock.now, reads[-1] + 120)
+        self.kc.mode = "ok"
+        self.issue("tok-A", self.clock.time() + 7200)
+        n = len(self.kc.reads)
+        self.user_refresh()
+        rows = self.fetch()
+        self.assertEqual(len(self.kc.reads), n + 1, "사용자가 눌렀는데 바로 읽지 않았다")
+        self.assertTrue(rows)
+        n = len(self.kc.reads)
+        self.clock.now += STEP
+        out = self.run_until(self.clock.time() + 3600)
+        self.assertTrue(all(r for _t, r in out))
+        self.assertLessEqual(len(self.kc.reads) - n, 3, "잡힌 뒤에도 자주 읽는다")
+        # 다시: 누르지 않아도 항목이 생기면 물러서기 읽기에서 잡힌다.
+        self.restart_app()
+        self.kc.reads.clear()
+        self.clock.now += 10_000
+        self.kc.mode = "missing"
+        start = self.clock.time()
+        self.run_until(start + 600)
+        self.assertEqual(len(self.kc.reads), 1)
+        self.kc.mode = "ok"
+        self.issue("tok-B", start + 7200)
+        out = self.run_until(start + 1800 + 180 + 60)
+        self.assertTrue(out[-1][1], "항목이 생겼는데 물러서기 읽기에서도 잡지 못했다")
+        self.assertTrue(all(g >= 1800 for g in _gaps(self.kc.reads[:2])), _gaps(self.kc.reads))
+
+
 # ═══════════════════════════ (c) 잠긴 키체인에서도 기억한 토큰을 쓴다 ═══════════════════════════
 
 
@@ -509,9 +591,98 @@ class LockedKeychainTests(_QuietCase):
         n_req = len(self.server.requests)
         out = self.run_until(T0 + 3600)
         self.assertEqual(len(self.kc.reads), n)
-        self.assertTrue(all(rows is None for _t, rows in out))
+        # 만료 뒤 120초 유예(AgyLazyRefreshTests 머리말) — 그 뒤(+180초)로는 빈 행.
+        self.assertTrue(all(rows is None for t, rows in out if t >= T0 + 3000 + 180),
+                        "잠긴 채 만료되고 180초가 지나도 옛 행이 남았다")
         self.assertEqual(self.server.requests[n_req:], [], "만료된 토큰을 보냈다")
         self.assertEqual(self.status().get("last_error"), "expired")
+
+
+# ═══════════════════════════ agy 의 늦은 갱신 — 만료 직후의 유예 ═══════════════════════════
+#
+# 관측(Coordinator, 2026-11-18, 이 저장소 주인의 Mac 한 대, agy 1.5.10 실행 중, 키체인 항목의 mdat 를
+# 비밀값을 읽지 않고 본 것): 항목의 수정 시각 05:06:25Z, 저장된 토큰의 만료 06:06:24Z — 즉 agy 는 **이전
+# 토큰의 만료(05:06:24Z) 약 1초 뒤에** 새 토큰을 썼다. 같은 날 앞선 관측(만료 12:05→13:06→14:06→15:06
+# KST)도 '만료 무렵에 갱신'과 맞는다. 표본은 한 기기·하루다 — agy 가 만료 **뒤에** 쓴다는 것은 관측이지
+# 보장이 아니다. 그래서 아래 게이트는 1초 하나가 아니라 1·10·45초 뒤를 함께 본다.
+#
+# 계약(Coordinator 결정): (1) 기억한 만료 300초 전부터 만료 600초 뒤까지는 60초 하한으로 다시 읽는다;
+# (2) 기억한 토큰이 만료된 뒤 120초까지는, 마지막 조회가 성공했으면 마지막 행을 그대로 보이고
+# "expired"/auth_error 를 올리지 않는다 — 만료된 토큰은 여전히 보내지 않는다; (3) 120초가 지나도 키체인에
+# 새 토큰이 없으면 행을 지우고 last_error "expired", auth_error True; (4) 60초 하한과 나머지 M1 규칙은 그대로.
+#
+# 해석 하나(보고서에 적음): 토큰은 만료 GEMINI_EXPIRY_MARGIN_SEC(60초) 전부터 '보내지 않는' 토큰이다. "agy 가
+# 떠 있는 동안 상태가 한 번도 expired 가 아니다"를 지키려면 유예는 그 순간(만료 − 60초)부터 걸려야 한다.
+
+
+class AgyLazyRefreshTests(_QuietCase):
+
+    def test_agy_writing_the_new_token_just_after_expiry_never_blanks_the_pill(self):
+        """agy 가 이전 토큰 만료 1·10·45초 뒤에 새 토큰을 쓰는 세 시간(30초 새로고침), 그 뒤 agy 를 닫는다.
+          · agy 가 떠 있는 동안(마지막 토큰 만료 + 120초 전까지): 행이 한 번도 비지 않고, 상태가 한 번도
+            "expired"·auth_error 가 아니며, 만료된 토큰을 보낸 적이 없다.
+          · 키체인 읽기는 agy 가 떠 있는 동안 어느 한 시간 창에서도 8번 이하, 언제나 두 읽기 사이 ≥ 60초.
+          · agy 를 닫으면 마지막 토큰 만료 뒤 180초 안에 "expired"(auth_error True)와 빈 행.
+        Rivals: 8eb4ccb(만료 − 60초부터 바로 "expired", 만료된 토큰이면 300초마다만 다시 읽음 → 매시간
+        1~2분 '만료'); 유예 없이 60초 하한만(만료 − 60초~새 토큰 사이 '만료'); 유예를 끝없이(agy 를 닫아도
+        옛 숫자가 남음); 유예 중 만료된 토큰을 보내 봄(401 → auth_error)."""
+        for lag in (1, 10, 45):
+            with self.subTest(agy_writes_after_expiry=lag):
+                self.restart_app()
+                self.kc.reads.clear()
+                self.server.requests.clear()
+                base = self.clock.now = T0 + 1_000_000 * (lag + 1)
+                period = 3600.0
+                # 첫 만료를 750초에 둔다: 180초 캐시 주기의 조회(720초)가 '보낼 수 없는 구간'(만료 − 60초 ~
+                # 새 토큰)에 떨어져야 유예 규칙이 실제로 시험된다. 600초로 두면 조회가 540초(딱 60초 남음,
+                # 보낼 수 있음)와 720초(새 토큰 뒤)에만 일어나 그 구간을 건너뛰고, 유예 없는 구현이 통과한다
+                # (scratch 로 확인).
+                first_exp = base + 750
+                open_end = base + 3 * 3600
+                current = {"k": 0}
+                self.issue("tok-%d-0" % lag, first_exp)
+
+                def agy(now):
+                    # agy 는 떠 있을 때만, 지금 토큰의 만료 lag 초 뒤에 다음 토큰을 쓴다.
+                    k = current["k"]
+                    exp_k = first_exp + period * k
+                    if now < open_end and now >= exp_k + lag:
+                        current["k"] = k + 1
+                        self.issue("tok-%d-%d" % (lag, k + 1), first_exp + period * (k + 1))
+
+                last_exp = first_exp + period * int((open_end - first_exp - lag) // period + 1)
+                log = []
+                while self.clock.time() <= last_exp + 600:
+                    agy(self.clock.time())
+                    rows = self.fetch()
+                    st = self.status()
+                    log.append((self.clock.time(), rows, st.get("last_error"), st.get("auth_error")))
+                    self.clock.now += STEP
+                self.assertEqual(current["k"], int((open_end - first_exp - lag) // period + 1),
+                                 "하네스: agy 가 쓴 토큰 수가 예상과 다르다")
+                running = [e for e in log if e[0] < last_exp + 120]
+                blank = [e[0] - base for e in running if not e[1]]
+                self.assertEqual(blank, [], "agy 가 떠 있는데 행이 빈 새로고침(기준 뒤 초): %r" % blank)
+                bad = [(e[0] - base, e[2], e[3]) for e in running if e[2] == "expired" or e[3]]
+                self.assertEqual(bad, [], "agy 가 떠 있는데 만료/거부 상태: %r" % bad[:6])
+                for t, _ep, tok in self.server.requests:
+                    self.assertGreater(self.server.expiry_of.get(tok, 0), t,
+                                       "만료된 토큰을 보냈다(%s, 기준 뒤 %d초)" % (tok, t - base))
+                reads = list(self.kc.reads)
+                self.assertTrue(all(g >= 60 for g in _gaps(reads)), "읽기 간격 < 60초: %r" % _gaps(reads))
+                # 시간당 상한은 agy 가 떠 있는 구간에만 건다. agy 를 닫은 뒤 마지막 만료 앞뒤(−300~+600초)는
+                # 계약 (1)대로 60초 하한으로 읽으므로 그 구간만으로 15번까지 갈 수 있다 — 60초 하한이 그 상한이다.
+                for start in range(int(base), int(last_exp - 300) - 3600 + 1, 300):
+                    n = sum(1 for r in reads if start <= r < start + 3600)
+                    self.assertLessEqual(n, 8, "한 시간 창(기준 뒤 %d~)에 읽기 %d번" % (start - base, n))
+                closed = [e for e in log if e[0] >= last_exp]
+                first = next((e for e in closed if e[2] == "expired"), None)
+                self.assertIsNotNone(first, "agy 를 닫았는데 'expired' 가 끝내 안 나왔다")
+                self.assertLessEqual(first[0] - last_exp, 180,
+                                     "agy 를 닫은 뒤 'expired' 가 만료 %d초 뒤에야 나왔다" % (first[0] - last_exp))
+                self.assertTrue(first[3], "만료인데 auth_error 가 내려가 있다")
+                self.assertTrue(all(not e[1] for e in closed if e[0] >= first[0]),
+                                "'expired' 뒤에도 옛 행이 남았다")
 
 
 # ═══════════════════════════ (e)(f) TOK-47 배선 — 새로고침 워커 ═══════════════════════════
@@ -621,6 +792,39 @@ class RefreshWiringTests(_QuietCase):
                         "보이는 Gemini 를 새로고침이 받지 않았다(state['gemini'] 가 비어 있다)")
         self.assertGreaterEqual(len(self.kc.reads), 1)
         self.assertEqual(state["gemini"][0][0], "gemini")
+
+    def test_group_labels_follow_the_server_window_through_the_fetch_path(self):
+        """리뷰 2차 R2-4: parse_gemini_quota 는 순수하다 — 그룹 window 표는 조회 경로(fetch)가 구간까지
+        나른다. 그래서 끝에서 끝으로 본다: 새로고침 워커가 받은 state 를 앱의 `state["gemini_summary"]`
+        훅(run_gui 에서 꺼낸 그 람다)에 넣으면 그룹 라벨이 서버의 window 를 따른다. bucketId 에는 window 가
+        없다(q-1 = weekly, q-2 = 5h).
+        Rivals: window 를 bucketId 에서 짐작(둘 다 "Claude·GPT"); 표가 구간에 닿지 않음; 파서가 모듈 표를
+        채우는 8eb4ccb 방식은 이 테스트로는 통과하고 test_gemini_pill 의 순수성 게이트가 막는다."""
+        self.server.summary = {"groups": [{"displayName": "Claude and GPT models", "buckets": [
+            {"bucketId": "q-1", "window": "weekly", "resetTime": "2027-01-20T03:45:42Z",
+             "remainingFraction": 0.9},
+            {"bucketId": "q-2", "window": "5h", "resetTime": "2027-01-15T08:45:42Z",
+             "remainingFraction": 0.1}]}]}
+        claude_pet.RUNTIME["gemini_gauges"] = ["group"]
+        state, _claude, _codex = self.drive(show_gemini=True)
+        self.assertTrue(_wait(lambda: bool(state.get("gemini")), 5.0), "Gemini 행이 들어오지 않았다")
+        tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+        gui = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_gui")
+        hooks = [n.value for n in ast.walk(gui)
+                 if isinstance(n, ast.Assign) and len(n.targets) == 1
+                 and isinstance(n.targets[0], ast.Subscript)
+                 and isinstance(n.targets[0].slice, ast.Constant)
+                 and n.targets[0].slice.value == "gemini_summary"]
+        self.assertEqual(len(hooks), 1)
+        scope = dict(vars(claude_pet), state=state)
+        hook = eval(compile(ast.Expression(body=hooks[0]), str(SOURCE), "eval"), scope)
+        lang = claude_pet.L.get("lang")
+        self.addCleanup(lambda: claude_pet.L.__setitem__("lang", lang))
+        claude_pet.L["lang"] = "en"
+        seg = hook()
+        self.assertIsNotNone(seg)
+        tr = claude_pet.TR["en"]
+        self.assertEqual([r[0] for r in seg[1]], [tr["gemini_group_weekly"], tr["gemini_group_5h"]])
 
     def test_a_hanging_cloudcode_does_not_hold_back_claude_and_codex(self):
         """cloudcode-pa 가 응답하지 않는 동안에도 Claude/Codex 행은 3초 안에 state 에 들어간다.

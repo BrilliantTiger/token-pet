@@ -763,8 +763,8 @@ def _run_fetch(test, secret, server=None, platform="darwin", status_before=None,
     """fetch_gemini_usage() 를 한 번 돌린다. 진짜 키체인·네트워크·홈에 닿을 길은 전부 막는다.
 
     fresh_state=False 면 캐시를 임포트 시점으로 되돌리지 않는다(앞 호출의 행이 남아 있다).
-    clock_shift 는 `time.time()` 을 그만큼(초) 뒤로 민다 — 캐시가 오래됐다는 것을 내부 이름에
-    기대지 않고 '시간이 흘렀다'로 만든다. datetime.now() 는 진짜 시각 그대로다."""
+    clock_shift 는 `time.time()` 과 `datetime.now()` 를 함께 그만큼(초) 뒤로 민다 — 캐시가
+    오래됐다는 것을 내부 이름에 기대지 않고 '시간이 흘렀다'로 만든다."""
     fn = _require("fetch_gemini_usage")
     server = _FakeCloudCode() if server is None else server
     procs = _Processes(secret)
@@ -794,6 +794,16 @@ def _run_fetch(test, secret, server=None, platform="darwin", status_before=None,
         if clock_shift:
             st.enter_context(mock.patch.object(claude_pet.time, "time",
                                                lambda: _real_time() + clock_shift))
+            # datetime.now() 도 같이 민다 — 시계 둘이 어긋나면 '기억한 토큰은 아직 유효'처럼 보이는
+            # 하네스만의 상태가 생긴다(리뷰 2차: 이 테스트가 600초 끊김 규칙 덕에만 초록이던 이유).
+            _shifted = datetime
+
+            class _ShiftedDT(_shifted):
+                @classmethod
+                def now(cls, tz=None):
+                    return _shifted.now(tz) + timedelta(seconds=clock_shift)
+
+            st.enter_context(mock.patch.object(claude_pet, "datetime", _ShiftedDT))
         st.enter_context(mock.patch.object(claude_pet.subprocess, "run", procs.run))
         st.enter_context(mock.patch.object(claude_pet.subprocess, "Popen", procs.popen))
         st.enter_context(mock.patch.object(claude_pet.os, "system", procs.system))
@@ -1006,13 +1016,17 @@ class GeminiFetchTests(unittest.TestCase):
     def test_after_expiry_the_last_good_rows_are_not_kept(self):
         """성공한 조회 뒤에 agy 가 닫혀 토큰이 만료되면, 캐시가 오래된 다음 조회는 None 이다 —
         직전 행을 붙들어 '만료' 대신 옛 숫자를 보여 주지 않는다(Codex 의 401 규칙과 같다).
-        두 번째 호출은 캐시를 되돌리지 않고 `time.time()` 만 900초 민다.
+        두 번째 호출은 캐시를 되돌리지 않고 `time.time()` 과 `datetime.now()` 를 함께 900초 민다(첫 토큰은
+        10분짜리 — 기억한 토큰이 만료 뒤 300초, 유예 120초 밖).
         Rivals: 만료를 일시 실패처럼 다뤄 직전 행을 돌려줌; 만료된 토큰이면 캐시 행을 그대로 줌."""
-        first = _run_fetch(self, _secret())
+        # 첫 토큰은 10분 뒤 만료. 두 번째 호출은 두 시계를 함께 900초 민다 — 기억한 토큰 자체가 만료된 지
+        # 300초(유예 120초를 넘음). agy 는 닫혀 있어 키체인에도 옛 토큰뿐이다(키체인을 다시 읽든 말든 같은
+        # 답) — 그래서 이 테스트는 '조회가 오래 끊기면 다시 읽기' 같은 구현 규칙에 기대지 않는다.
+        soon = _expiry_text(datetime.now(UTC) + timedelta(minutes=10), 9)
+        first = _run_fetch(self, _secret(expiry=soon))
         _assert_no_raise(self, first)
         self.assertIsNotNone(first.rows, "첫 조회가 성공해야 이 테스트가 뜻이 있다")
-        past = _expiry_text(datetime.now(UTC) - timedelta(minutes=5), 9)
-        second = _run_fetch(self, _secret(expiry=past), fresh_state=False, clock_shift=900.0)
+        second = _run_fetch(self, _secret(expiry=soon), fresh_state=False, clock_shift=900.0)
         _assert_no_raise(self, second)
         self.assertEqual(second.server.requests, [], "만료된 토큰을 보냈다")
         self.assertIsNone(second.rows, "만료 뒤에도 직전 행이 남았다: %r" % (second.rows,))
