@@ -1195,26 +1195,69 @@ class FoldBudgetMatchesTheActualPillTests(LangMixin, unittest.TestCase):
         return sum(pretendard_width(txt) for txt, _k in line)
 
     def settle(self, groups):
-        """어댑터와 같은 순서로 한 번 돌린다 → (blocks, budget, W).
+        """**생산 어댑터 자체**(`roam_summary_text`)를 한 번 돌린다 → (blocks, budget, W).
 
-        1. 내용을 재고(`need`), 2. 그 폭을 기록하고 예산을 받고(`budget_for`),
-        3. 그 예산으로 접는다. 2번을 건너뛰면 측정 이전 스냅샷을 재게 된다.
+        2026-11-18(TOK-42, Verifier) 이전에는 여기서 어댑터의 순서를 **다시 적었다**: 인라인
+        전 `roam_summary_runs` 의 첫 줄과 리셋 줄을 따로 재서 `need` 를 만들고, `budget_for`
+        를 부르고, `layout()` 으로 접었다. 그 `need` 식은 생산의 결함을 그대로 복제한 것이었다
+        — 게이지가 하나면 리셋이 첫 줄에 인라인돼 더 긴 한 줄이 그려지는데, 둘 다 그 줄을 안
+        쟀다. 생산을 고쳐도 이 헬퍼는 따라 바뀌지 않으므로, 이 클래스는 그 결함을 볼 수 없는
+        구조였다(tests/test_single_gauge_pill_width.py 머리말 참조).
+
+        이제 다시 적지 않는다. `run_gui` 에서 `roam_summary_text` 와 `_pill_budget_for` 를
+        꺼내 `_production_geometry()` 와 **같은 scope** 에 올리고 돌린다. need → 훅(기록 →
+        예산) → `summary_lines` 의 순서와 식은 전부 생산의 것이다. 픽스처는 그대로다:
+        `roam_summary` 와 Codex 훅이 이 테스트가 준 구간을 돌려주게 해서, 어댑터가 접는
+        내용이 `groups` 와 같다는 것을 아래에서 단언까지 한다. 측정은 예전과 같다 — 이
+        scope 의 `astr` 은 글꼴을 보지 않으므로 리셋 줄도 11pt 표로 잰다(`measure_line` 과
+        같은 자). 단언의 뜻은 바뀌지 않았다.
+
+        반환하는 budget 은 예전과 같은 **글자 자리** 폭이다(어댑터가 `summary_lines` 에 넘긴
+        예산 − `SUMMARY_LOGO_W`; summary_lines 가 로고 폭을 스스로 빼기 때문이다).
         """
-        # **생산이 쓰는 그 측정 함수로 잰다.** 어댑터는 `_stable_w()` 로 재는데, 그건
-        # 모든 숫자를 가장 넓은 글리프로 바꿔 재므로 실제 폭보다 **크다**(떨림을 없애는
-        # 대가다). 여기서 `pretendard_width` 로 재면 생산보다 작은 need 를 주게 되고,
-        # 필이 실제보다 좁게 기록돼 있지도 않은 접힘이 나타난다. 처음에 그렇게 써서
-        # 0.6pt 차이로 거짓 실패를 만들었다 — 같은 함수에 다른 값을 먹이는, 이 파일이
-        # 계속 잡아 온 바로 그 모양이다.
-        stable_w = self.geo["_stable_w"]
-        need = 0.0
-        for _pid, segs in groups:
-            main, sub = claude_pet.roam_summary_runs(segs, claude_pet.t)
-            need = max(need, sum(stable_w(x) for x, _k in main))
-            need = max(need, sum(stable_w(x) for x, _k in sub))
-        budget = self.geo["budget_for"](need)
-        blocks = layout(groups, budget=budget + claude_pet.SUMMARY_LOGO_W)
-        return blocks, budget, self.geo["geom"]()[2]
+        from test_companion_motion import gui_functions
+
+        scope = self.geo
+        fixture = {pid: segs for pid, segs in groups}
+        calls = []
+
+        def summary_lines_spy(groups_, measure, budget, measure_sub=None):
+            out = claude_pet.summary_lines(groups_, measure, budget, measure_sub)
+            calls.append((groups_, budget, out))
+            return out
+
+        runtime = dict(claude_pet.RUNTIME)
+        runtime.update(mode="sub", show_claude="claude" in fixture,
+                       claude_gauges=list(claude_pet.CLAUDE_GAUGES),
+                       show_codex="codex" in fixture, codex_gauges=["session", "weekly"],
+                       codex_mode="sub")
+        state = {"stats": {"spikes": {}}, "oauth": None, "cost": None, "cost_month": None,
+                 "onboard": None, "credit_text": None, "codex": None,
+                 "api_error": False, "api_stale": False, "summary_lines_n": 2,
+                 "codex_summary": ((lambda: fixture["codex"][0]) if "codex" in fixture
+                                   else None)}
+        for name, value in vars(claude_pet).items():
+            scope.setdefault(name, value)
+        scope.update(
+            state=state, RUNTIME=runtime,
+            OAUTH_STATUS={"auth_error": False, "last_error": None},
+            CODEX_STATUS={"auth_error": False, "last_error": None},
+            _summary_memo={"key": None, "value": None},
+            _time=SimpleNamespace(time=lambda: 0.0),
+            roam_summary=lambda *_a, **_k: (fixture["claude"][0] if "claude" in fixture
+                                            else None),
+            summary_lines=summary_lines_spy)
+        gui_functions(self, ("roam_summary_text", "_pill_budget_for"), scope)
+        state["pill_budget"] = scope["_pill_budget_for"]
+
+        blocks, _text_w, _text_h = scope["roam_summary_text"]()
+        folded = [(g_, b) for g_, b, out in calls if out is blocks]
+        self.assertEqual(len(folded), 1, "어댑터가 돌려준 blocks 를 만든 summary_lines 호출이 "
+                                         "정확히 하나여야 한다")
+        adapter_groups, budget = folded[0]
+        self.assertEqual(adapter_groups, list(groups),
+                         "어댑터가 접은 내용이 이 테스트의 픽스처와 다르다 — 하네스가 틀렸다")
+        return blocks, budget - claude_pet.SUMMARY_LOGO_W, scope["geom"]()[2]
 
     def pill_text_area(self, W, text_w, lines):
         rect = claude_pet.roam_pill_rect(

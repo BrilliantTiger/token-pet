@@ -143,6 +143,44 @@ CONTROL_SHAPES = [
 ]
 
 
+# 게이지 하나가 **아닌** 내용 종류. 기본 서버 행 대신 넣을 state/RUNTIME 조각을 돌려준다
+# (로케일에 따라 라벨이 바뀌므로 호출 시점에 만든다). 상태 줄은 제공자 없는 **전역 줄**이라
+# 로고 들여쓰기가 없다 — summary_lines 가 예산에서 로고 폭을 빼지 않는 유일한 경우다.
+CONTENT = {
+    "rows": lambda: {},
+    "credit": lambda: {"state": {
+        "oauth": claude_rows() + [(claude_pet.t("credit"), 66.0, None, "Sep 30")],
+        "credit_text": "$100.66"}},
+    "loading": lambda: {"state": {"oauth": None, "stats": None}},
+    "token_expired": lambda: {"state": {"oauth": None}, "auth_error": True},
+    "onb_install": lambda: {"state": {"oauth": None, "onboard": "install"}},
+    "api_cost": lambda: {"state": {"oauth": None, "cost": 12.375, "cost_month": 27.5},
+                         "runtime": {"mode": "api", "admin_key": "k", "api_budget": 50.0}},
+    # 짧은 내용(라운드 2, Reviewer F1): 게이지 하나에 한 자리 % 와 분 단위 남은시간.
+    # 남은시간은 생산 fmt_countdown 이 cd_m 으로 만든다(5분 30초 → "5m").
+    "short_weekly": lambda: {"state": {"oauth": [
+        (claude_pet.t("weekly"), 8.0, NOW + timedelta(minutes=5, seconds=30), None)]}},
+    "short_codex": lambda: {"state": {"codex": [("codex_weekly", 8.0, None, "5m")]}},
+}
+
+# (이름, Claude 게이지 또는 None, Codex 게이지 또는 None, CONTENT 이름)
+OTHER_CONTENT_SHAPES = [
+    ("claude session + weekly", ["session", "weekly"], None, "rows"),
+    ("claude weekly + model", ["weekly", "model"], None, "rows"),
+    ("claude weekly + credit", ["weekly", "credit"], None, "credit"),
+    ("codex two rows only", None, ["session", "weekly"], "rows"),
+    ("claude three gauges + codex two rows", ["session", "weekly", "model"],
+     ["session", "weekly"], "rows"),
+    ("status loading (global line)", ["session", "weekly", "model"], None, "loading"),
+    ("status token_expired (global line)", ["session", "weekly", "model"], None,
+     "token_expired"),
+    ("status onb_install (global line)", ["session", "weekly", "model"], None, "onb_install"),
+    ("token_expired (global) + codex weekly", ["session", "weekly", "model"], ["weekly"],
+     "token_expired"),
+    ("claude api cost", ["session", "weekly", "model"], None, "api_cost"),
+]
+
+
 class _FixedDatetime(datetime):
     @classmethod
     def now(cls, tz=None):
@@ -186,7 +224,7 @@ class Settled:
 _SETTLED = {}
 
 
-def settle(test, lang, scale, claude_gauges, codex_gauges):
+def settle(test, lang, scale, claude_gauges, codex_gauges, content=None):
     """생산 `roam_summary_text` 를 생산 기하와 한 scope 에서 돌린다 → Settled.
 
     틱이 하는 일을 그대로 흉내 낸다: 어댑터를 부르고(폭을 기록), `_regeom()` 처럼 줄 수를
@@ -197,15 +235,18 @@ def settle(test, lang, scale, claude_gauges, codex_gauges):
     비용을 아낀다). 캐시는 결과만 담는다 — 실패한 정착은 저장되지 않는다.
     """
     key = (lang, scale, tuple(claude_gauges) if claude_gauges is not None else None,
-           tuple(codex_gauges) if codex_gauges is not None else None)
+           tuple(codex_gauges) if codex_gauges is not None else None, content)
     if key not in _SETTLED:
-        _SETTLED[key] = _settle(test, lang, scale, claude_gauges, codex_gauges)
+        _SETTLED[key] = _settle(test, lang, scale, claude_gauges, codex_gauges, content)
     claude_pet.set_lang(lang)
     return _SETTLED[key]
 
 
-def _settle(test, lang, scale, claude_gauges, codex_gauges):
+def _settle(test, lang, scale, claude_gauges, codex_gauges, content=None):
+    """content 는 CONTENT 표의 이름(None 이면 기본 서버 행). 상태 줄·크레딧·API 비용 같은
+    다른 내용 종류를 같은 생산 경로로 돌리기 위한 것이다."""
     claude_pet.set_lang(lang)
+    extra = CONTENT[content]() if content is not None else {}
     pw0, ph0 = builtin_pet_base()
     runtime = dict(claude_pet.RUNTIME)
     runtime.update(mode="sub", admin_key="", api_budget=0.0,
@@ -214,12 +255,14 @@ def _settle(test, lang, scale, claude_gauges, codex_gauges):
                    show_codex=codex_gauges is not None,
                    codex_gauges=list(codex_gauges or ["weekly"]),
                    codex_mode="sub", openai_admin_key="", codex_budget=0.0)
+    runtime.update(extra.get("runtime", {}))
     state = {"stats": {"spikes": {}}, "oauth": claude_rows(), "cost": None,
              "cost_month": None, "onboard": None, "credit_text": None,
              "codex": list(CODEX_ROWS), "api_error": False, "api_stale": False,
              "codex_cost": None, "codex_cost_month": None,
              "codex_api_error": False, "codex_api_stale": False,
              "summary_lines_n": 2}
+    state.update(extra.get("state", {}))
     state["codex_summary"] = lambda: claude_pet.codex_summary_segment(
         runtime, state.get("codex"), False, None, None, False, False, auth_error=False)
     g = {"scale": scale}
@@ -237,7 +280,7 @@ def _settle(test, lang, scale, claude_gauges, codex_gauges):
         NSScreen=_Screen(), astr=_astr, F_SUMMARY=_F11, F_SUMMARY_SUB=_F95,
         F_SUMMARY_BY_KIND={k: _F11 for k in claude_pet.SUMMARY_COLORS},
         F_SUMMARY_SUB_BY_KIND={k: _F95 for k in claude_pet.SUMMARY_COLORS},
-        OAUTH_STATUS={"auth_error": False, "last_error": None},
+        OAUTH_STATUS={"auth_error": bool(extra.get("auth_error")), "last_error": None},
         CODEX_STATUS={"auth_error": False, "last_error": None},
         _summary_memo={"key": None, "value": None},
         _time=SimpleNamespace(time=lambda: clock["now"],
@@ -472,6 +515,89 @@ class WindowDoesNotClipTests(_Base):
         self.assert_none(
             problems,
             "필이나 글자가 창 밖으로 나가 말 없이 잘린다:\n  " + "\n  ".join(problems))
+
+
+class FoldBudgetIsThePillTextAreaForEveryContentTests(_Base):
+    """I2 를 게이지 하나짜리 **밖의** 내용 전부로 넓힌다 — 수정이 바꾼 동작 중 위 테스트들이
+    안 잡는 유일한 것이라서다(라운드 2, 수정 diff 를 보고 추가).
+
+    수정 전후를 14개 내용 × 4 로케일 × 3 배율로 비교하면, 게이지 하나짜리가 아닌 내용에서는
+    줄·W·기록 폭·text_w 가 **한 톨도** 안 바뀌고 접힘 예산 값만 바뀐다(W < 172 일 때 바닥
+    120 이 사라진다). 그 예산은 줄을 바꾸지 않으므로 화면에선 안 보이지만, 저장소 불변식
+    (접힘이 믿는 폭 == 필이 주는 폭)은 내용 종류를 가리지 않는다. 특히 상태 줄은 로고가
+    없는 **전역 줄**이라 summary_lines 가 예산에서 로고를 빼지 않는다 — 산술이 다른 유일한
+    길이므로 따로 고정한다. 등식 하나가 두 경우를 다 덮는다:
+    예산 − LOGO == 필 폭 − 2·PAD − LOGO  ⇔  예산 == 필 폭 − 2·PAD(전역 줄의 글자 자리).
+
+    지금 코드(75a7ddd): 빨강 — 예: ko weekly + model 0.5배 W=164 에서 예산 120 vs 자리 112,
+    loading 상태 0.3배 W=99 에서 120 vs 76. 수정 후 초록.
+
+    Rivals 가르기(스크래치 사본에서 실행해 확인한 것):
+      · 수정에서 바닥만 되살린 구현(R2) — 여기와 위 I2 가 빨강.
+      · `_pill_text_budget` 이 로고를 안 빼는 구현(room − 2·PAD) — 여기, 위 I2, 대조군,
+        test_summary_layout 의 FoldBudgetMatchesTheActualPillTests 가 빨강.
+    구성상(실행하지 않은 추론): 바닥을 게이지 하나짜리 내용에서만 없애는 구현은 위 I2 를
+    통과하고 여기서만 빨갛다 — 이 테스트가 따로 있는 이유다.
+    """
+
+    def test_fold_budget_equals_the_pill_text_area_for_every_content_kind(self):
+        problems = []
+        for lang in LOCALES:
+            claude_pet.set_lang(lang)
+            for name, cg, xg, content in OTHER_CONTENT_SHAPES:
+                for scale in ALL_SCALES:
+                    s = settle(self, lang, scale, cg, xg, content)
+                    problems += self.budget_mismatch(s, name)
+        self.assert_none(
+            problems,
+            "게이지 하나짜리가 아닌 내용에서도 접힘 예산과 필 글자 자리가 달라선 안 된다:\n  "
+            + "\n  ".join(problems))
+
+
+# 짧은 내용 — 필이 SUMMARY_MIN_W(120) 바닥에 붙는 내용. (이름, Claude 게이지, Codex 게이지, CONTENT)
+SHORT_CONTENT_SHAPES = [
+    ("claude weekly 8% · 5m", ["weekly"], None, "short_weekly"),
+    ("codex weekly 8% · 5m only", None, ["weekly"], "short_codex"),
+    ("status loading (global line, no logo)", ["session", "weekly", "model"], None, "loading"),
+    ("status token_expired (global line, no logo)", ["session", "weekly", "model"], None,
+     "token_expired"),
+    ("status no_providers (global line, no logo)", None, None, "rows"),
+]
+
+
+class ShortContentStaysInTheWindowTests(_Base):
+    """I4 를 **짧은 내용**으로 넓힌다 — 필이 SUMMARY_MIN_W 바닥에 붙는 경우(라운드 2, Reviewer F1).
+
+    위 WindowDoesNotClipTests 는 게이지 하나짜리 줄(88pt 이상)만 봐서, `need` 를 고치면 W 가
+    줄을 따라 128 이상이 되고 초록이 된다. 그런데 `geom()` 의 W 는
+    `max(pw + 2·BTN_R + 16, int(pill_w) + 2·EDGE)` 라 **SUMMARY_MIN_W + 2·EDGE(128) 바닥이
+    없고**, `roam_pill_rect` 는 필을 `max(SUMMARY_MIN_W, W − 2·EDGE)` 의 방에 120 이상으로
+    그린다. 내용이 짧고 펫이 작으면(0.3배: 펫 쪽 바닥 57+42 = 99) W < 128 이 되어 120pt
+    필이 창보다 넓다. 실제 창은 crop 이라 (0, W) 밖은 없다 — 필 테두리가 잘리고, 펫이
+    오른쪽이면 필이 음수 x 에서 시작해 **전역 줄의 첫 글자까지** 잘린다(로고 들여쓰기가 없는
+    pid None 줄은 필 왼쪽 + PILL_PAD 에서 시작한다).
+
+    need/예산 수정만 들어간 작업 트리에서: ko `주간 8% · 5m` 0.3배 W=121 → 필 [2, 122] /
+    [−3, 117] (창 [0, 119]); `조회 중…` 0.3배 W=99 → 필 [2, 122] / [−25, 95] (창 [0, 97]),
+    글자 [−12, 28.1] — 12pt 가 잘린다.
+
+    Rivals 가르기: 바닥 없음(지금) 빨강; W 바닥을 SUMMARY_MIN_W(120) 로만 거는 구현(2·EDGE
+    누락 — 방이 112 라 필 120 이 여전히 x=−4) 빨강; R5(필 상한 해제) 빨강. 이 테스트를
+    초록으로 만드는 것은 W ≥ SUMMARY_MIN_W + 2·SUMMARY_EDGE 가 되게 하는 구현이다.
+    """
+
+    def test_short_content_pill_and_glyphs_stay_inside_the_window(self):
+        problems = []
+        for lang in LOCALES:
+            claude_pet.set_lang(lang)
+            for name, cg, xg, content in SHORT_CONTENT_SHAPES:
+                for scale in ALL_SCALES:
+                    s = settle(self, lang, scale, cg, xg, content)
+                    problems += self.window_clips(s, name)
+        self.assert_none(
+            problems,
+            "짧은 내용에서 필이나 글자가 창 밖으로 나가 말 없이 잘린다:\n  "
+            + "\n  ".join(problems))
 
 
 class ThreeGaugeControlTests(_Base):
