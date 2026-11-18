@@ -50,8 +50,13 @@ retrieveUserQuotaSummary 는 "Claude and GPT models" 만 준다. 그래서 v1 �
 
 ── 계약 v5 (agy 와 합의한 최종안, 2026-11-18 — v4 에 더한다) ──────────────────────────────────
 
-  a. 백그라운드 `/usage` 실행의 env 는 os.environ 의 사본 + `SSH_TTY="1"` — 로그인 안 된 agy 가 기본
-     브라우저를 멋대로 여는 것을 막는다(agy 는 SSH_* 가 있으면 브라우저를 열지 않는다).
+  a. (v5-1 로 교체, 2026-11-18 — Developer 실측: agy 1.5.11 은 SSH 를 감지하면 토큰 저장소를 키체인에서
+     파일로 바꿔 로그인된 사용자를 "로그인 필요"로 본다. `SSH_TTY=1` 은 쓸 수 없다.)
+     백그라운드 `/usage` 실행의 env 는 os.environ 의 사본이고, `SSH_CLIENT`·`SSH_TTY`·`SSH_CONNECTION`
+     은 **없다**(앱 환경에 있어도 사본에서 지운다). `NO_COLOR=1`. `PATH` 의 맨 앞은 앱 전용 폴더(0700,
+     소유자 본인)이고 그 안의 실행 가능한 `open` 은 인자를 무시하고 아무것도 하지 않은 채 0 으로 끝난다 —
+     agy 가 브라우저를 열려고 부르는 `open <url>` 이 거기서 끝난다. 나머지 PATH 는 원래 순서 그대로.
+     앱 자신의 os.environ 은 바뀌지 않는다. 메뉴 로그인(start_gemini_login)에는 가짜 open 이 없다.
   b. stderr 에 "Authentication required" / "visit the URL to log in" / "Run 'agy'" 가 보이면 바로 프로세스
      **그룹**을 끝낸다(남은 프로세스 없음 — agy 가 띄운 자식도).
   c. 지문(marker) = 존재 확인 출력의 `"mdat"` 줄 + 폴백 파일 `~/.gemini/antigravity-cli/
@@ -89,6 +94,7 @@ import copy
 import json
 import math
 import os
+import stat
 import shutil
 import subprocess
 import sys
@@ -464,6 +470,71 @@ class AgyCase(unittest.TestCase):
         if isinstance(getattr(claude_pet, "GEMINI_AGY_TIMEOUT", None), (int, float)):
             self._patch(mock.patch.object(claude_pet, "GEMINI_AGY_TIMEOUT", wait))
 
+    SSH_ENV = {"SSH_TTY": "/dev/ttys009", "SSH_CLIENT": "192.0.2.1 50000 22",
+               "SSH_CONNECTION": "192.0.2.1 50000 192.0.2.2 22"}
+
+    def app_runs_over_ssh(self):
+        """앱 자신의 환경에 SSH_* 세 키를 넣어 둔다(합성 값) — 사본에서 빠지는지 보려고."""
+        self._patch(mock.patch.dict(os.environ, self.SSH_ENV))
+
+    def assert_background_env(self, env, app_env_before):
+        """계약 v5-1: 백그라운드 agy 에 준 env. `app_env_before` 는 조회 전의 dict(os.environ)."""
+        self.assertIsInstance(env, dict, "agy 에 env 를 주지 않았다 — 가짜 open 이 없으면 agy 가 브라우저를 연다")
+        for key in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION"):
+            # assertNotIn 은 실패 때 env 전체를 찍는다 — 환경변수 값이 기록에 남지 않게 참·거짓만 본다.
+            self.assertFalse(key in env, "%s 가 agy 의 env 에 있다 — agy 가 토큰 저장소를 파일로 바꾼다" % key)
+        self.assertEqual(env.get("NO_COLOR"), "1")
+        self.assertEqual(env.get("HOME"), self.home, "env 가 os.environ 의 사본이 아니다(HOME 이 없다)")
+        self.assertTrue(dict(os.environ) == app_env_before, "앱 자신의 환경을 바꿨다")
+
+        parts = (env.get("PATH") or "").split(os.pathsep)
+        rest = app_env_before["PATH"].split(os.pathsep)
+        self.assertTrue(parts[1:] == rest, "원래 PATH 가 순서 그대로 뒤에 붙지 않았다(맨 앞 하나만 더해야 한다)")
+        folder = parts[0]
+        self.assertTrue(os.path.isabs(folder), "PATH 맨 앞이 절대 경로가 아니다: %r" % folder)
+        self.assertNotIn(folder, rest)
+        real = os.path.realpath(folder)
+        self.assertTrue(real.startswith(os.path.realpath(self.home) + os.sep)
+                        or real.startswith(os.path.realpath(tempfile.gettempdir()) + os.sep),
+                        "가짜 open 폴더가 테스트 홈·임시 폴더 밖이다: %r" % folder)
+        self.assertTrue(os.path.lexists(folder), "PATH 맨 앞 폴더가 없다 — 가짜 open 폴더를 만들지 않았다")
+        st = os.lstat(folder)
+        self.assertTrue(stat.S_ISDIR(st.st_mode), "PATH 맨 앞이 진짜 폴더가 아니다(링크?)")
+        self.assertEqual(stat.S_IMODE(st.st_mode), 0o700, "가짜 open 폴더가 소유자 전용(0700)이 아니다")
+        self.assertEqual(st.st_uid, os.getuid())
+
+        fake = os.path.join(folder, "open")
+        self.assertTrue(os.path.lexists(fake), "PATH 맨 앞 폴더에 `open` 이 없다")
+        fst = os.lstat(fake)
+        self.assertTrue(stat.S_ISREG(fst.st_mode), "`open` 이 보통 파일이 아니다(링크면 진짜 open 일 수 있다)")
+        self.assertEqual(fst.st_uid, os.getuid())
+        self.assertFalse(stat.S_IMODE(fst.st_mode) & 0o022, "`open` 을 남이 고칠 수 있다")
+        self.assertTrue(os.access(fake, os.X_OK), "`open` 을 실행할 수 없다")
+        # 실행해 보기 전에: 진짜 open 을 부르는 스크립트라면 여기서 브라우저가 열린다 — 돌리지 않고 떨어뜨린다.
+        with open(fake, "rb") as f:
+            body = f.read(4096)
+        self.assertLess(len(body), 4096, "`open` 이 아무것도 안 하기에는 너무 크다")
+        for word in (b"/usr/bin/open", b"osascript", b"$@", b"$*", b"exec ", b"http"):
+            self.assertNotIn(word, body, "`open` 이 무언가를 실행하려 한다: %r" % word)
+        # agy 가 부르는 그대로(이 env, 이름만으로 찾게) 진짜로 실행한다: 곧바로 0, 출력 없음, 남는 프로세스 없음.
+        self.assertEqual(shutil.which("open", path=env["PATH"]), fake, "PATH 에서 찾은 open 이 가짜가 아니다")
+        for args in ([], ["https://accounts.example.invalid/o/oauth2/auth?synthetic=1"],
+                     ["-a", "Synthetic Browser", "https://example.invalid/"]):
+            t0 = _real_time.time()
+            child = _REAL_POPEN([fake] + args, env=env, cwd=self.home, start_new_session=True,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                out, err = child.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(child.pid, 9)
+                child.communicate()
+                self.fail("가짜 open 이 끝나지 않는다(인자 %r)" % (args,))
+            self.assertEqual(child.returncode, 0, "가짜 open 이 0 으로 끝나지 않았다(인자 %r)" % (args,))
+            self.assertLess(_real_time.time() - t0, 3.0)
+            self.assertEqual((out, err), (b"", b""))
+            with self.assertRaises(OSError, msg="가짜 open 이 프로세스를 남겼다(인자 %r)" % (args,)):
+                os.killpg(child.pid, 0)
+
     def write_fallback(self, mtime):
         """agy 의 파일 폴백 저장소(키체인을 못 쓰는 환경)를 만든다 — 내용은 합성, mtime 은 주는 값."""
         os.makedirs(os.path.dirname(self.fallback), exist_ok=True)
@@ -731,10 +802,15 @@ class FetchViaAgyTests(AgyCase):
         이하, cwd 는 홈이나 임시 디렉터리. 행은 parse 결과, 상태는 성공. v4: 그 전에 agy 키체인 항목이
         있는지 확인한다(`-w` 없이) — 그 밖의 security 호출은 없다. Rivals: 63d5420(확인 없이 agy 를 띄움 —
         로그인 안 된 사용자에게 OAuth 절차를 시작); `-w` 로 비밀값을 읽어 확인; env 없음(agy 가 기본
-        브라우저에 로그인 탭을 연다); env 를 SSH_TTY 하나로 갈아치움(HOME·PATH 가 없어 agy 가 설정을 못
-        찾는다); os.environ 자체에 SSH_TTY 를 씀(앱이 띄우는 다른 프로세스까지 바뀐다); 90fd32b(키체인 + cloudcode-pa HTTP — agy 를 띄우지 않음); 셸 문자열; timeout 없음
+        브라우저에 로그인 탭을 연다); env 를 통째로 갈아치움(HOME·PATH 가 없어 agy 가 설정을 못 찾는다);
+        v5 의 `SSH_TTY=1`(agy 1.5.11 이 토큰 저장소를 파일로 바꿔 로그인된 사용자를 못 읽는다); 앱 환경의
+        SSH_* 를 사본에 그대로 둠; 가짜 open 없음(브라우저가 열린다); 가짜 open 을 PATH 끝에 둠(진짜
+        /usr/bin/open 이 먼저 잡힌다); open 이 0 아닌 코드(agy 가 실패로 본다); 폴더 0755(남이 open 을
+        바꿔치기한다); os.environ 자체를 고침(앱이 띄우는 다른 프로세스까지 바뀐다); 90fd32b(키체인 + cloudcode-pa HTTP — agy 를 띄우지 않음); 셸 문자열; timeout 없음
         (멈춘 agy 가 워커를 영원히 붙듦); cwd 없음(앱의 작업 디렉터리 — 번들 안 — 에서 agy 가 돎);
         `/usage` 대신 프롬프트(모델 토큰을 씀)."""
+        self.app_runs_over_ssh()
+        before = dict(os.environ)
         rows = self.fetch()
         self.assertEqual(len(self.fake.calls), 1, "agy 를 정확히 한 번 띄워야 한다")
         _t, argv, kw = self.fake.calls[0]
@@ -751,16 +827,35 @@ class FetchViaAgyTests(AgyCase):
                         or real.startswith(os.path.realpath(tempfile.gettempdir())),
                         "cwd 가 중립 디렉터리가 아니다: %r" % cwd)
         self.assert_only_existence_checks(at_least=1)
-        # v5 a: env 는 os.environ 의 사본에 SSH_TTY="1" — agy 가 브라우저를 열지 않게.
-        env = kw.get("env")
-        self.assertIsInstance(env, dict, "agy 에 env 를 주지 않았다 — SSH_TTY 가 없으면 agy 가 브라우저를 연다")
-        self.assertEqual(env.get("SSH_TTY"), "1")
-        self.assertEqual(env.get("HOME"), self.home, "env 가 os.environ 의 사본이 아니다(HOME 이 없다)")
-        self.assertIn("PATH", env)
-        self.assertNotIn("SSH_TTY", os.environ, "앱 자신의 환경을 바꿨다")
+        # v5-1: SSH_* 없음, NO_COLOR=1, PATH 맨 앞에 아무것도 안 하는 open, 앱 환경 불변.
+        self.assert_background_env(kw.get("env"), before)
         assert_rows(self, rows, EXPECTED_ROWS)
         self.assertEqual(self.status().get("last_error"), None)
         self.assertIs(self.status().get("auth_error"), False)
+
+    def test_a_deleted_fake_open_is_made_again_before_the_next_run(self):
+        """v5-1 추가 1: 가짜 open 폴더(또는 그 안의 open 파일)가 지워졌으면 agy 를 띄우기 **직전에** 다시
+        만든다 — 없으면 PATH 의 다음 open(/usr/bin/open)으로 넘어가 브라우저가 열린다. 임시 폴더는 시스템이
+        치울 수 있다.
+        Rivals: 앱이 켜질 때 한 번만 만듦; 폴더 경로를 기억해 두고 있는지만 봄(폴더는 있는데 open 이 없다);
+        다시 만들되 권한·내용을 대충 함(같은 단언을 다시 통과해야 한다)."""
+        _require("parse_agy_usage")
+        box = {"now": 1_800_000_000.0}      # 다음 주기를 기다리지 않게 앱의 시계만 대역으로
+        self._patch(mock.patch.object(claude_pet, "time", _FakeTime(box)))
+        before = dict(os.environ)
+        self.assertTrue(self.fetch())
+        first = self.fake.calls[0][2].get("env")
+        self.assert_background_env(first, before)
+        folder = first["PATH"].split(os.pathsep)[0]
+        for n, wipe in enumerate((lambda: shutil.rmtree(folder),
+                                  lambda: os.unlink(os.path.join(folder, "open"))), start=1):
+            wipe()
+            box["now"] += 301
+            self.assertTrue(self.fetch())
+            self.assertEqual(len(self.fake.calls), n + 1, "다음 주기에 agy 를 띄우지 않았다")
+            # 그 실행에 준 env 의 PATH 맨 앞 폴더에, 띄운 시점에 이미 실행 가능한 open 이 있어야 한다.
+            self.assert_background_env(self.fake.calls[n][2].get("env"), before)
+            folder = self.fake.calls[n][2]["env"]["PATH"].split(os.pathsep)[0]
 
     def test_agy_is_found_on_path_or_in_dot_local_bin_otherwise_not_installed(self):
         """which 가 없으면 실행 가능한 ~/.local/bin/agy. 그것도 없거나 실행 권한이 없으면 띄우지 않고 None,
@@ -917,6 +1012,8 @@ class AgyLoginTests(AgyCase):
         돌아옴(로그인 절차가 뒤에 남는다); agy 만 끝내고 그것이 띄운 자식은 남김(그룹이 아니라 pid 하나만). 이 테스트는 **돌고 있는** 프로세스만 본다 — 끝낸 뒤 거두지 않은
         좀비는 가르지 못한다(상태를 묻는 순간 거둬진다)."""
         self.never_exits("login_wait", wait=8)
+        self.app_runs_over_ssh()
+        before = dict(os.environ)
         t0 = _real_time.time()
         rows = self.fetch()
         took = _real_time.time() - t0
@@ -927,8 +1024,8 @@ class AgyLoginTests(AgyCase):
         self.assertLess(took, 4.0, "로그인 안내가 나왔는데 agy 를 바로 끝내지 않았다(%.1f초)" % took)
         # v5 b: 프로세스 **그룹**을 끝낸다 — 대역 agy 는 이 mode 에서 같은 그룹에 자식을 하나 띄워 둔다.
         self.assertEqual(self.fake.alive(), 0, "agy 프로세스(또는 그것이 띄운 자식)가 남았다")
-        env = self.fake.calls[0][2].get("env") or {}
-        self.assertEqual(env.get("SSH_TTY"), "1", "로그인을 요구하는 agy 를 SSH_TTY 없이 띄웠다")
+        # v5-1: 로그인을 요구하는 agy 가 부를 `open <url>` 은 가짜 open 에서 끝난다.
+        self.assert_background_env(self.fake.calls[0][2].get("env"), before)
         self.assert_only_existence_checks()
 
     def test_an_immediate_authentication_required_error_is_login(self):

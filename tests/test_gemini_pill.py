@@ -848,6 +848,7 @@ class GeminiLoginMenuTests(_Guard):
         없다); 앱이 직접 agy 를 띄움(숨은 프로세스로 OAuth)."""
         login = _require("start_gemini_login")
         seen = []
+        path_before = os.environ.get("PATH")
         with mock.patch.object(claude_pet, "_run_in_terminal", side_effect=seen.append), \
                 mock.patch.object(claude_pet.subprocess, "run",
                                   side_effect=AssertionError("프로세스를 띄웠다")), \
@@ -860,8 +861,16 @@ class GeminiLoginMenuTests(_Guard):
                         "Terminal 명령에 `agy` 만 실행하는 줄이 없다: %r" % seen[0])
         self.assertNotIn("/usage", seen[0])
         self.assertNotIn("agy login", seen[0])
-        # v5: SSH_TTY 는 백그라운드 실행에만 넣는다 — 사용자가 고른 로그인에서는 브라우저가 열려야 한다.
-        self.assertNotIn("SSH_", seen[0])
+        # v5-1: 가짜 open 은 백그라운드 실행에만 둔다 — 사용자가 고른 로그인에서는 브라우저가 열려야 한다.
+        # Terminal 명령에 나오는 어느 폴더에도 `open` 이 없고(PATH 에 가짜 open 폴더를 넣지 않았다),
+        # `open` 을 가리거나 다시 정의하지도 않는다. 앱의 PATH 도 그대로다.
+        self.assertEqual(os.environ.get("PATH"), path_before, "앱 자신의 PATH 를 바꿨다")
+        import re as _re
+        for folder in set(_re.findall(r"/[^\s\"':;$]+", seen[0])):
+            self.assertFalse(os.path.lexists(os.path.join(folder, "open")),
+                             "로그인 명령의 PATH 에 `open` 을 가진 폴더가 있다: %r" % folder)
+        self.assertIsNone(_re.search(r"(alias\s+open\b|\bopen\s*\(\)|function\s+open\b)", seen[0]),
+                          "로그인 명령이 open 을 가렸다: %r" % seen[0])
 
 
 # ═════════════════════════════ 9. Windows 포트 ═════════════════════════════
