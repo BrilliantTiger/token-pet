@@ -1,4 +1,66 @@
-"""Static release-preparation gates for v1.1.1.
+"""Static release-preparation gates for v1.1.2.
+
+Status as of 2026-11-18 (Verifier pill-width-tests): v1.1.1 is published — lightweight tag
+``v1.1.1`` on origin, pointing at d1b38bc; GitHub release "ClaudePet v1.1.1" on
+BrilliantTiger/token-pet (formerly claude-pet; GitHub forwards the old address), published
+2026-10-17T12:48:13Z, not a draft or prerelease.  The tag's ``RELEASE_NOTES.md`` blob
+(3349a70e) is the v1.1.1 release commit 9fb3ab4's — nothing reworded the section between
+the release commit and the tag, as for v1.0.1.  Running ``release.sh``'s
+``gen_release_notes`` awk program (ver=``**v1.1.1**``) over the tag's file reproduces the
+live release body (``gh release view v1.1.1 -R BrilliantTiger/token-pet --json body``,
+checked 2026-11-18) byte for byte, 3456 bytes (gh's ``--jq .body`` output adds one
+trailing newline).  So everything from the ``**v1.1.1**`` heading to the end of
+``RELEASE_NOTES.md`` is frozen text and is pinned here byte for byte
+(``PUBLISHED_V111_AND_OLDER_SHA256``), beside the older pins.  The single unpublished
+section above it is ``**v1.1.2**``, and ``APP_VERSION`` is ``"1.1.2"`` — the bump the
+release commit 1c2ab4b carries (it replaced 96ad0ff and then 2fbfedd, which staged the
+same version and claude_pet.py with earlier wordings of bullets 1 and 3 and, until
+1c2ab4b, a ``--expect-version 1.1.1`` usage example in verify_release_artifact.py).  ``StagedV111NotesFormatTests``
+became ``PublishedV111NotesContractTests`` with its method names unchanged; three
+assertions are re-scoped from ``APP_VERSION`` to the section's own heading (the
+numbers-are-the-version check, the heading check, and "Windows도 같은 1.1.1로") — exactly
+the re-scope v1.1.0's class received.  Every other v1.1.1 claim was re-run against the
+v1.1.2 tree and still holds: the v1.1.2 change (TOK-42) touches only three closures inside
+``run_gui`` (``geom``, ``_pill_text_budget``, ``roam_summary_text``) and ``APP_VERSION``,
+none of which a v1.1.1 claim is about (the keychain reads, the update address, the two
+click handlers).  ``StagedV112NotesFormatTests`` holds the v1.1.2 section to CLAUDE.md's
+release-note format and ties each bullet to the source and to its behavioural gate in
+tests/test_single_gauge_pill_width.py:
+
+* "macOS에서 사용량 표시에 게이지가 하나뿐이면 끝(리셋까지 남은 시간)이 잘리던 문제를
+  고쳤습니다. 이제 표시가 내용에 맞춰 넓어집니다" ("게이지가 하나뿐이면", not "하나만 켜
+  두면": a Codex block whose server sends one row was cut the same way) against ``summary_lines``
+  appending the reset after the gauge when a block has one gauge (the "끝"), and
+  ``roam_summary_text`` taking ``need`` from the unfolded lines
+  ``summary_lines(groups, measure, float('inf'), measure_sub)`` returns, each measured in
+  the font it is drawn in, with ``roam_summary_runs`` no longer measured on its own; the
+  hook records that width (``_pill_budget_for`` → ``_apply_pill_width``) and ``geom``'s W
+  follows it; the gates are ``SingleGaugeLineFitsItsPillTests``,
+  ``SingleGaugeStaysOneLineTests``, ``WindowDoesNotClipTests`` and
+  ``FoldBudgetIsThePillTextAreaTests``.  "macOS에서": the Windows port already measured
+  the unfolded lines (``cp.summary_lines(..., float("inf"), ...)``) before this release.
+* "macOS에서 펫을 아주 작게 줄였을 때 사용량 표시의 테두리나 "조회 중…" 같은 안내 문구가
+  창 밖으로 잘리던 문제도 고쳤습니다. 업데이트만 받으면 되고 따로 할 일은 없습니다" against
+  ``geom``'s W having the ``SUMMARY_MIN_W + 2 * SUMMARY_EDGE`` floor — the same two names
+  ``roam_pill_rect`` floors the pill's room with — unconditionally (no setting, no
+  ``RUNTIME`` key); the quote against ``TR["ko"]["loading"]``; the gate
+  ``ShortContentStaysInTheWindowTests``.
+* "Windows도 같은 1.1.2로 나오지만 바뀐 점은 없습니다" against ``APP_VERSION`` and
+  ``windows/build_win.py``; "바뀐 점은 없습니다" against every change being inside
+  ``run_gui``, which the port never calls.  Checked by hand on 2026-11-18 (not a static
+  property of this tree): ``git diff v1.1.1 1c2ab4b -- windows/`` is empty, and
+  ``git diff v1.1.1 1c2ab4b -- claude_pet.py`` is five hunks — ``APP_VERSION`` and four
+  inside ``run_gui``.
+
+Not tied, because it is not a property of this tree: the Windows port keeps its own pill
+geometry, which has neither of the two floors bullet 2's fix adds on macOS
+(windows/claude_pet_win.py ``geom`` / ``_pill_text_budget``).  Bullet 3 says Windows did
+not change, which is true; it does not say Windows has the bullet-2 fix, and must not be
+reworded to.
+
+Lineage: ``test_v1_1_1_release_contract.py`` → this file (``git mv``).
+
+The paragraphs below are the v1.1.1 module's docstring, kept as it was reviewed.
 
 Status as of 2026-10-17 (Verifier keychain-quiet-tests): v1.1.0 is published — annotated
 tag ``v1.1.0`` (0a02350f) on origin, pointing at cb4f98f; GitHub release published
@@ -372,6 +434,21 @@ PUBLISHED_V101_AND_OLDER_SHA256 = (
 # above it and nothing below moved.
 PUBLISHED_V110_AND_OLDER_SHA256 = (
     "538bd854d05730c5b16b78ad19da345ed4ed0f2ba9bd4cc882489f76ee5be8c5"
+)
+# v1.1.1-and-older: from the ``**v1.1.1**`` heading through EOF, computed from the *tag*'s
+# tree (`git show v1.1.1:RELEASE_NOTES.md`; lightweight tag -> d1b38bc, blob 3349a70e,
+# 28529 bytes, of which the suffix is 24121).  That blob is also the v1.1.1 release commit
+# 9fb3ab4's — nothing reworded the section between the release commit and the tag.
+# Independently confirmed against the live GitHub release body
+# (`gh release view v1.1.1 -R BrilliantTiger/token-pet --json body`, checked 2026-11-18;
+# published 2026-10-17T12:48:13Z): running release.sh's gen_release_notes awk program
+# (ver=**v1.1.1**) over the tag's file reproduces the body's 3456 bytes exactly (gh's --jq
+# output adds one trailing newline), so the 717-byte v1.1.1 section users received is the
+# one pinned here.  Identical in the working tree after the v1.1.2 section was staged above
+# it (1c2ab4b, 2026-11-18).  The v1.1.0 suffix is unchanged at 23404 bytes across these
+# trees, so the v1.1.1 section was appended above it and nothing below moved.
+PUBLISHED_V111_AND_OLDER_SHA256 = (
+    "cfb8295ee10d8b796e2f15e03feff0c5e49ecf500ff0dc2c29c2cd7d2a30886b"
 )
 
 # The cadence the published v0.23 notes promise, and the Korean label they name.
@@ -817,26 +894,27 @@ def _guards(root: ast.AST, node: ast.AST) -> list[ast.AST]:
 
 
 class VersionAndPinContractTests(unittest.TestCase):
-    def test_v111_version_and_final_source_pins_propagate(self):
+    def test_v112_version_and_final_source_pins_propagate(self):
         problems: list[str] = []
 
         versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
-        if versions != ["1.1.1"]:
-            problems.append(f"APP_VERSION must be one literal '1.1.1', got {versions!r}")
+        if versions != ["1.1.2"]:
+            problems.append(f"APP_VERSION must be one literal '1.1.2', got {versions!r}")
 
         verifier_text = RELEASE_VERIFIER.read_text(encoding="utf-8")
-        if "--expect-version 1.1.1" not in verifier_text:
-            problems.append("verify_release_artifact.py usage must show --expect-version 1.1.1")
+        if "--expect-version 1.1.2" not in verifier_text:
+            problems.append("verify_release_artifact.py usage must show --expect-version 1.1.2")
         # A bare version-number substring check would false-positive here: "1.0" is a
         # literal prefix of "1.0.1" (as "0.26" was of "0.26.1", and "1.1" is of "1.1.0"), so a naive
         # `f"--expect-version {stale}" in text` would flag the very string this test just
         # required above. The negative lookahead excludes exactly that case — it only
         # fires on a *bare* stale version, never on it being a prefix of the current one.
-        # "1.1.2", "1.2", "1.2.0" and "1.1.10" are the plausible wrong bumps; the rest are
-        # the versions before ("1.1" is a bare prefix of "1.1.1", so the lookahead below
-        # keeps it from firing on the current version).
-        for stale in ("1.1.0", "1.0.1", "1.0.0", "0.26.1", "0.26", "0.25", "0.24", "1.0",
-                      "1.1", "1.1.2", "1.2", "1.2.0", "1.1.10"):
+        # "1.1.3", "1.2", "1.2.0" and "1.1.20" are the plausible wrong bumps ("1.1.20" also
+        # satisfies the plain substring check above, so only this list catches it); the
+        # rest are the versions before ("1.1" is a bare prefix of "1.1.2", so the lookahead
+        # below keeps it from firing on the current version).
+        for stale in ("1.1.1", "1.1.0", "1.0.1", "1.0.0", "0.26.1", "0.26", "0.25", "0.24",
+                      "1.0", "1.1", "1.1.3", "1.2", "1.2.0", "1.1.20"):
             if re.search(rf"--expect-version {re.escape(stale)}(?!\.\d)", verifier_text):
                 problems.append(
                     f"verify_release_artifact.py still advertises --expect-version {stale}"
@@ -966,13 +1044,24 @@ class PublishedNotesImmutabilityTests(unittest.TestCase):
             "published v1.1.0-and-older bytes were rewritten or dropped",
         )
 
-    def test_v111_is_the_only_unpublished_heading_and_sits_directly_above_v110(self):
+    def test_published_v111_and_older_bytes_are_untouched(self):
+        raw = RELEASE_NOTES.read_bytes()
+        published_marker = b"**v1.1.1**"
+        self.assertEqual(raw.count(published_marker), 1, "published v1.1.1 heading changed")
+        published_suffix = raw[raw.index(published_marker) :]
+        self.assertEqual(
+            hashlib.sha256(published_suffix).hexdigest(),
+            PUBLISHED_V111_AND_OLDER_SHA256,
+            "published v1.1.1-and-older bytes were rewritten or dropped",
+        )
+
+    def test_v112_is_the_only_unpublished_heading_and_sits_directly_above_v111(self):
         """Rivals this heading-shape regex must not miss: a stale two-part-only pattern
         (``\\d+\\.\\d+``) silently fails to match a three-part heading like
         ``**v0.26.1**`` at all — a regex bug that would have made every assertion below
         vacuously pass against an empty ``headings`` list rather than catching a
         misplaced or duplicated heading. The pattern below allows an optional third
-        component for exactly this reason — and ``**v1.1.1**`` has one too."""
+        component for exactly this reason — and ``**v1.1.2**`` has one too."""
         text = RELEASE_NOTES.read_text(encoding="utf-8")
         changelog = "### 📝 변경 내역 / Changelog"
         self.assertEqual(text.count(changelog), 1)
@@ -981,11 +1070,11 @@ class PublishedNotesImmutabilityTests(unittest.TestCase):
         self.assertTrue(headings, "changelog has no release heading")
         self.assertEqual(
             headings[:2],
-            ["1.1.1", "1.1.0"],
-            "the unpublished v1.1.1 section must sit directly above the published "
-            f"v1.1.0 heading, with nothing newer above it; got {headings[:2]!r}",
+            ["1.1.2", "1.1.1"],
+            "the unpublished v1.1.2 section must sit directly above the published "
+            f"v1.1.1 heading, with nothing newer above it; got {headings[:2]!r}",
         )
-        self.assertEqual(headings.count("1.1.1"), 1, "v1.1.1 heading must appear once")
+        self.assertEqual(headings.count("1.1.2"), 1, "v1.1.2 heading must appear once")
 
 
 class PublishedV023NotesContractTests(unittest.TestCase):
@@ -3032,7 +3121,8 @@ class PublishedV110NotesContractTests(unittest.TestCase):
     GitHub release went out on 2026-10-06T00:25:29Z.  Three assertions are re-scoped from
     ``APP_VERSION`` to the section's own heading, as v1.0.1's was: the numbers-are-the-
     version check in the format test, ``test_v110_heading_and_version_are_the_bump`` (now:
-    the section is headed 1.1.0 and sits directly below the staged section), and "Windows도
+    the section is headed 1.1.0 and sits directly below the staged section — since v1.1.2:
+    directly below ``**v1.1.1**``), and "Windows도
     같은 1.1.0으로" in the spikes test (the ``windows/build_win.py`` tie beside it is still a
     property of ``APP_VERSION`` and unchanged).  The heading-equals-``APP_VERSION`` check
     lives on in ``StagedV111NotesFormatTests``.  Every other assertion was re-run against
@@ -3111,10 +3201,17 @@ class PublishedV110NotesContractTests(unittest.TestCase):
     def test_v110_heading_and_version_are_the_bump(self):
         """Re-scoped on publication: the section is headed 1.1.0 and is the second section,
         directly below the staged one (while staged this said heading == ``APP_VERSION``;
-        that check now lives in ``StagedV111NotesFormatTests``)."""
+        that check now lives in ``StagedV111NotesFormatTests``).
+
+        Re-scoped again for v1.1.2 (Verifier pill-width-tests, 2026-11-18): once v1.1.1 was
+        published, "the newest published section" stopped being true of v1.1.0 by the
+        passage of a release, not by any change to it.  What stays true is its place in the
+        frozen history: it sits directly below ``**v1.1.1**``."""
         headings = [v for v, _ in _changelog_sections(self.text)]
-        self.assertEqual(headings[1:2], ["1.1.0"],
-                         f"v1.1.0 must be the newest published section; got {headings[:3]!r}")
+        self.assertIn("1.1.1", headings)
+        after = headings[headings.index("1.1.1") + 1:headings.index("1.1.1") + 2]
+        self.assertEqual(after, ["1.1.0"],
+                         f"v1.1.0 must sit directly below v1.1.1; got {headings[:4]!r}")
 
     def test_v110_pill_shows_only_server_values_and_calibration_is_gone(self):
         """"필에는 이제 서버가 알려 준 사용량만 표시합니다. 로그로 계산한 추정치(≈)와 한도
@@ -3496,11 +3593,23 @@ def _call_sites(tree: ast.AST, name: str) -> list[tuple[str, ast.Call]]:
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name]
 
 
-class StagedV111NotesFormatTests(unittest.TestCase):
-    """The unpublished v1.1.1 section, held to CLAUDE.md's release-note format rule and to
-    the source it describes, one test per bullet (see the module docstring for the list).
+class PublishedV111NotesContractTests(unittest.TestCase):
+    """The published v1.1.1 section: its bytes are frozen above, and the source must still
+    keep every promise it made.
 
-    The section is staged text until the tag is pushed, so correcting it is ordinary work.
+    This is the v1.1.2 release's former ``StagedV111NotesFormatTests`` with its method
+    names unchanged — its status moved from staged to published when the ``v1.1.1`` tag and
+    GitHub release went out on 2026-10-17T12:48:13Z.  Three assertions are re-scoped from
+    ``APP_VERSION`` to the section's own heading, as v1.1.0's was: the numbers-are-the-
+    version check in the format test, ``test_v111_heading_and_version_are_the_bump`` (now:
+    the section is headed 1.1.1 and sits directly below the staged section), and "Windows도
+    같은 1.1.1로" in the address test (the ``windows/build_win.py`` tie beside it is still a
+    property of ``APP_VERSION`` and unchanged).  The heading-equals-``APP_VERSION`` check
+    lives on in ``StagedV112NotesFormatTests``.  Every other assertion was re-run against
+    the v1.1.2 release tree (1c2ab4b, 2026-11-18) and still holds.
+
+    (As staged:) the unpublished v1.1.1 section, held to CLAUDE.md's release-note format
+    rule and to the source it describes, one test per bullet.
     The ties are about the named mechanisms; the behaviour is gated in
     tests/test_keychain_quiet.py, tests/test_oauth_token_cache.py, tests/test_repo_move.py
     and windows/tests/test_win_repo_move.py.
@@ -3544,22 +3653,22 @@ class StagedV111NotesFormatTests(unittest.TestCase):
             match = re.search(pattern, prose_for_forbidden_scan, re.I)
             if match:
                 problems.append(f"remove {label}: {match.group(0)!r}")
-        # As for v1.1.0: the only number a bullet may carry is the version.
+        # As for v1.1.0: the only number a bullet may carry is the version.  Published: the
+        # version is the section's own heading, no longer APP_VERSION.
         numbers = set(re.findall(r"\d+(?:\.\d+)*", self.body))
-        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        versions = ["1.1.1"]
         if numbers - set(versions):
             problems.append(f"the notes carry numbers other than the version: "
                             f"{sorted(numbers - set(versions))!r}")
         self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
 
     def test_v111_heading_and_version_are_the_bump(self):
-        """Rivals: a heading left at 1.1.0 or written as 1.1.10/1.2; ``APP_VERSION`` not
-        bumped, or bumped to something the heading does not say."""
-        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
-        heading = _changelog_sections(self.text)[0][0]
-        self.assertEqual(versions, [heading],
-                         f"the staged heading is v{heading}; APP_VERSION is {versions!r}")
-        self.assertEqual(heading, "1.1.1")
+        """Re-scoped on publication: the section is headed 1.1.1 and is the second section,
+        directly below the staged one (while staged this said heading == ``APP_VERSION``;
+        that check now lives in ``StagedV112NotesFormatTests``)."""
+        headings = [v for v, _ in _changelog_sections(self.text)]
+        self.assertEqual(headings[1:2], ["1.1.1"],
+                         f"v1.1.1 must be the newest published section; got {headings[:3]!r}")
 
     def test_v111_keychain_dialogs_stop_and_a_locked_keychain_is_not_read(self):
         """"macOS에서 키체인이나 암호를 묻는 창이 반복해서 뜨던 문제를 고쳤습니다. 이제 키체인이
@@ -3770,11 +3879,12 @@ class StagedV111NotesFormatTests(unittest.TestCase):
             if old:
                 problems.append(f"{path.name} still names the old owner: {old!r}")
 
+        # Published: the version Windows shipped is the section's own heading, no longer
+        # APP_VERSION (the build_win.py tie below is still a property of APP_VERSION).
         win_named = re.search(r"Windows도\s*같은\s*(\d+(?:\.\d+)+)\s*로", self.body)
-        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
-        if not win_named or versions != [win_named.group(1)]:
+        if not win_named or win_named.group(1) != "1.1.1":
             problems.append(f"the notes say Windows ships {win_named and win_named.group(1)!r}; "
-                            f"APP_VERSION is {versions!r}")
+                            f"the section is v1.1.1")
         win_version = _module_defs(WIN_BUILD).get("app_version")
         if win_version is None or not any("APP_VERSION" in s for s in _code_strings([win_version])):
             problems.append("windows/build_win.py's app_version must read APP_VERSION")
@@ -3808,6 +3918,266 @@ class StagedV111NotesFormatTests(unittest.TestCase):
                                                         | _names(_module_tree(path)))
             if named_new:
                 problems.append(f"{path.name} names the macOS keychain functions {sorted(named_new)!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+
+SINGLE_GAUGE_GATE = REPO / "tests" / "test_single_gauge_pill_width.py"
+WIN_CORE = REPO / "windows" / "win_core.py"
+
+
+def _class_names(path: Path) -> set[str]:
+    return {n.name for n in _module_tree(path).body if isinstance(n, ast.ClassDef)}
+
+
+def _attrs_and_names(path: Path) -> set[str]:
+    tree = _module_tree(path)
+    return {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)} | _names(tree)
+
+
+class StagedV112NotesFormatTests(unittest.TestCase):
+    """The unpublished v1.1.2 section, held to CLAUDE.md's release-note format rule and to
+    the source it describes, one test per bullet (see the module docstring for the list).
+
+    The section is staged text until the tag is pushed, so correcting it is ordinary work.
+    The ties are about the named mechanisms and name the behavioural gates by class — the
+    behaviour itself is gated in tests/test_single_gauge_pill_width.py, which drives the
+    production ``roam_summary_text`` closure with the production geometry; this module only
+    ties the prose to it.  Deleting a gate class the notes rest on fails here, by name.
+    """
+
+    def setUp(self):
+        text = RELEASE_NOTES.read_text(encoding="utf-8")
+        self.text = text
+        self.visible = _notes_block(text, "**v1.1.2**", "**v1.1.1**")
+        self.top_level, self.nested, self.bullets = _bullet_shape(self.visible)
+        self.body = "\n".join(self.bullets)
+        self.gui = _module_def(APP_SOURCE, "run_gui")
+
+    def _bullet(self, pattern: str) -> str:
+        matching = [b for b in self.bullets if re.search(pattern, b)]
+        self.assertEqual(len(matching), 1,
+                         f"expected exactly one v1.1.2 bullet matching {pattern!r}, "
+                         f"got {len(matching)}")
+        return matching[0]
+
+    def test_v112_notes_follow_the_three_bullet_450_character_format(self):
+        problems: list[str] = []
+        if len(self.top_level) != 3:
+            problems.append(f"v1.1.2 must have exactly 3 top-level bullets, got {len(self.top_level)}")
+        if self.nested:
+            problems.append("v1.1.2 must not contain nested bullets")
+        normalized_body = " ".join(self.visible.split())
+        if len(normalized_body) > 450:
+            problems.append(f"v1.1.2 Korean body is {len(normalized_body)} Unicode characters; max is 450")
+        for index, bullet in enumerate(self.bullets, 1):
+            if not re.search(r"[가-힣]", bullet):
+                problems.append(f"bullet {index} must be Korean")
+            count = len(_sentences(bullet))
+            if not 1 <= count <= 2:
+                problems.append(f"bullet {index} has {count} sentences; CLAUDE.md allows 1-2")
+        prose_for_forbidden_scan = self.body.replace("`", "")
+        for label, pattern in FORBIDDEN_NOTE_PATTERNS.items():
+            match = re.search(pattern, prose_for_forbidden_scan, re.I)
+            if match:
+                problems.append(f"remove {label}: {match.group(0)!r}")
+        # As for v1.1.0 and v1.1.1: the only number a bullet may carry is the version.
+        numbers = set(re.findall(r"\d+(?:\.\d+)*", self.body))
+        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        if numbers - set(versions):
+            problems.append(f"the notes carry numbers other than the version: "
+                            f"{sorted(numbers - set(versions))!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v112_heading_and_version_are_the_bump(self):
+        """Rivals: a heading left at 1.1.1 or written as 1.1.20/1.2; ``APP_VERSION`` not
+        bumped, or bumped to something the heading does not say."""
+        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        heading = _changelog_sections(self.text)[0][0]
+        self.assertEqual(versions, [heading],
+                         f"the staged heading is v{heading}; APP_VERSION is {versions!r}")
+        self.assertEqual(heading, "1.1.2")
+
+    def test_v112_the_quoted_status_is_the_loading_line_the_fix_covers(self):
+        """The one quote, "조회 중…", must be ``TR["ko"]["loading"]`` exactly — the global
+        status line (no provider mark) that the short-content gate drives through the
+        production adapter.  Rivals: a quote that drifted from the on-screen text; a second
+        quote added without a tie; the quote naming a status the gate does not cover (e.g.
+        ``scanning``, "사용량을 기다리는 중…")."""
+        quotes = re.findall(r'"([^"]+)"', self.body)
+        loading = _tr_table()["ko"].get("loading")
+        self.assertEqual(quotes, [loading],
+                         f"the v1.1.2 notes must quote exactly TR['ko']['loading'] "
+                         f"({loading!r}); got {quotes!r}")
+
+    def test_v112_single_gauge_line_is_measured_as_drawn_and_the_display_widens(self):
+        """"macOS에서 사용량 표시에 게이지가 하나뿐이면 끝(리셋까지 남은 시간)이 잘리던 문제를
+        고쳤습니다. 이제 표시가 내용에 맞춰 넓어집니다."
+
+        "끝(리셋까지 남은 시간)": ``summary_lines`` appends the reset after the gauge
+        (``main = list(main) + [(SUMMARY_SEP, 'sub')] + inline``) only under
+        ``_summary_gauge_count(usable) == 1``.  "고쳤습니다": ``roam_summary_text`` takes
+        ``need`` from the unfolded lines of ``summary_lines(groups, measure, float('inf'),
+        measure_sub)`` — the inlined line included — each in the font it is drawn in
+        (``F_SUMMARY_SUB`` only for an all-``sub`` line), and no longer measures
+        ``roam_summary_runs``' two lines on its own (the defect); the fold safety net is
+        exact too (``_pill_text_budget`` returns the pill's text area with no
+        ``SUMMARY_MIN_W`` floor).  "내용에 맞춰 넓어집니다": ``need`` goes to the hook,
+        ``_pill_budget_for`` records it through ``_apply_pill_width``, and ``geom``'s W
+        takes ``want + 2 * SUMMARY_EDGE``.  "macOS에서": the Windows port already measured
+        the unfolded lines with ``cp.summary_lines(..., float("inf"), ...)``.  Gates:
+        ``SingleGaugeLineFitsItsPillTests``, ``SingleGaugeStaysOneLineTests``,
+        ``WindowDoesNotClipTests``, ``FoldBudgetIsThePillTextAreaTests``.
+
+        Rivals: the old ``need`` (main and reset line measured before inlining); the probe
+        measuring every line at 11pt or picking the font per run; the budget floor kept."""
+        problems: list[str] = []
+        bullet = self._bullet(r"게이지")
+        if not _has_all(bullet, (r"macOS", r"게이지[가를]?\s*하나", r"남은\s*시간", r"잘리던",
+                                 r"고쳤습니다", r"내용에\s*맞춰\s*넓어")):
+            problems.append("bullet 1 must say macOS, one gauge, the remaining time at the end "
+                            "was cut, it is fixed, and the display now widens to its content")
+
+        lines_fn = _module_def(APP_SOURCE, "summary_lines")
+        inline_ifs = [n for n in ast.walk(lines_fn) if isinstance(n, ast.If)
+                      and "_summary_gauge_count(usable) == 1" in ast.unparse(n.test)]
+        appends = [n for n in ast.walk(lines_fn) if isinstance(n, ast.Assign)
+                   and ast.unparse(n) == "main = list(main) + [(SUMMARY_SEP, 'sub')] + inline"]
+        if len(inline_ifs) != 1 or not appends or not any(
+                a in list(ast.walk(inline_ifs[0])) for a in appends):
+            problems.append("summary_lines must append the reset after the gauge only when the "
+                            "block has one gauge")
+
+        text_fn = _nested_function(self.gui, "roam_summary_text")
+        probes = [n for n in ast.walk(text_fn) if isinstance(n, ast.For)
+                  and isinstance(n.iter, ast.Call) and ast.unparse(n.iter.func) == "summary_lines"
+                  and len(n.iter.args) >= 3 and ast.unparse(n.iter.args[2]) == "float('inf')"]
+        if len(probes) != 1:
+            problems.append(f"roam_summary_text must take need from one unfolded summary_lines "
+                            f"probe (budget float('inf')); found {len(probes)}")
+        else:
+            probe = probes[0]
+            fonts = [n for n in ast.walk(probe) if isinstance(n, ast.IfExp)
+                     and ast.unparse(n.body) == "F_SUMMARY_SUB"
+                     and ast.unparse(n.orelse) == "F_SUMMARY"
+                     and re.fullmatch(r"all\(\(k == 'sub' for _?\w*, k in line\)\)",
+                                      ast.unparse(n.test))]
+            needs = [n for n in ast.walk(probe) if isinstance(n, ast.Assign)
+                     and ast.unparse(n.targets[0]) == "need" and "_stable_w" in ast.unparse(n.value)]
+            if not fonts or not needs:
+                problems.append("the probe must measure each line with _stable_w in the font "
+                                "that line is drawn in (9.5pt only when every run is 'sub')")
+        if _calls_to(text_fn, "roam_summary_runs"):
+            problems.append("roam_summary_text still measures roam_summary_runs' lines itself")
+        if not any(ast.unparse(c) == "hook(need)" for c in ast.walk(text_fn)
+                   if isinstance(c, ast.Call)):
+            problems.append("roam_summary_text must hand need to the pill-width hook")
+        budget_fn = _nested_function(self.gui, "_pill_text_budget")
+        returns = [ast.unparse(n.value) for n in ast.walk(budget_fn) if isinstance(n, ast.Return)]
+        if returns != ["room - 2 * PILL_PAD - SUMMARY_LOGO_W"]:
+            problems.append(f"_pill_text_budget must return the pill's text area unfloored; "
+                            f"returns {returns!r}")
+        hook_fn = _nested_function(self.gui, "_pill_budget_for")
+        if not _calls_to(hook_fn, "_apply_pill_width") or not _calls_to(hook_fn, "_pill_text_budget"):
+            problems.append("_pill_budget_for must record the width and return the budget")
+        geom = _nested_function(self.gui, "geom")
+        w_args = [ast.unparse(a) for n in ast.walk(geom) if isinstance(n, ast.Assign)
+                  and ast.unparse(n.targets[0]) == "w" and isinstance(n.value, ast.Call)
+                  and ast.unparse(n.value.func) == "max" for a in n.value.args]
+        if "want + 2 * SUMMARY_EDGE" not in w_args:
+            problems.append(f"geom's W must follow the recorded pill width; max args {w_args!r}")
+
+        port = _module_tree(WIN_APP)
+        port_probe = [n for n in ast.walk(port) if isinstance(n, ast.Call)
+                      and ast.unparse(n.func) == "cp.summary_lines" and len(n.args) >= 3
+                      and ast.unparse(n.args[2]) == "float('inf')"]
+        if not port_probe:
+            problems.append("'macOS에서' rests on the Windows port already measuring the "
+                            "unfolded lines; it no longer does")
+        missing = {"SingleGaugeLineFitsItsPillTests", "SingleGaugeStaysOneLineTests",
+                   "WindowDoesNotClipTests", "FoldBudgetIsThePillTextAreaTests"} - _class_names(
+                       SINGLE_GAUGE_GATE)
+        if missing:
+            problems.append(f"the behavioural gates bullet 1 rests on are gone: {sorted(missing)!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v112_tiny_pet_short_text_stays_inside_the_window(self):
+        """"macOS에서 펫을 아주 작게 줄였을 때 사용량 표시의 테두리나 "조회 중…" 같은 안내 문구가
+        창 밖으로 잘리던 문제도 고쳤습니다. 업데이트만 받으면 되고 따로 할 일은 없습니다."
+
+        "고쳤습니다": ``geom``'s W has a ``SUMMARY_MIN_W + 2 * SUMMARY_EDGE`` term — built
+        from the same two names ``roam_pill_rect`` floors the pill's room with
+        (``max(SUMMARY_MIN_W, W - 2 * SUMMARY_EDGE)``), so the smallest pill always fits the
+        window.  "따로 할 일은 없습니다": that term sits directly in the ``max`` — under no
+        condition — and ``geom`` reads no setting.  Gate: ``ShortContentStaysInTheWindowTests``.
+
+        Rivals: no W floor (the pill sticks out at scale 0.3); a floor of ``SUMMARY_MIN_W``
+        alone (still 2·EDGE short); the floor behind a setting."""
+        problems: list[str] = []
+        bullet = self._bullet(r"아주\s*작게")
+        if not _has_all(bullet, (r"macOS", r"펫을\s*아주\s*작게", r"테두리", r"창\s*밖으로",
+                                 r"잘리던", r"고쳤습니다", r"업데이트만\s*받으면",
+                                 r"따로\s*할\s*일은\s*없")):
+            problems.append("bullet 2 must say macOS, a very small pet, the border or status "
+                            "text cut by the window, fixed, and nothing to do")
+        geom = _nested_function(self.gui, "geom")
+        assigns = [n for n in ast.walk(geom) if isinstance(n, ast.Assign)
+                   and ast.unparse(n.targets[0]) == "w" and isinstance(n.value, ast.Call)
+                   and ast.unparse(n.value.func) == "max"]
+        if len(assigns) != 1:
+            problems.append(f"geom must compute W in one max(...); found {len(assigns)}")
+        else:
+            args = [ast.unparse(a) for a in assigns[0].value.args]
+            if "SUMMARY_MIN_W + 2 * SUMMARY_EDGE" not in args:
+                problems.append(f"geom's W lacks the SUMMARY_MIN_W + 2 * SUMMARY_EDGE floor: {args!r}")
+            if _guards(geom, assigns[0]):
+                problems.append("geom's W floor must not sit behind a condition")
+        if {"RUNTIME", "cfg", "load_config"} & _names(geom):
+            problems.append("geom must not read a setting")
+        rect = _module_def(APP_SOURCE, "roam_pill_rect")
+        rooms = [ast.unparse(n.value) for n in ast.walk(rect) if isinstance(n, ast.Assign)
+                 and ast.unparse(n.targets[0]) == "room"]
+        if rooms != ["max(SUMMARY_MIN_W, W - 2 * SUMMARY_EDGE)"]:
+            problems.append(f"the W floor must mirror roam_pill_rect's room; room is {rooms!r}")
+        if "ShortContentStaysInTheWindowTests" not in _class_names(SINGLE_GAUGE_GATE):
+            problems.append("the behavioural gate bullet 2 rests on is gone: "
+                            "ShortContentStaysInTheWindowTests")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v112_windows_ships_the_same_version_with_nothing_changed(self):
+        """"Windows도 같은 1.1.2로 나오지만 바뀐 점은 없습니다."
+
+        "같은 1.1.2로": ``APP_VERSION`` and ``windows/build_win.py``'s ``app_version``
+        reading it.  "바뀐 점은 없습니다": every function the release changed (``geom``,
+        ``_pill_text_budget``, ``roam_summary_text``) is a closure inside ``run_gui``, not a
+        module-level name, and no Windows module names ``run_gui`` — so nothing the release
+        changed can run on Windows.  By hand, 2026-11-18: ``git diff v1.1.1 1c2ab4b --
+        windows/`` is empty (see the module docstring).
+
+        Rivals: a version in the bullet other than ``APP_VERSION``; one of the changed
+        functions hoisted to module level where the port could reach it."""
+        problems: list[str] = []
+        bullet = self._bullet(r"Windows")
+        named = re.search(r"Windows도\s*같은\s*(\d+(?:\.\d+)+)\s*로", bullet)
+        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        if not named or versions != [named.group(1)]:
+            problems.append(f"the bullet says Windows ships {named and named.group(1)!r}; "
+                            f"APP_VERSION is {versions!r}")
+        if not re.search(r"바뀐\s*점은\s*없", bullet):
+            problems.append("bullet 3 must say nothing changed on Windows")
+        win_version = _module_defs(WIN_BUILD).get("app_version")
+        if win_version is None or not any("APP_VERSION" in s for s in _code_strings([win_version])):
+            problems.append("windows/build_win.py's app_version must read APP_VERSION")
+        top_level = set(_module_defs(APP_SOURCE))
+        for name in ("geom", "_pill_text_budget", "roam_summary_text"):
+            try:
+                _nested_function(self.gui, name)
+            except AssertionError as exc:
+                problems.append(str(exc))
+            if name in top_level:
+                problems.append(f"{name} is module-level; the port could reach it")
+        for path in (WIN_APP, WIN_UPDATE, WIN_BUILD, WIN_CORE):
+            if "run_gui" in _attrs_and_names(path):
+                problems.append(f"{path.name} names run_gui")
         self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
 
 
