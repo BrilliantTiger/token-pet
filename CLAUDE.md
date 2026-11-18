@@ -856,6 +856,11 @@ Every number on the pill comes from a server, per provider and per data source:
   Anthropic and OpenAI cost APIs bucket by UTC day; a local-midnight start would cut a
   bucket in half.
 
+- **Gemini, Antigravity sign-in** (macOS only) — `fetch_gemini_usage()`, which runs the
+  Antigravity CLI as `agy -p /usage --output-format json` (`GEMINI_AGY_ARGS`) and shows the
+  percentages it returns. There is no HTTP client, no API-key mode and no token of ours: the
+  CLI holds the sign-in. See [Gemini usage](#gemini-usage-runs-agy--p-usage-and-never-a-signed-out-agy).
+
 Both Admin keys (`admin_key`, `openai_admin_key`) are stored in plain text in
 `~/.claude_pet.json`, and the debug log carries status codes and exception class names
 only, never key bytes.
@@ -863,7 +868,7 @@ only, never key bytes.
 **There is no fallback to the logs.** With no server value the pill shows a status:
 `token_expired` when the server rejected the OAuth token (401/403 — whatever the logs
 hold), onboarding (`onb_install` / `onb_login`) when there is no Claude OAuth token,
-`loading` / `scanning` while waiting for the first answer, `no_providers` when both
+`loading` / `scanning` while waiting for the first answer, `no_providers` when all
 providers are hidden. Codex has the same expiry status: `fetch_codex_usage()` sets
 `CODEX_STATUS["auth_error"]` on 401/403 (and clears it on a success, or when there is no Codex
 token at all — no credentials is the "no row, no status" case, not expiry), and
@@ -1012,6 +1017,72 @@ Three changes to refuse:
 short-circuits TCC (a sandboxed `ls ~/Downloads` made no `tccd` request; the same `ls`
 unsandboxed did), so deny the protected locations and read the kernel's `Sandbox: … deny` log
 lines.
+
+### Gemini usage runs `agy -p /usage`, and never a signed-out `agy`
+
+Gemini (since v1.2.0, macOS only — `fetch_gemini_usage()` returns at once on any other
+platform, and the Windows port does not call it) is read by running the Antigravity CLI:
+`agy -p /usage --output-format json`, no shell, in the private folder `gemini_cli_cwd()`,
+under `GEMINI_AGY_TIMEOUT`. `parse_agy_usage()` turns the answer into rows of the usual shape
+`(label, pct_used, reset_dt, None)`: row 0 is `"gemini"` (the most-used Gemini bucket), then
+one `gemini_group:<bucket id>` per bucket; a bucket marked `"disabled": true` is left out.
+The gauges are `GEMINI_GAUGES = ("gemini", "limits", "group")`, filtered by
+`filter_gemini_rows()` against `gemini_gauges`, and `gemini_summary_segment()` returns the
+pill segment — **or nothing**. Gemini has no status segment: without rows its line is absent.
+
+It runs apart from the main refresh, on its own daemon thread (`start_gemini_refresh()`), and
+only while Gemini is shown. The rules, each of which exists because the opposite shipped or
+was measured:
+
+- **Cadence.** At most one automatic run per `GEMINI_AUTO_SEC` (5 minutes). A click on the
+  pet or pill (`allow_keychain_prompt()`) asks for a run now, but never within
+  `GEMINI_CLICK_MIN_SEC` of the last one. After a transient failure the previous rows are kept
+  for `GEMINI_KEEP_SEC`.
+- **A signed-out `agy` is not run.** The user's words: "로그인 안 하면 표시 안 하면 되는 거야!
+  왜 로그인을 재시도해". Before running, `_gemini_login_marker()` asks whether a sign-in
+  exists: `security find-generic-password -s gemini -a antigravity` **without `-w` or `-g`**
+  (exit 0 = present, 44 = absent, anything else = unknown — that cycle is skipped and the last
+  rows stay), plus whether the CLI's fallback file
+  `~/.gemini/antigravity-cli/antigravity-oauth-token` exists. Nothing secret is read: the
+  marker is `(item present, the item's "mdat" line, (file exists, mtime))`. No item and no file
+  → zero runs, no line, and, when `agy` is installed, the right-click menu offers
+  `menu_gemini_login`
+  (`compute_gemini_onboard_state()` → `start_gemini_login()`, which opens Terminal with plain
+  `agy`). A locked keychain is not asked; with no earlier answer nothing is run at all.
+  `agy` not installed → `not_installed`, decided before `security` is called.
+- **The fingerprint stops it and restarts it.** A keychain item can exist and still be dead
+  (signed out with the item left behind, an expired refresh token). When a run asks for a
+  sign-in — judged from stderr only (`_agy_wants_login()`), and the process is ended at once —
+  the marker of that moment is stored as `auth_failed_marker` and automatic runs stop. They
+  resume when the marker changes (the user signed in: `mdat` moved, or the fallback file
+  appeared, changed, or vanished) or when the user clicks. Choosing the menu's sign-in item is not itself
+  a retry signal.
+- **`SSH_*` is removed from the child's environment, and the browser is blocked by a fake
+  `open`** (`_agy_env()`). A signed-out `agy` opens the default browser with `open <url>`. The
+  first attempt to stop that was `SSH_TTY=1`, and it broke everything: **observed** 2026-11-18,
+  one Mac, agy 1.5.11 — with any SSH variable set the CLI logs "Using file-based token storage
+  because SSH session detected", ignores the keychain, and answers "Authentication required"
+  for a signed-in user; the same minute without it, `SUCCESS`. So the environment is a copy of
+  `os.environ` with `SSH_CLIENT` / `SSH_TTY` / `SSH_CONNECTION` deleted, `NO_COLOR=1`, and
+  `PATH` prefixed with a private 0700 folder holding one `open` that is `#!/bin/sh` + `exit 0`
+  (`_gemini_fake_open_dir()`). The folder and file are re-checked immediately before every
+  run and made again if missing or altered — without them `PATH` falls through to
+  `/usr/bin/open`. If they cannot be made, `agy` is not run. The app's own environment is never
+  changed, and `start_gemini_login()` uses neither — there the browser must open. Do not put
+  `SSH_TTY` back, and do not add the fake `open` to the menu path.
+- **The process is its own group and is always reaped** (`_agy_exec()`:
+  `start_new_session=True`, `os.killpg`, then `wait`). The limit is measured with
+  `time.monotonic()`.
+
+Not observed: a signed-out `agy` actually stopping at the fake `open` on this Mac (signing
+out was off-limits; it rests on the Antigravity side's isolated run), other agy versions, and
+the bundled app's shorter `PATH`. `ANTIGRAVITY_APP_DATA_DIR` is not consulted — the CLI does
+not use it for the token file.
+
+**[NEVER]** read the keychain item's secret (`-w`, `-g`) or the fallback file's contents, run
+`/logout`, or run the real `agy`, `security` or `/usr/bin/open` from a test.
+`tests/test_gemini_usage.py`, `tests/test_gemini_agy_cadence.py` and `tests/test_gemini_pill.py`
+use an emulated child and a `security` stand-in.
 
 ### Timing: what recomputes when
 
@@ -1329,6 +1400,18 @@ shapes ("42 rows, 3 files"), never contents.
 > AGENTS.md §0 for the exact condition before relying on it, rather than assuming this
 > paragraph restates it in full.
 
+**Version numbers are `major.minor.fix`, three parts, since v1.2.0** (user, 2026-11-18:
+"버전 관리는 이제 major, minor, fix/build 이렇게 가자"):
+
+- **major** — compatibility breaks: the app's name or bundle ID, the settings format, a
+  dropped OS version, the update path.
+- **minor** — a new feature the user can see.
+- **fix/build** — fixes, security, rebuilds, wording.
+
+Raising a part resets every part below it to 0. A release carrying both a feature and fixes
+is a minor. macOS and Windows carry the same number (`windows/build_win.py` reads
+`APP_VERSION`), and the tag is `vX.Y.Z`.
+
 **Version and changelog can be out of step, and that is meaningful.** `RELEASE_NOTES.md`
 may already contain a section for a version that `APP_VERSION` has not yet reached. That
 is the expected state after an implementation phase and before an authorized release: the
@@ -1593,8 +1676,8 @@ in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
    is single-architecture, and its deployment target is this Mac's macOS). `release.sh`
    checks the universal one with `lipo -archs`, and both builds' deployment target against
    12.0, and refuses otherwise.
-5. **Tag and push.** The tag is the version with a `v` prefix — `vX.Y` for `APP_VERSION`
-   `"X.Y"` — since the tag is what the updater compares against.
+5. **Tag and push.** The tag is the version with a `v` prefix — `vX.Y.Z` for `APP_VERSION`
+   `"X.Y.Z"` — since the tag is what the updater compares against.
 
    **[ASK] Push the tag or publish the release only on the user's explicit, per-instance
    authorization.** This is the step that makes the release real: `check_github_update()`
