@@ -1,4 +1,43 @@
-"""Static release-preparation gates for v1.1.2.
+"""Static release-preparation gates for v1.2.0.
+
+Status as of 2026-11-18 (Verifier gemini-tests-v2): v1.1.2 is published — lightweight tag
+``v1.1.2`` on origin, pointing at ea8922d; GitHub release "ClaudePet v1.1.2" (not a draft,
+published 2026-11-18T04:33:06Z).  ``git show v1.1.2:RELEASE_NOTES.md`` is byte-identical to
+this tree's file (29036 bytes), and the live release body carries the section's third bullet
+verbatim.  So everything from the ``**v1.1.2**`` heading to the end of RELEASE_NOTES.md
+(24628 bytes) is frozen and pinned by SHA256 (``PUBLISHED_V112_AND_OLDER_SHA256``), beside
+the older pins.  The single unpublished section above it is ``**v1.2.0**``, and
+``APP_VERSION`` is ``"1.2.0"`` — the bump the user asked for (2026-11-18: "잼미니 구현 빨리
+끝내고 릴리즈해 그리고 버전 관리는 이제 major, minor, fix/build 이렇게 가자"; a new feature is
+a minor, hence 1.2.0, the same number on macOS and Windows).
+
+``StagedV112NotesFormatTests`` became ``PublishedV112NotesContractTests`` with its method
+names unchanged; three assertions were re-scoped because they compared against "the current
+version" (the numbers-are-the-version check, the heading check, and "Windows도 같은 1.1.2로")
+— exactly the re-scope v1.1.1's class received.  Every other v1.1.2 claim still holds in the
+v1.2.0 tree: the Gemini work (TOK-44/47) left ``geom``, ``_pill_text_budget`` and the
+single-gauge measuring inside ``run_gui`` alone.
+
+``StagedV120NotesFormatTests`` holds the v1.2.0 section to CLAUDE.md's release-note format
+and to the source it describes.  The section is not written yet when these tests are
+written (red-before-green), so they pin what the notes must *say and be tied to*, not their
+wording:
+
+* the Gemini usage line — one bullet names Gemini and 사용량, names where the numbers come
+  from (Antigravity or its ``agy`` CLI — 1.2.0 reads only that; the user: "1.2.0은
+  Antigravity만, API 키는 다음"), and says macOS, because ``fetch_gemini_usage`` returns
+  nothing off macOS and the Windows port has no Gemini code;
+* the sign-in menu item — the notes quote ``TR["ko"]["menu_gemini_login"]`` (leading glyph
+  and trailing ellipsis may be dropped), every quoted string is a real Korean UI string,
+  the item exists in all four locales and ``rightMouseDown_`` builds it;
+* "Windows도 같은 1.2.0" against ``APP_VERSION`` and ``windows/build_win.py``;
+* numbers: the version, plus only figures this tree can audit ("4개 언어" against the TR
+  table, "5분" against ``GEMINI_AUTO_SEC``).
+
+The two relaxations made during the Gemini work (the onboarding-suppression condition and
+the single ``find-generic-password`` site rule) are unchanged.
+
+The paragraphs below are the v1.1.2 module's docstring, kept as it was reviewed.
 
 Status as of 2026-11-18 (Verifier pill-width-tests): v1.1.1 is published — lightweight tag
 ``v1.1.1`` on origin, pointing at d1b38bc; GitHub release "ClaudePet v1.1.1" on
@@ -447,6 +486,13 @@ PUBLISHED_V110_AND_OLDER_SHA256 = (
 # one pinned here.  Identical in the working tree after the v1.1.2 section was staged above
 # it (1c2ab4b, 2026-11-18).  The v1.1.0 suffix is unchanged at 23404 bytes across these
 # trees, so the v1.1.1 section was appended above it and nothing below moved.
+# v1.1.2-and-older: from the ``**v1.1.2**`` heading through EOF, computed from the *tag*'s
+# tree (`git show v1.1.2:RELEASE_NOTES.md`; lightweight tag -> ea8922d, 29036 bytes, of which
+# the suffix is 24628).  Identical in the working tree before the v1.2.0 section is staged
+# above it (dev e4d9901, 2026-11-18); `gh release view v1.1.2` is not a draft.
+PUBLISHED_V112_AND_OLDER_SHA256 = (
+    "88a9cdf2a73ae3a0cfe968f2c5ff4debe7474fb657577d192226d92a84675e9c"
+)
 PUBLISHED_V111_AND_OLDER_SHA256 = (
     "cfb8295ee10d8b796e2f15e03feff0c5e49ecf500ff0dc2c29c2cd7d2a30886b"
 )
@@ -894,28 +940,29 @@ def _guards(root: ast.AST, node: ast.AST) -> list[ast.AST]:
 
 
 class VersionAndPinContractTests(unittest.TestCase):
-    def test_v112_version_and_final_source_pins_propagate(self):
+    def test_v120_version_and_final_source_pins_propagate(self):
         problems: list[str] = []
 
         versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
-        if versions != ["1.1.2"]:
-            problems.append(f"APP_VERSION must be one literal '1.1.2', got {versions!r}")
+        if versions != ["1.2.0"]:
+            problems.append(f"APP_VERSION must be one literal '1.2.0', got {versions!r}")
 
         verifier_text = RELEASE_VERIFIER.read_text(encoding="utf-8")
-        if "--expect-version 1.1.2" not in verifier_text:
-            problems.append("verify_release_artifact.py usage must show --expect-version 1.1.2")
+        if "--expect-version 1.2.0" not in verifier_text:
+            problems.append("verify_release_artifact.py usage must show --expect-version 1.2.0")
         # A bare version-number substring check would false-positive here: "1.0" is a
         # literal prefix of "1.0.1" (as "0.26" was of "0.26.1", and "1.1" is of "1.1.0"), so a naive
         # `f"--expect-version {stale}" in text` would flag the very string this test just
         # required above. The negative lookahead excludes exactly that case — it only
         # fires on a *bare* stale version, never on it being a prefix of the current one.
-        # "1.1.3", "1.2", "1.2.0" and "1.1.20" are the plausible wrong bumps ("1.1.20" also
-        # satisfies the plain substring check above, so only this list catches it); the
-        # rest are the versions before ("1.1" is a bare prefix of "1.1.2", so the lookahead
-        # below keeps it from firing on the current version).
-        for stale in ("1.1.1", "1.1.0", "1.0.1", "1.0.0", "0.26.1", "0.26", "0.25", "0.24",
-                      "1.0", "1.1", "1.1.3", "1.2", "1.2.0", "1.1.20"):
-            if re.search(rf"--expect-version {re.escape(stale)}(?!\.\d)", verifier_text):
+        # "1.1.3", "1.2", "1.2.1", "1.3.0", "2.0.0" and "1.2.00" are the plausible wrong
+        # bumps ("1.2.00" also satisfies the plain substring check above, so only this list
+        # catches it; "1.2" is the two-part spelling the old scheme would have used — the
+        # lookahead below keeps it from firing on "1.2.0"); the rest are the versions before.
+        for stale in ("1.1.2", "1.1.1", "1.1.0", "1.0.1", "1.0.0", "0.26.1", "0.26", "0.25",
+                      "0.24", "1.0", "1.1", "1.1.3", "1.2", "1.2.1", "1.3.0", "2.0.0",
+                      "1.2.00"):
+            if re.search(rf"--expect-version {re.escape(stale)}(?!\.?\d)", verifier_text):
                 problems.append(
                     f"verify_release_artifact.py still advertises --expect-version {stale}"
                 )
@@ -1055,13 +1102,25 @@ class PublishedNotesImmutabilityTests(unittest.TestCase):
             "published v1.1.1-and-older bytes were rewritten or dropped",
         )
 
-    def test_v112_is_the_only_unpublished_heading_and_sits_directly_above_v111(self):
+    def test_published_v112_and_older_bytes_are_untouched(self):
+        raw = RELEASE_NOTES.read_bytes()
+        published_marker = b"**v1.1.2**"
+        self.assertEqual(raw.count(published_marker), 1, "published v1.1.2 heading changed")
+        published_suffix = raw[raw.index(published_marker) :]
+        self.assertEqual(
+            hashlib.sha256(published_suffix).hexdigest(),
+            PUBLISHED_V112_AND_OLDER_SHA256,
+            "published v1.1.2-and-older bytes were rewritten or dropped",
+        )
+
+    def test_v120_is_the_only_unpublished_heading_and_sits_directly_above_v112(self):
         """Rivals this heading-shape regex must not miss: a stale two-part-only pattern
         (``\\d+\\.\\d+``) silently fails to match a three-part heading like
         ``**v0.26.1**`` at all — a regex bug that would have made every assertion below
         vacuously pass against an empty ``headings`` list rather than catching a
         misplaced or duplicated heading. The pattern below allows an optional third
-        component for exactly this reason — and ``**v1.1.2**`` has one too."""
+        component for exactly this reason — and ``**v1.2.0**`` has one too (a two-part
+        ``**v1.2**`` heading is a wrong spelling of this release and fails below)."""
         text = RELEASE_NOTES.read_text(encoding="utf-8")
         changelog = "### 📝 변경 내역 / Changelog"
         self.assertEqual(text.count(changelog), 1)
@@ -1070,11 +1129,11 @@ class PublishedNotesImmutabilityTests(unittest.TestCase):
         self.assertTrue(headings, "changelog has no release heading")
         self.assertEqual(
             headings[:2],
-            ["1.1.2", "1.1.1"],
-            "the unpublished v1.1.2 section must sit directly above the published "
-            f"v1.1.1 heading, with nothing newer above it; got {headings[:2]!r}",
+            ["1.2.0", "1.1.2"],
+            "the unpublished v1.2.0 section must sit directly above the published "
+            f"v1.1.2 heading, with nothing newer above it; got {headings[:2]!r}",
         )
-        self.assertEqual(headings.count("1.1.2"), 1, "v1.1.2 heading must appear once")
+        self.assertEqual(headings.count("1.2.0"), 1, "v1.2.0 heading must appear once")
 
 
 class PublishedV023NotesContractTests(unittest.TestCase):
@@ -3687,8 +3746,12 @@ class PublishedV111NotesContractTests(unittest.TestCase):
         directly below the staged one (while staged this said heading == ``APP_VERSION``;
         that check now lives in ``StagedV112NotesFormatTests``)."""
         headings = [v for v, _ in _changelog_sections(self.text)]
-        self.assertEqual(headings[1:2], ["1.1.1"],
-                         f"v1.1.1 must be the newest published section; got {headings[:3]!r}")
+        # Re-scoped again for v1.2.0 (Verifier gemini-tests-v2, 2026-11-18): once v1.1.2 was
+        # published this is no longer the newest published section — it sits directly below it.
+        self.assertIn("1.1.2", headings)
+        after = headings[headings.index("1.1.2") + 1:headings.index("1.1.2") + 2]
+        self.assertEqual(after, ["1.1.1"],
+                         f"v1.1.1 must sit directly below v1.1.2; got {headings[:4]!r}")
 
     def test_v111_keychain_dialogs_stop_and_a_locked_keychain_is_not_read(self):
         """"macOS에서 키체인이나 암호를 묻는 창이 반복해서 뜨던 문제를 고쳤습니다. 이제 키체인이
@@ -3968,6 +4031,9 @@ class PublishedV111NotesContractTests(unittest.TestCase):
 
 SINGLE_GAUGE_GATE = REPO / "tests" / "test_single_gauge_pill_width.py"
 WIN_CORE = REPO / "windows" / "win_core.py"
+GEMINI_USAGE_GATE = REPO / "tests" / "test_gemini_usage.py"
+GEMINI_CADENCE_GATE = REPO / "tests" / "test_gemini_agy_cadence.py"
+GEMINI_PILL_GATE = REPO / "tests" / "test_gemini_pill.py"
 
 
 def _class_names(path: Path) -> set[str]:
@@ -3979,9 +4045,21 @@ def _attrs_and_names(path: Path) -> set[str]:
     return {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)} | _names(tree)
 
 
-class StagedV112NotesFormatTests(unittest.TestCase):
-    """The unpublished v1.1.2 section, held to CLAUDE.md's release-note format rule and to
-    the source it describes, one test per bullet (see the module docstring for the list).
+class PublishedV112NotesContractTests(unittest.TestCase):
+    """The published v1.1.2 section: its bytes are frozen above, and the source must still
+    back what those bytes told users.
+
+    This is the v1.2.0 release's former ``StagedV112NotesFormatTests`` with its method names
+    unchanged — its status moved from staged to published when the ``v1.1.2`` tag and GitHub
+    release went out.  Three assertions were re-scoped because they compared against "the
+    current version": the numbers-are-the-version check in the format test,
+    ``test_v112_heading_and_version_are_the_bump`` (now: the section is headed 1.1.2 and
+    sits directly below the staged section), and "Windows도 같은 1.1.2로" in the Windows test
+    (the ``windows/build_win.py`` tie beside it is still a property of this tree).  The
+    "APP_VERSION is the heading" check lives on in ``StagedV120NotesFormatTests``.
+
+    (As staged:) the unpublished v1.1.2 section, held to CLAUDE.md's release-note format rule
+    and to the source it describes, one test per bullet (see the module docstring).
 
     The section is staged text until the tag is pushed, so correcting it is ordinary work.
     The ties are about the named mechanisms and name the behavioural gates by class — the
@@ -4027,7 +4105,7 @@ class StagedV112NotesFormatTests(unittest.TestCase):
                 problems.append(f"remove {label}: {match.group(0)!r}")
         # As for v1.1.0 and v1.1.1: the only number a bullet may carry is the version.
         numbers = set(re.findall(r"\d+(?:\.\d+)*", self.body))
-        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        versions = ["1.1.2"]
         if numbers - set(versions):
             problems.append(f"the notes carry numbers other than the version: "
                             f"{sorted(numbers - set(versions))!r}")
@@ -4036,11 +4114,11 @@ class StagedV112NotesFormatTests(unittest.TestCase):
     def test_v112_heading_and_version_are_the_bump(self):
         """Rivals: a heading left at 1.1.1 or written as 1.1.20/1.2; ``APP_VERSION`` not
         bumped, or bumped to something the heading does not say."""
-        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
-        heading = _changelog_sections(self.text)[0][0]
-        self.assertEqual(versions, [heading],
-                         f"the staged heading is v{heading}; APP_VERSION is {versions!r}")
-        self.assertEqual(heading, "1.1.2")
+        # Re-scoped on publication: headed 1.1.2, the second section, directly below the
+        # staged one (the "APP_VERSION is the heading" check moved to StagedV120NotesFormatTests).
+        headings = [h for h, _ in _changelog_sections(self.text)]
+        self.assertEqual(headings[1:2], ["1.1.2"],
+                         f"v1.1.2 must be the newest published section; got {headings[:3]!r}")
 
     def test_v112_the_quoted_status_is_the_loading_line_the_fix_covers(self):
         """The one quote, "조회 중…", must be ``TR["ko"]["loading"]`` exactly — the global
@@ -4203,10 +4281,10 @@ class StagedV112NotesFormatTests(unittest.TestCase):
         problems: list[str] = []
         bullet = self._bullet(r"Windows")
         named = re.search(r"Windows도\s*같은\s*(\d+(?:\.\d+)+)\s*로", bullet)
-        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
-        if not named or versions != [named.group(1)]:
+        # Re-scoped on publication: the bullet names the version of *its* section.
+        if not named or named.group(1) != "1.1.2":
             problems.append(f"the bullet says Windows ships {named and named.group(1)!r}; "
-                            f"APP_VERSION is {versions!r}")
+                            f"the section is v1.1.2")
         if not re.search(r"바뀐\s*점은\s*없", bullet):
             problems.append("bullet 3 must say nothing changed on Windows")
         win_version = _module_defs(WIN_BUILD).get("app_version")
@@ -4223,6 +4301,218 @@ class StagedV112NotesFormatTests(unittest.TestCase):
         for path in (WIN_APP, WIN_UPDATE, WIN_BUILD, WIN_CORE):
             if "run_gui" in _attrs_and_names(path):
                 problems.append(f"{path.name} names run_gui")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+
+
+KO_GEMINI_LOGIN_LABEL = "🔑 Gemini 로그인(agy)…"
+
+
+class StagedV120NotesFormatTests(unittest.TestCase):
+    """The unpublished v1.2.0 section, held to CLAUDE.md's release-note format rule and to
+    the source it describes (see the module docstring for the list).
+
+    The section is staged text until the tag is pushed, so correcting it is ordinary work.
+    The behaviour itself is gated in tests/test_gemini_usage.py, test_gemini_agy_cadence.py
+    and test_gemini_pill.py; this class only ties the prose to it, and names those gate
+    classes so deleting one the notes rest on fails here.
+    """
+
+    def setUp(self):
+        text = RELEASE_NOTES.read_text(encoding="utf-8")
+        self.text = text
+        self.visible = _notes_block(text, "**v1.2.0**", "**v1.1.2**")
+        self.top_level, self.nested, self.bullets = _bullet_shape(self.visible)
+        self.body = "\n".join(self.bullets)
+        self.gui = _module_def(APP_SOURCE, "run_gui")
+
+    def _bullets(self, pattern: str) -> list[str]:
+        return [b for b in self.bullets if re.search(pattern, b)]
+
+    def test_v120_notes_follow_the_three_bullet_450_character_format(self):
+        """Numbers: the version, and beyond it only figures this tree can audit —
+        "4개 언어" (the TR table has exactly four locales) and "5분" (``GEMINI_AUTO_SEC``
+        is 300).  Anything else is a number nobody can check from the release commit.
+        Rivals: "30초"/"60초" style internals; a locale count that is not the table's;
+        a refresh interval that is not the constant's."""
+        problems: list[str] = []
+        if len(self.top_level) != 3:
+            problems.append(f"v1.2.0 must have exactly 3 top-level bullets, got {len(self.top_level)}")
+        if self.nested:
+            problems.append("v1.2.0 must not contain nested bullets")
+        normalized_body = " ".join(self.visible.split())
+        if len(normalized_body) > 450:
+            problems.append(f"v1.2.0 Korean body is {len(normalized_body)} Unicode characters; max is 450")
+        for index, bullet in enumerate(self.bullets, 1):
+            if not re.search(r"[가-힣]", bullet):
+                problems.append(f"bullet {index} must be Korean")
+            count = len(_sentences(bullet))
+            if not 1 <= count <= 2:
+                problems.append(f"bullet {index} has {count} sentences; CLAUDE.md allows 1-2")
+        prose_for_forbidden_scan = self.body.replace("`", "")
+        for label, pattern in FORBIDDEN_NOTE_PATTERNS.items():
+            match = re.search(pattern, prose_for_forbidden_scan, re.I)
+            if match:
+                problems.append(f"remove {label}: {match.group(0)!r}")
+
+        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        rest = self.body
+        for version in versions:
+            rest = rest.replace(str(version), " ")
+        locales = len(_tr_table())
+        auto_sec = _one_literal_int(APP_SOURCE, "GEMINI_AUTO_SEC")
+        audited = (
+            (rf"(?<![\d.]){locales}\s*개\s*언어", locales == 4),
+            (rf"(?<![\d.]){auto_sec // 60}\s*분", auto_sec % 60 == 0),
+        )
+        for pattern, holds in audited:
+            if holds:
+                rest = re.sub(pattern, " ", rest)
+        leftover = sorted(set(re.findall(r"\d+(?:\.\d+)*", rest)))
+        if leftover:
+            problems.append(f"the notes carry numbers this tree cannot audit: {leftover!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v120_heading_and_version_are_the_bump(self):
+        """Rivals: a heading left at 1.1.2, or written the old two-part way (1.2) or as
+        1.1.3/1.3.0; ``APP_VERSION`` not bumped, or bumped to something the heading does
+        not say."""
+        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        heading = _changelog_sections(self.text)[0][0]
+        self.assertEqual(versions, [heading],
+                         f"the staged heading is v{heading}; APP_VERSION is {versions!r}")
+        self.assertEqual(heading, "1.2.0")
+
+    def test_v120_gemini_usage_comes_from_antigravity_on_macos(self):
+        """The notes tell users the pill now shows Gemini usage.  One bullet must name
+        Gemini and 사용량, name the source (Antigravity or its ``agy`` CLI — the only source
+        1.2.0 reads), and say macOS.
+
+        Ties: ``fetch_gemini_usage`` runs ``GEMINI_AGY_ARGS`` (``-p /usage --output-format
+        json``) and returns before anything else when the platform is not darwin; no Windows
+        module names it; ``show_gemini`` is a runtime default and ``GEMINI_GAUGES`` exists,
+        so the line can be switched on and off; the behavioural gates the sentence rests on
+        exist by name.
+
+        Rivals: notes that promise Gemini through an API key (next release); notes silent
+        on the platform, so a Windows user looks for a line the port cannot draw; a Gemini
+        reader that grew a second source the notes do not mention."""
+        problems: list[str] = []
+        usage = [b for b in self._bullets(r"Gemini") if re.search(r"사용량", b)]
+        if not usage:
+            problems.append("no bullet says Gemini 사용량 is shown")
+        if not any(re.search(r"Antigravity|\bagy\b", b) for b in usage):
+            problems.append("the Gemini usage bullet must name Antigravity (or agy) as the source")
+        if not any(re.search(r"macOS", b) for b in self._bullets(r"Gemini")):
+            problems.append("a Gemini bullet must say macOS — the Windows port has no Gemini reader")
+        for bullet in self._bullets(r"API\s*키"):
+            # An API key may be mentioned only as something that is not in this version —
+            # judged per sentence, so a "아직" elsewhere in the section does not excuse it.
+            for sentence in _sentences(bullet):
+                if re.search(r"API\s*키", sentence) and not re.search(
+                        r"다음|아직|지원\s*예정|않습니다|없습니다", sentence):
+                    problems.append("the notes read as if Gemini works with an API key in "
+                                    f"this version: {sentence!r}")
+
+        defs = _module_defs(APP_SOURCE)
+        fetch = defs.get("fetch_gemini_usage")
+        if fetch is None:
+            problems.append("fetch_gemini_usage is gone")
+        else:
+            first_guard = next((n for n in ast.walk(fetch) if isinstance(n, ast.If)), None)
+            guard_src = ast.unparse(first_guard.test) if first_guard is not None else ""
+            if "sys.platform" not in guard_src or "darwin" not in guard_src:
+                problems.append("fetch_gemini_usage no longer starts with the macOS-only guard")
+        args = _module_literals(APP_SOURCE).get("GEMINI_AGY_ARGS", set())
+        if not {"-p", "/usage", "--output-format", "json"} <= set(args):
+            problems.append(f"GEMINI_AGY_ARGS is not the agy /usage call: {sorted(args)!r}")
+        if "show_gemini" not in _runtime_default_keys(APP_SOURCE):
+            problems.append("show_gemini is not a runtime default")
+        if not _literal_assignments(APP_SOURCE, "GEMINI_GAUGES") and "GEMINI_GAUGES" not in _module_literals(APP_SOURCE):
+            problems.append("GEMINI_GAUGES is gone")
+        for path in (WIN_APP, WIN_UPDATE, WIN_BUILD, WIN_CORE):
+            if "fetch_gemini_usage" in _attrs_and_names(path):
+                problems.append(f"{path.name} names fetch_gemini_usage; the notes say macOS only")
+        for gate, classes in ((GEMINI_USAGE_GATE, ("FetchViaAgyTests", "AgyLoginTests")),
+                              (GEMINI_CADENCE_GATE, ("AutomaticCadenceTests",)),
+                              (GEMINI_PILL_GATE, ("GeminiSegmentTests", "GeminiLoginMenuTests"))):
+            missing = [c for c in classes if c not in _class_names(gate)]
+            if missing:
+                problems.append(f"{gate.name} lacks the gate class(es) {missing!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v120_the_sign_in_menu_item_is_quoted_and_exists_in_four_languages(self):
+        """The notes tell a signed-out user where to sign in: the right-click item.  They
+        must quote ``TR["ko"]["menu_gemini_login"]`` (the leading glyph and the trailing
+        ellipsis may be dropped, as every earlier section does), and every quoted string in
+        the section must be a real Korean UI string under the same two variants.
+
+        Ties: the key exists in en/ko/ja/es and each value names Gemini and agy;
+        ``rightMouseDown_`` builds the item from that key with the ``loginGemini:`` action,
+        behind ``state["gemini_onboard"]``; ``start_gemini_login`` opens Terminal.
+
+        Rivals: a label that drifted from the menu; a quote of something that is not on
+        screen; a locale left without the item; the item built unconditionally."""
+        problems: list[str] = []
+        table = _tr_table()
+
+        def forms(value):
+            out = {value, value.rstrip("…").strip()}
+            head, _, rest = value.partition(" ")
+            if rest and not re.match(r"[0-9A-Za-z가-힣]", head):
+                out.add(rest)
+                out.add(rest.rstrip("…").strip())
+            return out
+
+        label = table["ko"].get("menu_gemini_login")
+        if label != KO_GEMINI_LOGIN_LABEL:
+            problems.append(f"TR['ko']['menu_gemini_login'] is {label!r}, the notes were "
+                            f"reviewed against {KO_GEMINI_LOGIN_LABEL!r}")
+        quotes = re.findall(r'"([^"]+)"', self.body)
+        if not any(q in forms(label or "") for q in quotes):
+            problems.append(f"the notes must quote the menu item {label!r}; quotes: {quotes!r}")
+        known = set()
+        for value in table["ko"].values():
+            if isinstance(value, str):
+                known |= forms(value)
+        for quote in quotes:
+            if quote not in known:
+                problems.append(f"quoted {quote!r} is not a Korean UI string")
+
+        if sorted(table) != ["en", "es", "ja", "ko"]:
+            problems.append(f"the app's locales are {sorted(table)!r}, not the four the release names")
+        for lang in ("en", "ko", "ja", "es"):
+            value = table.get(lang, {}).get("menu_gemini_login")
+            if not isinstance(value, str) or "Gemini" not in value or "agy" not in value:
+                problems.append(f"TR[{lang!r}]['menu_gemini_login'] is {value!r}")
+
+        menu = ast.unparse(_nested_function(self.gui, "rightMouseDown_")) \
+            if any(isinstance(n, ast.FunctionDef) and n.name == "rightMouseDown_"
+                   for n in ast.walk(self.gui)) else ""
+        for needed in ("t('menu_gemini_login')", "'loginGemini:'", "gemini_onboard"):
+            if needed not in menu:
+                problems.append(f"rightMouseDown_ lacks {needed}")
+        login = _module_defs(APP_SOURCE).get("start_gemini_login")
+        if login is None or not _calls_to(login, "_run_in_terminal"):
+            problems.append("start_gemini_login must open Terminal (_run_in_terminal)")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v120_windows_ships_the_same_version(self):
+        """One bullet names Windows and the version, and that version is ``APP_VERSION``
+        — which ``windows/build_win.py``'s ``app_version`` reads, so the two platforms
+        cannot carry different numbers.  Rivals: a version in the bullet other than
+        ``APP_VERSION``; no word about Windows at all (a release is both platforms)."""
+        problems: list[str] = []
+        windows = self._bullets(r"Windows")
+        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        named = [m.group(1) for b in windows for m in re.finditer(r"(\d+\.\d+(?:\.\d+)?)", b)]
+        if not windows:
+            problems.append("no bullet mentions Windows")
+        elif not named or any([v] != versions for v in named):
+            problems.append(f"the Windows bullet names {named!r}; APP_VERSION is {versions!r}")
+        win_version = _module_defs(WIN_BUILD).get("app_version")
+        if win_version is None or not any("APP_VERSION" in s for s in _code_strings([win_version])):
+            problems.append("windows/build_win.py's app_version must read APP_VERSION")
         self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
 
 
