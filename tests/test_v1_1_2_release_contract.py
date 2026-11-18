@@ -2182,7 +2182,10 @@ class PublishedV0261NotesContractTests(unittest.TestCase):
         ``claude_onboarding_suppressed`` local must gate the suppression on exactly
         ``onb_install``/``onb_login`` and on the Codex segment actually carrying data —
         ``bool(codex_seg) and codex_seg[0] != "status"``, not merely a truthy Codex
-        segment (a Codex-side loading/absent status is not "real" data). The flag must
+        segment (a Codex-side loading/absent status is not "real" data). **Changed for
+        TOK-44 v3 (2026-11-18):** the condition may now also name the Gemini segment, so the
+        exact Codex-only expression is no longer pinned as text here — see the comment at
+        the assertion; the rule itself is held by the behavioural tests. The flag must
         also be consulted at both use sites: it clears the clickable
         ``state["summary_status"]`` and it is what drops the global status line from the
         provider blocks.
@@ -2215,9 +2218,26 @@ class PublishedV0261NotesContractTests(unittest.TestCase):
         self.assertIn(
             "segment[1] in ('onb_install', 'onb_login')", src,
             "the suppression must be scoped to exactly the two onboarding status keys")
+        # TOK-44 v3 (Coordinator decision, 2026-11-18): the suppression now also fires when the
+        # **Gemini** segment carries data, by the same rule as Codex.  This test used to pin the
+        # exact Codex-only expression ("bool(codex_seg) and (codex_seg[0] != 'status')"); that
+        # literal can no longer hold once a second provider joins the condition, so the pin is
+        # relaxed to what the v0.26.1 sentence actually needs: the condition consults the Codex
+        # segment and compares a segment kind against 'status'.  The exact rule — a real
+        # (non-status) segment, not merely a truthy one, for Codex and for Gemini alike — is
+        # proven behaviourally: CodexOnboardingSuppressionTests (tests/test_companion_motion.py)
+        # for Codex, and GeminiPillAdapterTests.test_gemini_numbers_suppress_… /
+        # test_a_gemini_status_or_other_claude_statuses_are_not_suppressed
+        # (tests/test_gemini_pill.py) for Gemini.
+        match = re.search(r"claude_onboarding_suppressed = (.+?)\n", src)
+        self.assertIsNotNone(match, "roam_summary_text must define claude_onboarding_suppressed")
+        condition = match.group(1)
         self.assertIn(
-            "bool(codex_seg) and (codex_seg[0] != 'status')", src,
-            "the suppression must require a real (non-status) Codex segment, not merely "
+            "codex_seg", condition,
+            "the suppression must still consult the Codex segment (the v0.26.1 sentence)")
+        self.assertIn(
+            "!= 'status'", condition,
+            "the suppression must require a real (non-status) provider segment, not merely "
             "a truthy one")
         self.assertEqual(
             src.count("claude_onboarding_suppressed"), 3,
@@ -3686,7 +3706,12 @@ class PublishedV111NotesContractTests(unittest.TestCase):
         ``_recovery_step`` spawns the ``claude`` CLI — which reads the keychain itself — only
         under a ``keychain_locked()`` guard (R2 — unguarded at d65bd9c, fails).
 
-        Rivals: a second ``security`` call site left behind (the v1.1.0 shape had two); the
+        **Changed for TOK-44 v4 (2026-11-18):** a ``find-generic-password`` argv *without*
+        ``-w``/``-g`` — the agy item existence check — is allowed outside
+        ``_security_read_blob``; the single-site rule now covers the argvs that read a secret.
+        See the comment at the check.
+
+        Rivals: a second secret-reading ``security`` call site left behind (the v1.1.0 shape had two); the
         cache keyed to the 30 s cycle; the lock check after the subprocess; the native read
         or the CLI spawn left unguarded."""
         problems: list[str] = []
@@ -3696,14 +3721,34 @@ class PublishedV111NotesContractTests(unittest.TestCase):
             problems.append("the bullet must say the repeated keychain/password dialogs are fixed "
                             "and a locked keychain is not read")
 
+        # TOK-44 v4 (the principal's instruction, 2026-11-18): the app may now ask whether the
+        # *agy* keychain item **exists** — ``security find-generic-password -s gemini -a
+        # antigravity``, with no ``-w`` and no ``-g``.  That argv opens no secret, so it cannot
+        # raise the dialogs this sentence is about, and it is a second ``find-generic-password``
+        # site by construction.  So the pin is no longer "exactly one site" but what the sentence
+        # needs: **every argv that reads a secret** (``-w`` or ``-g``) lives in
+        # ``_security_read_blob``, and any other ``find-generic-password`` argv carries neither
+        # flag.  That the existence check really is run without ``-w``, at most once per 300 s,
+        # and not at all while the keychain is locked is held behaviourally by
+        # tests/test_gemini_usage.py (``AgyLoginTests``) and tests/test_gemini_agy_cadence.py
+        # (``KeychainCheckCadenceTests``).
         owners = _enclosing_defs(self.tree)
-        argv_sites = sorted({owners.get(id(n), "<module>") for n in ast.walk(self.tree)
-                             if isinstance(n, ast.List) and any(
-                                 isinstance(e, ast.Constant) and e.value == "find-generic-password"
-                                 for e in n.elts)})
-        if argv_sites != ["_security_read_blob"]:
-            problems.append(f"the security find-generic-password argv must live only in "
-                            f"_security_read_blob; found in {argv_sites!r}")
+        secret_sites, plain_sites = set(), set()
+        for n in ast.walk(self.tree):
+            if not isinstance(n, (ast.List, ast.Tuple)):
+                continue
+            consts = [e.value for e in n.elts if isinstance(e, ast.Constant)]
+            if "find-generic-password" not in consts:
+                continue
+            owner = owners.get(id(n), "<module>")
+            (secret_sites if ("-w" in consts or "-g" in consts) else plain_sites).add(owner)
+        if sorted(secret_sites) != ["_security_read_blob"]:
+            problems.append(f"the security find-generic-password argv that reads a secret (-w/-g) "
+                            f"must live only in _security_read_blob; found in "
+                            f"{sorted(secret_sites)!r}")
+        if "_security_read_blob" in plain_sites:
+            problems.append("_security_read_blob must not gain a second, flagless "
+                            "find-generic-password argv")
         read = self.defs.get("_security_read_blob")
         if read is None:
             problems.append("claude_pet.py must define _security_read_blob")

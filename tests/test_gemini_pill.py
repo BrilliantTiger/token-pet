@@ -2,7 +2,8 @@
 
 v2(2026-11-18): 사용량은 `agy -p "/usage" --output-format json` 에서 온다(tests/test_gemini_usage.py).
 그래서 모델별 줄("models" 게이지, `gemini:<modelId>` 행)은 없어지고, Gemini 묶음의 한도 줄("limits")이
-생겼다. 로그인 필요 상태는 `gemini_login`. 90fd32b 에서 v2 게이트는 빨강이어야 한다(AGENTS.md §3) —
+생겼다. v4(대표님 지시): 로그인 안 됨 = **필에 아무것도 없다**(상태 줄 `gemini_login` 은 없앴다) — 대신
+우클릭 메뉴에 "Gemini 로그인(agy)"(TR `menu_gemini_login`)이 뜬다. 90fd32b 에서 v2 게이트는 빨강이어야 한다(AGENTS.md §3) —
 빨강은 ImportError 가 아니라 `_require` 의 AssertionError 이거나 단언 실패다.
 
 ── 계약 (Coordinator, TOK-47 v2) ────────────────────────────────────────────────────
@@ -16,7 +17,7 @@ v2(2026-11-18): 사용량은 `agy -p "/usage" --output-format json` 에서 온�
    그 로케일의 5시간/주간(ko "5시간"/"주간"; 5시간은 새 TR 키 `gemini_5h`, 주간은 `t("weekly")` 그대로);
    "group" → 나머지 묶음의 행, "Claude·GPT 5시간"/"Claude·GPT 주간"(TR `gemini_group_5h` /
    `gemini_group_weekly`), window 를 모르면 "Claude·GPT"(TR `gemini_group`).
-   rows None → None(블록 없음, 0% 금지). auth_error → 상태 구간 `gemini_login`(모든 로케일에 "agy").
+   rows None → None(블록 없음, 0% 금지). auth_error(로그인 안 됨)여도 None — Gemini 에는 상태 구간이 없다.
    agy 가 없으면(last_error "not_installed") 블록 없음.
 4. 필: 제공자 순서 claude, codex, gemini; 마크 `SUMMARY_LOGO_FILES["gemini"] = "gemini.svg"`;
    roam_summary_text 루프가 gemini 를 포함한다(`state["gemini_summary"]` 훅).
@@ -337,13 +338,14 @@ class GeminiSegmentTests(_Guard):
                 self.assertIsNone(_segment(self, _rt(gemini_gauges=gauges), rows,
                                            auth_error=False, last_error=last))
 
-    def test_needing_login_is_the_gemini_login_status_but_rows_win(self):
-        """행이 없고 auth_error(agy 가 로그인하라고 답함)면 ("status", "gemini_login"). 행이 있으면 행이
-        이긴다(Codex 와 같은 규칙).
-        Rivals: 90fd32b 의 gemini_expired("토큰 만료" — 앱은 더 이상 토큰을 보지 않는다); Codex 키 재사용;
-        로그인 필요에서 None(사용자가 왜 안 보이는지 모름); 행이 있는데도 상태."""
-        self.assertEqual(_segment(self, _rt(), None, auth_error=True, last_error="login"),
-                         ("status", "gemini_login"))
+    def test_needing_login_shows_nothing_in_the_pill(self):
+        """v4: 행이 없고 auth_error(로그인 안 됨)면 **None** — 필에는 아무것도 없다(로그인은 우클릭 메뉴가
+        안내한다). 행이 있으면 행을 보인다.
+        Rivals: 63d5420(("status", "gemini_login") — 대표님: "로그인 안 하면 표시 안 하면 되는 거야");
+        다른 상태 구간(gemini_expired 등)을 냄; auth_error 면 행도 숨김."""
+        _require("parse_agy_usage")
+        self.assertIsNone(_segment(self, _rt(), None, auth_error=True, last_error="login"))
+        self.assertIsNone(_segment(self, _rt(), [], auth_error=True, last_error="login"))
         seg = _segment(self, _rt(), [HEAD], auth_error=True, last_error="login")
         self.assertIsNotNone(seg)
         self.assertEqual(seg[0], "exact")
@@ -457,6 +459,29 @@ class GeminiLimitsAndGroupTests(AgyCase):
         got = self.labels(groups, ["gemini"], "ko")
         self.assertEqual([(r[0], round(r[1], 6)) for r in got], [("Gemini", 60.0)])
 
+    def test_a_logged_out_agy_shows_nothing_in_the_pill(self):
+        """v4: 로그인 안 됨의 세 모양(키체인 항목 없음; 항목은 있는데 agy 가 로그인을 요구 — 끝나지 않는
+        쪽과 바로 실패하는 쪽) → 조회는 None, 상태는 "login"/auth_error True, 앱의 훅은 구간을 내지 않는다.
+        Rivals: 63d5420(항목 없음에 agy 를 띄움; 로그인 요구를 "timeout"/"agy_failed" 로 봄; 필에
+        gemini_login 상태 줄)."""
+        _require("parse_agy_usage")
+        claude_pet.RUNTIME.update({"show_gemini": True, "gemini_gauges": ["gemini"]})
+        for keychain, mode in (("absent", "ok"), ("present", "login_wait"), ("present", "login_exit")):
+            with self.subTest(keychain=keychain, mode=mode):
+                reset_gemini_state()
+                self.fake.calls.clear()
+                self.fake.keychain = keychain
+                if mode == "login_wait":
+                    self.never_exits(mode)
+                else:
+                    self.fake.mode = mode
+                rows = claude_pet.fetch_gemini_usage()
+                self.assertIsNone(rows)
+                self.assertEqual(len(self.fake.calls), 0 if keychain == "absent" else 1)
+                self.assertEqual(claude_pet.GEMINI_STATUS.get("last_error"), "login")
+                self.assertIs(claude_pet.GEMINI_STATUS.get("auth_error"), True)
+                self.assertIsNone(app_hook(self, {"gemini": rows})())
+
     def test_a_gauge_with_no_rows_of_its_own_shows_nothing(self):
         """Gemini 묶음만 온 응답에서 "group" 만 고르면 블록 없음, 나머지 묶음만 온 응답에서 "limits"·"gemini"
         만 고르면 블록 없음. Rival: 빈 게이지를 다른 게이지의 행으로 채움; 0% 를 지어냄."""
@@ -530,9 +555,10 @@ class GeminiTranslationTests(unittest.TestCase):
         """`gemini` 은 모든 로케일에서 "Gemini"; `gemini_5h`(새 키 — Gemini 묶음의 5시간 줄)는 모든 로케일에
         있고 그 로케일의 t("weekly") 와 다르다, ko 는 "5시간"; `gemini_group` 은 "Claude·GPT" 로 시작하고 두
         window 라벨이 그것으로 시작한다; 주간 라벨은 그 로케일의 t("weekly") 를 그대로 품는다(대소문자
-        포함); ko 는 계약 문구; `gemini_login` 은 모든 로케일에 있고 "Gemini" 와 할 일(`agy`)을 말한다.
+        포함); ko 는 계약 문구; v4: 메뉴 항목 `menu_gemini_login` 은 모든 로케일에 있고 "Gemini" 와 `agy` 를
+        말한다(ko 는 "로그인"도) — 필의 상태 줄 `gemini_login`·`gemini_expired` 는 없다.
         Rivals: en 에만 넣음(t() 가 en 으로 떨어져 ko 필에 영어); "Gemini" 를 번역함; 5h/weekly 를 같은
-        문구로; 90fd32b(gemini_5h·gemini_login 없음)."""
+        문구로; 63d5420(menu_gemini_login 없음, 필 상태 줄 gemini_login 이 남음)."""
         tr = claude_pet.TR
         for lang in LANGS:
             with self.subTest(lang=lang):
@@ -550,12 +576,15 @@ class GeminiTranslationTests(unittest.TestCase):
                 self.assertNotEqual(h5, wk)
                 self.assertIn(table["weekly"], wk,
                               "주간 그룹 라벨이 이 로케일의 t('weekly') 표기를 쓰지 않는다")
-                login = table.get("gemini_login")
+                login = table.get("menu_gemini_login")
                 self.assertTrue(isinstance(login, str) and "Gemini" in login and "agy" in login,
-                                "gemini_login 이 없거나 Gemini·agy 를 말하지 않는다: %r" % login)
+                                "menu_gemini_login 이 없거나 Gemini·agy 를 말하지 않는다: %r" % login)
+                for gone in ("gemini_login", "gemini_expired"):
+                    self.assertNotIn(gone, table, "필의 Gemini 상태 줄 TR 이 남아 있다: %s" % gone)
                 self.assertTrue(str(table.get("s_sec_gemini", "")).strip(),
                                 "설정 구역 제목 s_sec_gemini 가 없다")
         self.assertEqual(tr["ko"].get("gemini_5h"), "5시간")
+        self.assertIn("로그인", str(tr["ko"].get("menu_gemini_login")))
         self.assertEqual((tr["ko"].get("gemini_group_5h"), tr["ko"].get("gemini_group_weekly")),
                          ("Claude·GPT 5시간", "Claude·GPT 주간"))
         self.assertEqual(tr["en"].get("gemini_group_weekly"), "Claude·GPT " + tr["en"]["weekly"])
@@ -618,6 +647,7 @@ class GeminiPillAdapterTests(_Guard):
             _stable_w=lambda v, font=None: 7.0 * len(str(v)),
             roam_summary=lambda *_a, **_k: claude)
         gui_functions(self, ("roam_summary_text",), scope)
+        self.last_state = state
         out = [scope["roam_summary_text"]()]
         for _ in range(calls - 1):
             if between:
@@ -639,17 +669,6 @@ class GeminiPillAdapterTests(_Guard):
         blocks, _w, _h = self.run_adapter(gemini=self.GEM, show=("gemini",))
         self.assertEqual([pid for pid, _lines in blocks], ["gemini"])
 
-    def test_gemini_login_is_a_gemini_block_not_dropped(self):
-        """("status", "gemini_login") 은 Gemini 블록(자기 마크)으로 보이고 그 문구는 agy 를 말한다 — Codex 의
-        codex_token_expired 와 같은 자리. Rival: 일반 status 로 보고 '없음'으로 버림(로그인 안내가 화면에
-        안 보인다)."""
-        blocks, _w, _h = self.run_adapter(codex=self.CODEX, gemini=("status", "gemini_login"),
-                                          show=("codex", "gemini"))
-        self.assertEqual([pid for pid, _lines in blocks], ["codex", "gemini"])
-        text = " ".join(txt for _pid, lines in blocks if _pid == "gemini"
-                        for line in lines for txt, _k in line)
-        self.assertIn("agy", text, "Gemini 블록이 gemini_login 문구(agy 로그인)를 보이지 않는다")
-
     def test_a_shown_gemini_with_nothing_yet_is_not_no_providers(self):
         """Claude·Codex 를 끄고 Gemini 만 켰는데 아직 행이 없다 → 'scanning'(받은 뒤)이지
         'no_providers' 가 아니다. 셋 다 끄면 'no_providers'.
@@ -662,9 +681,10 @@ class GeminiPillAdapterTests(_Guard):
         self.assertIn(claude_pet.t("no_providers"), texts)
 
     def test_new_gemini_rows_or_status_refresh_the_memo(self):
-        """같은 5초 창 안에서도 Gemini 행(`state["gemini"]`)이나 GEMINI_STATUS 가 바뀌면 다시
-        만든다(Codex 의 id(state["codex"]), CODEX_STATUS 와 같은 규칙).
-        Rival: 메모 키에 Gemini 를 넣지 않음(최대 5초 동안 옛 값·옛 상태)."""
+        """같은 5초 창 안에서도 Gemini 행(`state["gemini"]`)이 바뀌면 다시 만든다(Codex 의
+        id(state["codex"]) 와 같은 규칙). v4: Gemini 에는 상태 구간이 없으므로 GEMINI_STATUS 는 메모에
+        들 필요가 없다 — 그 절반은 뺐다.
+        Rival: 메모 키에 Gemini 를 넣지 않음(최대 5초 동안 옛 값)."""
         holder = {"pct": 75.0}
 
         def gem():
@@ -679,20 +699,54 @@ class GeminiPillAdapterTests(_Guard):
                                          between=change_rows)
         self.assertNotEqual(first[0], second[0], "Gemini 행이 바뀌었는데 메모가 옛 값을 줬다")
 
-        status = {"auth_error": False, "last_error": None}   # 어댑터와 훅이 같은 dict 를 본다
+    # ── v3: Claude 온보딩 안내를 Gemini 수치가 누른다 (Codex 와 같은 규칙) ──
 
-        def gem_by_status():
-            return ("status", "gemini_login") if status["auth_error"] else None
+    def _global_keys(self, blocks):
+        """마크 없는 전역 줄(pid None)의 글자들."""
+        return [txt for pid, lines in blocks if pid is None for line in lines for txt, _k in line]
 
-        def expire(_state, g):
-            g.update(auth_error=True, last_error="login")
+    def _click(self):
+        return claude_pet.summary_click_action(status_key=self.last_state.get("summary_status"),
+                                               in_pill=True, click_count=1, moved=False)
 
-        first, second = self.run_adapter(gemini=gem_by_status, show=("codex", "gemini"),
-                                         codex=self.CODEX, calls=2, status=status,
-                                         between=expire)
-        self.assertEqual([pid for pid, _l in first[0]], ["codex"])
-        self.assertEqual([pid for pid, _l in second[0]], ["codex", "gemini"],
-                         "로그인 필요로 바뀌었는데 메모가 옛 필을 줬다")
+    def test_gemini_numbers_suppress_the_claude_onboarding_line_and_its_click(self):
+        """Claude Code 없이 agy 만 쓰는 사용자: Gemini 구간이 수치로 떠 있으면 Claude 온보딩 안내
+        (onb_install / onb_login)는 전역 줄로 나오지 않고, 필 클릭은 Claude 설치·로그인으로 가지 않는다
+        (state["summary_status"] 가 None).
+        Rivals: 63d5420(Codex 만 봄 — "Gemini 82%" 위에 "Claude Code 설치…" 가 붙고 필을 누르면 설치
+        터미널이 열림); 줄은 숨기고 클릭 뜻은 남김(안 보이는 문구의 유령 클릭); 클릭 뜻만 지움."""
+        for key, act in (("onb_install", "install"), ("onb_login", "login")):
+            with self.subTest(status=key):
+                blocks, _w, _h = self.run_adapter(claude=("status", key), gemini=self.GEM)
+                self.assertEqual([pid for pid, _lines in blocks], ["gemini"])
+                self.assertNotIn(claude_pet.t(key), self._global_keys(blocks))
+                self.assertIsNone(self.last_state.get("summary_status"))
+                self.assertIsNone(self._click())
+                # 대조: Gemini 수치가 없으면 안내와 클릭 뜻이 그대로 있다.
+                blocks, _w, _h = self.run_adapter(claude=("status", key), gemini=None)
+                self.assertIn(claude_pet.t(key), self._global_keys(blocks))
+                self.assertEqual(self._click(), act)
+
+    def test_a_gemini_status_or_other_claude_statuses_are_not_suppressed(self):
+        """넘치지 않는다(v3 계약 2: "Gemini 구간이 status 가 아닌 수치로 떠 있으면"): Gemini 구간이 **상태**면
+        — 수치가 아니다 — 온보딩 안내는 그대로다. 여기서는 훅이 주는 합성 상태 구간으로 본다(Gemini 가
+        실제로 어떤 상태 구간을 내는지는 로그인 계약이 정한다 — 그 계약은 협의 중이고, 이 규칙은 그것과
+        무관하다). 온보딩이 아닌 Claude 상태(token_expired)는 Gemini 수치가 있어도 그대로 보이고 클릭 뜻도
+        남는다. Codex 수치로 누르던 것은 그대로 누른다.
+        **63d5420 에서도 초록이다** — 억제를 Gemini 로 넓히는 구현을 가르는 가드다. Rivals: Gemini 구간이
+        참이기만 하면 누름(수치 없는 Gemini 사용자에게서 Claude 안내까지 사라짐); Gemini 수치가 있으면
+        Claude 의 모든 상태를 누름(토큰 만료가 안 보임); Codex 조건을 Gemini 로 바꿔치움."""
+        blocks, _w, _h = self.run_adapter(claude=("status", "onb_install"),
+                                          gemini=("status", "gemini_synthetic_status"))
+        self.assertIn(claude_pet.t("onb_install"), self._global_keys(blocks))
+        self.assertEqual(self._click(), "install")
+        blocks, _w, _h = self.run_adapter(claude=("status", "token_expired"), gemini=self.GEM)
+        self.assertIn(claude_pet.t("token_expired"), self._global_keys(blocks))
+        self.assertEqual(self._click(), "recover")
+        blocks, _w, _h = self.run_adapter(claude=("status", "onb_install"), codex=self.CODEX,
+                                          gemini=None)
+        self.assertEqual([pid for pid, _lines in blocks], ["codex"])
+        self.assertIsNone(self._click())
 
     def test_the_mac_hook_and_refresh_are_wired(self):
         """run_gui 의 `state["gemini_summary"]` 는 gemini_summary_segment 를 RUNTIME·state["gemini"]·
@@ -763,6 +817,51 @@ class GeminiSettingsPanelTests(unittest.TestCase):
         for key in ("show_gemini", "gemini_gauges"):
             with self.subTest(key=key):
                 self.assertIn(key, consts)
+
+
+# ═════════════════════════════ v4: 우클릭 메뉴 "Gemini 로그인(agy)" ═════════════════════════════
+
+
+class GeminiLoginMenuTests(_Guard):
+    """Codex 의 설치·로그인 항목과 같은 방식(state 깃발 → rightMouseDown_ → Handler → Terminal 도우미).
+    이 파일이 거는 이름: TR `menu_gemini_login`, state["gemini_onboard"], 액션 "loginGemini:",
+    Handler.loginGemini_, 모듈 함수 `start_gemini_login`. 깃발이 실제로 오르는 것은
+    tests/test_gemini_agy_cadence.py(RefreshPathTests)가 본다."""
+
+    def test_the_context_menu_offers_the_gemini_login_item_from_its_flag(self):
+        """rightMouseDown_ 이 state["gemini_onboard"] 를 읽어 t("menu_gemini_login") 항목을 "loginGemini:"
+        로 달고, Handler.loginGemini_ 가 start_gemini_login 을 부른다.
+        Rivals: 항목 없음(로그인하라는 말이 어디에도 없다); 깃발 없이 늘 보임; 핸들러가 Codex 도우미를 부름."""
+        run_gui = _run_gui_tree()
+        menu = _nested(run_gui, "rightMouseDown_")
+        self.assertIsNotNone(menu)
+        self.assertIn("menu_gemini_login", _t_keys(menu))
+        self.assertLessEqual({"loginGemini:", "gemini_onboard"}, _str_consts(menu))
+        fn = _nested(run_gui, "loginGemini_")
+        self.assertIsNotNone(fn, "Handler.loginGemini_ 가 없다")
+        self.assertIn("start_gemini_login", _called_names(fn))
+
+    def test_the_login_helper_opens_agy_itself_in_terminal(self):
+        """start_gemini_login 은 Terminal 에서 `agy` 를 연다(사용자가 직접 로그인한다) — `-p`·`/usage` 가
+        아니다. 아무것도 실행하지 않는다: `_run_in_terminal` 은 기록기다.
+        Rivals: `agy -p /usage` 를 엶(한 번 묻고 끝난다 — 로그인 화면이 아니다); `agy login`(그런 명령은
+        없다); 앱이 직접 agy 를 띄움(숨은 프로세스로 OAuth)."""
+        login = _require("start_gemini_login")
+        seen = []
+        with mock.patch.object(claude_pet, "_run_in_terminal", side_effect=seen.append), \
+                mock.patch.object(claude_pet.subprocess, "run",
+                                  side_effect=AssertionError("프로세스를 띄웠다")), \
+                mock.patch.object(claude_pet.subprocess, "Popen",
+                                  side_effect=AssertionError("프로세스를 띄웠다")):
+            login()
+        self.assertEqual(len(seen), 1)
+        lines = [ln.strip().strip("\"'") for ln in str(seen[0]).splitlines()]
+        self.assertTrue(any(ln == "agy" or ln.endswith("/agy") for ln in lines),
+                        "Terminal 명령에 `agy` 만 실행하는 줄이 없다: %r" % seen[0])
+        self.assertNotIn("/usage", seen[0])
+        self.assertNotIn("agy login", seen[0])
+        # v5: SSH_TTY 는 백그라운드 실행에만 넣는다 — 사용자가 고른 로그인에서는 브라우저가 열려야 한다.
+        self.assertNotIn("SSH_", seen[0])
 
 
 # ═════════════════════════════ 9. Windows 포트 ═════════════════════════════

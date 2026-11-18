@@ -26,10 +26,62 @@ retrieveUserQuotaSummary 는 "Claude and GPT models" 만 준다. 그래서 v1 �
    답 → auth_error True, last_error "login" — 그 답의 모양은 아직 관측하지 않았다(아래 모호점). 그래서
    여기서는 'SUCCESS 가 아니면 None + 비어 있지 않은 last_error' 만 고정한다.
 
+── 계약 v3·v4 (2026-11-18 — agy 리뷰 지적 반영; v4 는 대표님 지시로 v3 의 로그인 항목을 바꾼 것) ──────────
+
+대표님: "로그인 안 되어 있을 땐 로그인하면 된다고 하고, 로그인 안 하면 표시 안 하면 되는 거야! 왜 로그인을
+재시도해". 사실: 로그인 안 된 상태에서 `agy -p /usage` 를 실행하는 것 자체가 agy 의 로그인 절차(OAuth)를
+시작한다. agy 에는 로그인 상태만 묻는 명령이 없다. 그래서:
+
+  1. 로그인 여부 = agy 키체인 항목이 **있는지**: `security find-generic-password -s gemini -a antigravity`
+     (`-w` 없이 — 비밀값을 열지 않으므로 창이 뜨지 않는다). 종료 0 = 있음, 44 = 없음. 자동으로는 300초에
+     한 번, 사용자가 누르면 바로. `keychain_locked()` 이면 이 확인도 하지 않는다(직전 판단 유지).
+     `-w`/`-g` 로 agy 비밀값을 읽는 일은 없다.
+  2. 항목 없음 → agy 를 **실행하지 않는다**. None, last_error "login", auth_error True. 필에는 아무것도
+     없다(tests/test_gemini_pill.py). 다음 확인에서 항목이 보이면 그 조회에서 바로 읽는다.
+  3. 항목 있음 → `/usage` 실행. 그런데 agy 가 로그인을 요구하면(refresh token 만료·취소 — stderr 에
+     "Authentication required. Please visit the URL to log in" / "Run 'agy' to log in"): **그 즉시 agy 를
+     끝내고**(timeout 을 기다리지 않는다, 남은 프로세스 없음), 행을 지우고, "login"/auth_error True, 자동
+     실행을 멈춘다 — 사용자가 누를 때까지(tests/test_gemini_agy_cadence.py). 시간 초과 예외에 실린 출력
+     (bytes)도 같은 낱말로 본다.
+  4. 오프라인 토큰 갱신 실패("authentication failed or timed out", "Error: authentication failed: …")는
+     로그인 안 됨이 아니다 — 일시 실패("agy_failed" / "timeout").
+  5. 버킷에 `"disabled": true` 가 있으면 건너뛴다(0행 계산에서도, 행에서도).
+  6. `mood_for(…, gemini_rows=…)` — 보이는 Gemini 의 고른 게이지 행도 펫 기분에 든다.
+
+── 계약 v5 (agy 와 합의한 최종안, 2026-11-18 — v4 에 더한다) ──────────────────────────────────
+
+  a. 백그라운드 `/usage` 실행의 env 는 os.environ 의 사본 + `SSH_TTY="1"` — 로그인 안 된 agy 가 기본
+     브라우저를 멋대로 여는 것을 막는다(agy 는 SSH_* 가 있으면 브라우저를 열지 않는다).
+  b. stderr 에 "Authentication required" / "visit the URL to log in" / "Run 'agy'" 가 보이면 바로 프로세스
+     **그룹**을 끝낸다(남은 프로세스 없음 — agy 가 띄운 자식도).
+  c. 지문(marker) = 존재 확인 출력의 `"mdat"` 줄 + 폴백 파일 `~/.gemini/antigravity-cli/
+     antigravity-oauth-token` 의 존재·mtime. 항목도 폴백 파일도 없으면 agy 0회. 항목(또는 폴백 파일)이
+     있는데 agy 가 로그인을 요구하면 그때의 지문을 기억하고 자동 실행을 멈춘다. 300초마다의 확인에서
+     지문이 **달라지면**(사용자가 로그인을 마쳐 agy 가 키체인을 다시 씀) 클릭 없이 다시 읽는다. 그대로면
+     다시 띄우지 않는다.
+  d. 오프라인 갱신 실패의 실제 모양: stdout `{"schemaVersion":1,"status":"ERROR","error":"authentication
+     failed or timed out"}`, 종료 1, stderr 에 "token refresh failed due to network error" — 일시 실패.
+     60초를 다 기다린 로그인 요구도 **같은 stdout** 으로 끝난다(stderr 에 "Run 'agy' interactively to log
+     in") — 그쪽은 "login" 이다. 둘은 stderr 로만 갈린다.
+
+관측(agy 리뷰·협의 보고, 한 기기, agy 1.5.10, 샌드박스 재현): 로그인하지 않은 agy 는 stdout 에 아무것도 쓰지 않고
+stderr 에 위 안내를 쓴 뒤 60초를 기다린다. 바로 실패하는 경우의 stderr 는 "Error: authentication required.
+Run 'agy' to log in." 이다. 아래 문구는 그 모양을 본뜬 합성이다.
+
 이 파일은 하네스도 겸한다 — test_gemini_agy_cadence.py 와 test_gemini_pill.py 가 `AgyFake`, `agy_payload`,
-`refresh_worker`, `wait_for`, `app_hook` 를 가져다 쓴다. 진짜 agy·키체인·네트워크는 건드리지 않는다:
-subprocess.run 은 기록기, Popen·os.system 은 막힘, HOME 은 임시 디렉터리, `shutil.which("agy")` 는 대역.
-subprocess 는 `subprocess.run` 으로 부른다(코드베이스의 다른 CLI 호출 — `claude -p /usage` — 과 같다).
+`refresh_worker`, `wait_for`, `app_hook` 를 가져다 쓴다. 진짜 agy·키체인·네트워크는 건드리지 않는다.
+
+v3 부터 가짜 agy 는 **진짜 자식 프로세스**다: 테스트 동안 `subprocess.Popen` 이 어떤 명령이든 작은 파이썬
+에뮬레이터(`sys.executable -I -S -c …`)로 바꿔 띄운다. agy 를 띄우면 그 에뮬레이터가 mode 대로 stdout·
+stderr 를 쓰고 끝나거나 끝나지 않는다. 이유: 로그인 판정은 stderr 를 읽다 일찍 끝내는 것, 시간 초과 예외에
+실린 출력(bytes), 프로세스 정리에 달려 있고, 그것을 손으로 흉내 낸 대역은 리뷰가 찾은 바로 그 결함(예외의 stderr 를 안 봄, bytes)을
+가릴 수 없다. 그리고 구현이 `subprocess.run` 을 쓰든 `Popen` 으로 stderr 를 읽다 일찍 끝내든 같은
+하네스로 돈다. `security` 도 에뮬레이터가 대신한다(실행되지 않는다): `fake.keychain` 이 "present" 면 종료 0,
+"absent" 면 44. 그 밖의 명령은 종료 1. 모두 기록만 남는다.
+`os.system` 은 막혀 있다. HOME 은 임시 디렉터리, `shutil.which("agy")` 는 대역.
+끝나지 않는 mode(timeout·login_wait·offline_wait)에서는 기다림을 SHORT 초로 줄인다(run 의 timeout 인자와
+자식의 communicate/wait timeout 을 자르고, `claude_pet.GEMINI_AGY_TIMEOUT` 이 있으면 그것도) — 30초를
+실제로 기다리지 않으려는 것뿐이다.
 """
 
 import ast
@@ -140,62 +192,241 @@ def assert_rows(test, got, expected, msg=""):
 
 # ═════════════════════════════ 하네스: agy 대역 ═════════════════════════════
 
+_REAL_POPEN = subprocess.Popen
+_REAL_RUN = subprocess.run
+SHORT = 1.5              # 끝나지 않는 mode 에서 실제로 기다리는 상한(초)
+_FOREVER = 20            # '끝나지 않는' 에뮬레이터가 스스로 끝나는 시각(초) — 고아가 남지 않게
+
+# 관측된 문구의 모양을 본뜬 합성(위 계약 v3). 마지막 줄은 줄바꿈 없이 끝난다(입력 프롬프트).
+LOGIN_WAIT_STDERR = (
+    "Authentication required. Please visit the URL to log in:\n"
+    "  https://accounts.example.invalid/o/oauth2/auth?synthetic=1\n"
+    "\n"
+    "Waiting for authentication (timeout 60s)...\n"
+    "Or, paste the authorization code here and press Enter: ")
+LOGIN_EXIT_STDERR = "Error: authentication required. Run 'agy' to log in.\n"
+LOGIN_TIMEOUT_STDERR = (
+    "Authentication required. Please visit the URL to log in:\n"
+    "  https://accounts.example.invalid/o/oauth2/auth?synthetic=1\n"
+    "\n"
+    "Waiting for authentication (timeout 60s)...\n"
+    "Error: authentication timed out after 60s. Run 'agy' interactively to log in.\n")
+OFFLINE_STDERR_A = "Error: authentication failed: token refresh failed due to network error: synthetic\n"
+OFFLINE_STDERR_B = "authentication failed or timed out\n"
+# 오프라인 갱신 실패와 60초를 다 기다린 로그인 요구가 **똑같이** 내는 stdout(v5 d).
+AUTH_ERROR_STDOUT = ('{"schemaVersion":1,"status":"ERROR",'
+                     '"error":"authentication failed or timed out"}\n')
+
+# mode → (stdout — None 이면 payload, stderr, 종료 코드, 끝나는 방식: exit | forever | release)
+AGY_MODES = {
+    "ok": (None, "", 0, "exit"),
+    "hang": (None, "", 0, "release"),
+    "fail": ("", "synthetic agy failure\n", 1, "exit"),
+    "garbage": ("{not json", "", 0, "exit"),
+    "timeout": ("", "", 0, "forever"),
+    "login_wait": ("", LOGIN_WAIT_STDERR, 0, "forever"),
+    "login_exit": ("", LOGIN_EXIT_STDERR, 1, "exit"),
+    "login_timeout_exit": (AUTH_ERROR_STDOUT, LOGIN_TIMEOUT_STDERR, 1, "exit"),
+    "offline_exit_a": (AUTH_ERROR_STDOUT, OFFLINE_STDERR_A, 1, "exit"),
+    "offline_exit_b": (AUTH_ERROR_STDOUT, OFFLINE_STDERR_B, 1, "exit"),
+    "offline_wait": ("", OFFLINE_STDERR_B, 0, "forever"),
+}
+
+_EMULATOR = r"""
+import json, os, sys, time
+spec = json.load(open(sys.argv[1], encoding="utf-8"))
+if spec.get("gpids"):
+    # agy 가 띄우는 자식(브라우저 여는 도우미 등)의 대역 — 같은 프로세스 그룹, 파이프는 물려받지 않는다.
+    import subprocess
+    g = subprocess.Popen([sys.executable, "-I", "-S", "-c", "import time; time.sleep(%d)" % spec["forever"]],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with open(spec["gpids"], "a", encoding="utf-8") as f:
+        f.write("%d\n" % g.pid)
+sys.stderr.write(spec["stderr"]); sys.stderr.flush()
+end = time.time() + spec["forever"]
+if spec["how"] == "forever":
+    while time.time() < end:
+        time.sleep(0.05)
+    sys.exit(3)
+if spec["how"] == "release":
+    while not os.path.exists(spec["release"]) and time.time() < end:
+        time.sleep(0.02)
+sys.stdout.write(spec["stdout"]); sys.stdout.flush()
+sys.exit(spec["rc"])
+"""
+
+
+class _Child(_REAL_POPEN):
+    """에뮬레이터 자식. 끝나지 않는 mode 에서는 communicate/wait 의 timeout 을 _never(초)로 자른다."""
+
+    _never = None
+
+    def _clamp(self, timeout):
+        if self._never is not None and isinstance(timeout, (int, float)):
+            return min(timeout, self._never)
+        return timeout
+
+    def communicate(self, input=None, timeout=None):
+        return super().communicate(input, self._clamp(timeout))
+
+    def wait(self, timeout=None):
+        return super().wait(self._clamp(timeout))
+
+
+class _Release:
+    """hang mode 의 자식을 풀어 주는 깃발(threading.Event 의 set/is_set 모양)."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def set(self):
+        with open(self.path, "w", encoding="utf-8"):
+            pass
+
+    def is_set(self):
+        return os.path.exists(self.path)
+
+
 class AgyFake:
-    """subprocess.run 의 대역. agy 를 띄우면 기록하고 mode 대로 답한다. 아무것도 실행하지 않는다.
-    mode: ok | fail | timeout | garbage | hang. hang 은 Event 를 기다린다(run 의 timeout 을 지킨다)."""
+    """subprocess.run / subprocess.Popen 의 대역. 어떤 명령이든 진짜로는 실행하지 않고, 에뮬레이터 자식을
+    대신 띄운다. agy 는 mode(AGY_MODES) 대로 답하고, `security` 는 종료 코드 44, 그 밖은 1 이다.
+    calls: agy 를 띄운 기록 [(시각, argv, 띄운 쪽이 준 kwargs)] — run 으로 띄웠으면 run 의 kwargs."""
 
     def __init__(self, clock=None):
         self.clock = clock or _real_time
         self.payload = agy_payload()
         self.mode = "ok"
-        self.calls = []          # (시각, argv, kwargs)
-        self.security = []
+        self.keychain = "present"      # agy 키체인 항목: present(종료 0) | absent(종료 44)
+        self.mdat = "20261118062000Z"  # 그 항목의 수정 시각(존재 확인 출력의 "mdat" 줄)
+        self.wait = SHORT              # 끝나지 않는 mode 에서 실제로 기다리는 상한(초)
+        self.calls = []
+        self.security = []             # security argv 들
+        self.security_at = []          # 그 시각들
         self.other = []
         self.blocked = []
-        self.hang = threading.Event()
+        self.children = []       # agy 로 띄운 에뮬레이터 자식
+        self._all = []
+        self._dir = tempfile.mkdtemp(prefix="claudepet-agyfake-")
+        self._n = 0
+        self._local = threading.local()
+        self.hang = _Release(os.path.join(self._dir, "release"))
+        self._gpids = os.path.join(self._dir, "grandchildren")
 
-    def agy_calls(self):
-        return [c for c in self.calls]
-
+    # ── subprocess.run ──
     def run(self, argv, *a, **k):
-        if isinstance(argv, (str, bytes)):
+        if isinstance(argv, (str, bytes)) or k.get("shell"):
             self.other.append(("shell-string", str(argv)[:40]))
             raise AssertionError("문자열 명령 — 셸 없이 argv 목록으로 띄워야 한다")
         argv = [str(x) for x in argv]
-        base = os.path.basename(argv[0]) if argv else ""
-        text = bool(k.get("text") or k.get("universal_newlines") or k.get("encoding"))
-        conv = (lambda s: s) if text else (lambda s: s.encode())
-        if base == "security":
-            self.security.append(argv)
-            res = subprocess.CompletedProcess(argv, 44, conv(""), conv(""))
-        elif base == "agy":
+        is_agy = bool(argv) and os.path.basename(argv[0]) == "agy"
+        kk = dict(k)
+        if is_agy:
             self.calls.append((self.clock.time(), argv, dict(k)))
-            if self.mode == "timeout":
-                raise subprocess.TimeoutExpired(argv, k.get("timeout") or 30)
-            if self.mode == "hang":
-                if not self.hang.wait(k.get("timeout") or 60):
-                    raise subprocess.TimeoutExpired(argv, k.get("timeout") or 60)
-            if self.mode == "fail":
-                res = subprocess.CompletedProcess(argv, 1, conv(""), conv("synthetic agy failure\n"))
-            elif self.mode == "garbage":
-                res = subprocess.CompletedProcess(argv, 0, conv("{not json"), conv(""))
+            if AGY_MODES[self.mode][3] == "forever":
+                given = kk.get("timeout")
+                kk["timeout"] = (min(given, self.wait) if isinstance(given, (int, float))
+                                 else self.wait)
+        self._local.in_run = is_agy
+        try:
+            return _REAL_RUN(argv, *a, **kk)
+        finally:
+            self._local.in_run = False
+
+    # ── subprocess.Popen ──
+    def popen(self, args, *a, **k):
+        if isinstance(args, (str, bytes)) or k.get("shell"):
+            self.other.append(("shell-string", str(args)[:40]))
+            raise AssertionError("문자열 명령 — 셸 없이 argv 목록으로 띄워야 한다")
+        argv = [str(x) for x in args]
+        base = os.path.basename(argv[0]) if argv else ""
+        never = None
+        if base == "agy":
+            if not getattr(self._local, "in_run", False):
+                self.calls.append((self.clock.time(), argv, dict(k)))
+            stdout, stderr, rc, how = AGY_MODES[self.mode]
+            if stdout is None:
+                stdout = (self.payload if isinstance(self.payload, str)
+                          else json.dumps(self.payload)) + "\n"
+            never = self.wait if how == "forever" else None
+        elif base == "security":
+            self.security.append(argv)
+            self.security_at.append(self.clock.time())
+            if self.keychain == "present":
+                # -w 없는 답의 모양(속성만). 비밀값은 어디에도 없다 — 합성이다.
+                # 진짜 출력처럼 수정 시각 줄이 있다: "mdat"<timedate>=0x… "YYYYMMDDHHMMSSZ\000"
+                stdout, stderr, rc, how = (
+                    'keychain: "synthetic.keychain-db"\nversion: 512\nclass: "genp"\nattributes:\n'
+                    '    "acct"<blob>="antigravity"\n'
+                    '    "cdat"<timedate>=0x00 "20260101000000Z\\000"\n'
+                    '    "mdat"<timedate>=0x00 "%s\\000"\n'
+                    '    "svce"<blob>="gemini"\n' % self.mdat), "", 0, "exit"
             else:
-                body = self.payload if isinstance(self.payload, str) else json.dumps(self.payload)
-                res = subprocess.CompletedProcess(argv, 0, conv(body + "\n"), conv(""))
+                stdout, stderr, rc, how = "", ("security: SecKeychainSearchCopyNext: The specified "
+                                               "item could not be found in the keychain.\n"), 44, "exit"
         else:
             self.other.append(argv[:2])
-            res = subprocess.CompletedProcess(argv, 1, conv(""), conv(""))
-        if k.get("check") and res.returncode:
-            raise subprocess.CalledProcessError(res.returncode, argv, res.stdout, res.stderr)
-        return res
-
-    def popen(self, *a, **k):
-        self.blocked.append("Popen")
-        raise OSError("Popen 은 막혀 있다 — subprocess.run 을 쓴다")
+            stdout, stderr, rc, how = "", "", 1, "exit"
+        self._n += 1
+        spec = os.path.join(self._dir, "spec-%d.json" % self._n)
+        with open(spec, "w", encoding="utf-8") as f:
+            json.dump({"stdout": stdout, "stderr": stderr, "rc": rc, "how": how,
+                       "release": self.hang.path, "forever": _FOREVER,
+                       "gpids": self._gpids if (base == "agy" and self.mode == "login_wait")
+                       else None}, f)
+        k.pop("executable", None)
+        child = _Child([sys.executable, "-I", "-S", "-c", _EMULATOR, spec], *a, **k)
+        child._never = never
+        self._all.append(child)
+        if base == "agy":
+            self.children.append(child)
+        return child
 
     def system(self, *a, **k):
         self.blocked.append("os.system")
         return 1
+
+    def grandchildren(self):
+        """agy 대역이 띄운 자식 중 아직 살아 있는 pid 들."""
+        try:
+            with open(self._gpids, encoding="utf-8") as f:
+                pids = [int(x) for x in f.read().split()]
+        except OSError:
+            return []
+        live = []
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+                live.append(pid)
+            except OSError:
+                pass
+        return live
+
+    def alive(self, grace=2.0):
+        """아직 돌고 있는 agy 프로세스의 수 — agy 자신과 그것이 띄운 자식(grace 초까지 기다려 본다)."""
+        end = _real_time.time() + grace
+        while _real_time.time() < end and (any(c.poll() is None for c in self.children)
+                                           or self.grandchildren()):
+            _real_time.sleep(0.02)
+        return sum(1 for c in self.children if c.poll() is None) + len(self.grandchildren())
+
+    def close(self):
+        self.hang.set()
+        for pid in self.grandchildren():
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+        for c in self._all:
+            try:
+                if c.poll() is None:
+                    c.kill()
+                c.wait(5)
+                for stream in (c.stdin, c.stdout, c.stderr):
+                    if stream is not None:
+                        stream.close()
+            except Exception:  # noqa: BLE001
+                pass
+        shutil.rmtree(self._dir, ignore_errors=True)
 
 
 def _gemini_dicts():
@@ -226,6 +457,34 @@ def reset_gemini_state(test=None):
 class AgyCase(unittest.TestCase):
     """HOME 은 임시, agy 는 /…/bin/agy 대역(which), subprocess 는 AgyFake, 플랫폼은 darwin."""
 
+    def never_exits(self, mode, wait=SHORT):
+        """끝나지 않는 mode 로 바꾸고, 구현이 기다리는 상한을 wait 초로 줄인다(있으면)."""
+        self.fake.mode = mode
+        self.fake.wait = wait
+        if isinstance(getattr(claude_pet, "GEMINI_AGY_TIMEOUT", None), (int, float)):
+            self._patch(mock.patch.object(claude_pet, "GEMINI_AGY_TIMEOUT", wait))
+
+    def write_fallback(self, mtime):
+        """agy 의 파일 폴백 저장소(키체인을 못 쓰는 환경)를 만든다 — 내용은 합성, mtime 은 주는 값."""
+        os.makedirs(os.path.dirname(self.fallback), exist_ok=True)
+        with open(self.fallback, "w", encoding="utf-8") as f:
+            f.write("{}")
+        os.utime(self.fallback, (mtime, mtime))
+
+    def assert_only_existence_checks(self, at_least=0):
+        """Gemini 를 위한 security 호출은 존재 확인뿐이다: 정확히
+        `security find-generic-password -s gemini -a antigravity`(-s/-a 의 순서는 상관없다). `-w`·`-g`
+        (비밀값을 여는 인자)는 없다."""
+        for argv in self.fake.security:
+            self.assertNotIn("-w", argv, "agy 비밀값을 읽었다(-w)")
+            self.assertNotIn("-g", argv, "agy 비밀값을 읽었다(-g)")
+            self.assertEqual(argv[1:2], ["find-generic-password"], "존재 확인이 아니다: %r" % argv[1:])
+            pairs = sorted(zip(argv[2::2], argv[3::2]))
+            self.assertEqual((len(argv), pairs), (6, [("-a", "antigravity"), ("-s", "gemini")]),
+                             "존재 확인의 인자가 다르다: %r" % argv[1:])
+        self.assertGreaterEqual(len(self.fake.security), at_least,
+                                "agy 키체인 항목이 있는지 확인하지 않았다")
+
     clock = None
 
     def setUp(self):
@@ -234,8 +493,12 @@ class AgyCase(unittest.TestCase):
         self.agy_path = os.path.join(self.home, "fakebin", "agy")
         env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
         env.pop("CLAUDE_PET_DEBUG", None)
+        for name in ("ANTIGRAVITY_APP_DATA_DIR", "SSH_TTY", "SSH_CLIENT", "SSH_CONNECTION"):
+            env.pop(name, None)
         self._patch(mock.patch.dict(os.environ, env, clear=True))
+        self.fallback = os.path.join(self.home, ".gemini", "antigravity-cli", "antigravity-oauth-token")
         self.fake = AgyFake(self.clock)
+        self.addCleanup(self.fake.close)
         self.which = {"agy": self.agy_path}
         real_which = shutil.which
         self._patch(mock.patch.object(claude_pet.shutil, "which",
@@ -297,6 +560,19 @@ def refresh_worker(test, state, claude_rows, codex_rows):
         gui_functions(test, tuple(extra), scope)
     exec(compile(ast.Module(body=[found[0]], type_ignores=[]), str(SOURCE), "exec"), scope)
     return scope["refresh_"]
+
+
+class _FakeTime:
+    """`time` 모듈의 대역 — time() 만 dict 의 "now" 를 읽고 나머지는 진짜다."""
+
+    def __init__(self, box):
+        self.box = box
+
+    def time(self):
+        return self.box["now"]
+
+    def __getattr__(self, name):
+        return getattr(_real_time, name)
 
 
 def wait_for(cond, seconds):
@@ -404,6 +680,28 @@ class ParseAgyUsageTests(unittest.TestCase):
         rows = self.parse(agy_payload([OTHER_GROUP]))
         assert_rows(self, rows, EXPECTED_ROWS[4:])
 
+    def test_disabled_buckets_are_skipped_everywhere(self):
+        """v3: `"disabled": true` 인 버킷은 0행 계산에서도 행에서도 빠진다. `"disabled": false` 는 보통
+        버킷이다. 비활성 버킷은 Gemini 묶음의 **가운데**, 가장 낮은 남은 비율(0)로 둔다.
+        모두 비활성이면 None.
+        Rivals: 63d5420(비활성 0 을 100% 로 — 0행이 100% 에 고정); 0행에서만 뺌(행은 남음); 행에서만 뺌
+        (0행은 100%); `disabled` 키가 있기만 하면 뺌(false 도 빠짐 — gemini-5h 가 사라져 0행 20%)."""
+        gem = {"name": "Gemini Models", "buckets": [
+            _bucket("gemini-weekly", "weekly", 0.8, "2026-11-25T02:13:31Z"),
+            dict(_bucket("gemini-off", "5h", 0, "2026-11-18T05:00:00Z"), disabled=True),
+            dict(_bucket("gemini-5h", "5h", 0.34, "2026-11-18T07:13:31Z"), disabled=False)]}
+        other = {"name": "Claude and GPT models", "buckets": [
+            dict(_bucket("3p-off", "weekly", 0, "2026-11-25T03:45:42Z"), disabled=True),
+            _bucket("3p-5h", "5h", 0.1, "2026-11-18T08:45:42Z")]}
+        assert_rows(self, self.parse(agy_payload([gem, other])), [
+            ("gemini", 66.0, _utc(2026, 11, 18, 7, 13, 31), None),
+            ("gemini_group:gemini-weekly", 20.0, _utc(2026, 11, 25, 2, 13, 31), None),
+            ("gemini_group:gemini-5h", 66.0, _utc(2026, 11, 18, 7, 13, 31), None),
+            ("gemini_group:3p-5h", 90.0, _utc(2026, 11, 18, 8, 45, 42), None)])
+        all_off = {"name": "Gemini Models", "buckets": [
+            dict(_bucket("gemini-5h", "5h", 0.5, "2026-11-18T07:13:31Z"), disabled=True)]}
+        self.assertIsNone(self.parse(agy_payload([all_off])))
+
     def test_parse_agy_usage_is_pure(self):
         """모듈 상태(GEMINI_GROUP_WINDOWS 를 포함한 어떤 모듈 수준 dict·list·set 도)를 바꾸지 않는다.
         Rival: 파서가 window 표나 Gemini id 목록을 모듈에 적음."""
@@ -430,8 +728,11 @@ class FetchViaAgyTests(AgyCase):
 
     def test_it_runs_exactly_agy_usage_json_without_a_shell_in_a_neutral_dir(self):
         """argv 는 정확히 `[agy, "-p", "/usage", "--output-format", "json"]`(셸 없음), timeout 은 0 초과 30
-        이하, cwd 는 홈이나 임시 디렉터리. 행은 parse 결과, 상태는 성공. Gemini 를 위해 security 를 부르지
-        않는다. Rivals: 90fd32b(키체인 + cloudcode-pa HTTP — agy 를 띄우지 않음); 셸 문자열; timeout 없음
+        이하, cwd 는 홈이나 임시 디렉터리. 행은 parse 결과, 상태는 성공. v4: 그 전에 agy 키체인 항목이
+        있는지 확인한다(`-w` 없이) — 그 밖의 security 호출은 없다. Rivals: 63d5420(확인 없이 agy 를 띄움 —
+        로그인 안 된 사용자에게 OAuth 절차를 시작); `-w` 로 비밀값을 읽어 확인; env 없음(agy 가 기본
+        브라우저에 로그인 탭을 연다); env 를 SSH_TTY 하나로 갈아치움(HOME·PATH 가 없어 agy 가 설정을 못
+        찾는다); os.environ 자체에 SSH_TTY 를 씀(앱이 띄우는 다른 프로세스까지 바뀐다); 90fd32b(키체인 + cloudcode-pa HTTP — agy 를 띄우지 않음); 셸 문자열; timeout 없음
         (멈춘 agy 가 워커를 영원히 붙듦); cwd 없음(앱의 작업 디렉터리 — 번들 안 — 에서 agy 가 돎);
         `/usage` 대신 프롬프트(모델 토큰을 씀)."""
         rows = self.fetch()
@@ -439,7 +740,8 @@ class FetchViaAgyTests(AgyCase):
         _t, argv, kw = self.fake.calls[0]
         self.assertEqual(argv, [self.agy_path] + AGY_ARGS)
         self.assertFalse(kw.get("shell"), "셸로 띄웠다")
-        timeout = kw.get("timeout")
+        # run 으로 띄웠으면 그 timeout 인자, Popen 으로 띄웠으면 구현의 상한 상수.
+        timeout = kw.get("timeout", getattr(claude_pet, "GEMINI_AGY_TIMEOUT", None))
         self.assertIsInstance(timeout, (int, float), "timeout 이 없다")
         self.assertTrue(0 < timeout <= 30, "timeout %r" % timeout)
         cwd = kw.get("cwd")
@@ -448,7 +750,14 @@ class FetchViaAgyTests(AgyCase):
         self.assertTrue(real == os.path.realpath(self.home)
                         or real.startswith(os.path.realpath(tempfile.gettempdir())),
                         "cwd 가 중립 디렉터리가 아니다: %r" % cwd)
-        self.assertEqual(self.fake.security, [], "Gemini 를 위해 키체인을 읽었다")
+        self.assert_only_existence_checks(at_least=1)
+        # v5 a: env 는 os.environ 의 사본에 SSH_TTY="1" — agy 가 브라우저를 열지 않게.
+        env = kw.get("env")
+        self.assertIsInstance(env, dict, "agy 에 env 를 주지 않았다 — SSH_TTY 가 없으면 agy 가 브라우저를 연다")
+        self.assertEqual(env.get("SSH_TTY"), "1")
+        self.assertEqual(env.get("HOME"), self.home, "env 가 os.environ 의 사본이 아니다(HOME 이 없다)")
+        self.assertIn("PATH", env)
+        self.assertNotIn("SSH_TTY", os.environ, "앱 자신의 환경을 바꿨다")
         assert_rows(self, rows, EXPECTED_ROWS)
         self.assertEqual(self.status().get("last_error"), None)
         self.assertIs(self.status().get("auth_error"), False)
@@ -488,7 +797,10 @@ class FetchViaAgyTests(AgyCase):
                                     ("ok", agy_payload(status="ERROR"), None)):
             with self.subTest(mode=mode, status=None if payload is None else payload["status"]):
                 reset_gemini_state()
-                self.fake.mode = mode
+                if mode == "timeout":
+                    self.never_exits(mode)
+                else:
+                    self.fake.mode = mode
                 if payload is not None:
                     self.fake.payload = payload
                 fetch = _require("fetch_gemini_usage")
@@ -504,6 +816,7 @@ class FetchViaAgyTests(AgyCase):
                     self.assertEqual(last, want)
                 self.assertIs(self.status().get("auth_error"), False)
                 self.fake.payload = agy_payload()
+                self.assertEqual(self.fake.alive(), 0, "agy 프로세스가 남았다")
 
     def test_off_macos_nothing_is_spawned(self):
         """macOS 가 아니면 None, 프로세스 0. Rival: 플랫폼을 안 봄."""
@@ -523,6 +836,218 @@ class FetchViaAgyTests(AgyCase):
                   if isinstance(n, ast.FunctionDef) and n.name == "_security_read_blob")
         self.assertNotIn("item", [a.arg for a in fn.args.args + fn.args.kwonlyargs])
         self.assertNotIn("antigravity", ast.unparse(fn))
+
+
+# ═════════════════════════════ v3·v4: 로그인 안 됨 ═════════════════════════════
+
+
+class AgyLoginTests(AgyCase):
+
+    def fetch(self):
+        return _require("fetch_gemini_usage")()
+
+    def test_without_the_keychain_item_agy_is_never_run(self):
+        """v4: agy 키체인 항목이 없다 = 로그인 안 됨 → agy 를 **띄우지 않는다**. None, last_error "login",
+        auth_error True. 확인은 `-w` 없는 존재 확인 한 번.
+        Rivals: 63d5420(확인 없이 agy 를 띄움 — 그 실행이 로그인 절차를 시작한다); 확인은 하고도 띄움;
+        `-w` 로 읽음; 없음을 "not_installed"·일시 실패로 보임."""
+        _require("parse_agy_usage")
+        self.fake.keychain = "absent"
+        rows = self.fetch()
+        self.assertEqual(self.fake.calls, [], "로그인 안 된 사용자에게 agy 를 띄웠다")
+        self.assert_only_existence_checks(at_least=1)
+        self.assertEqual(len(self.fake.security), 1)
+        self.assertIsNone(rows)
+        self.assertEqual(self.status().get("last_error"), "login")
+        self.assertIs(self.status().get("auth_error"), True)
+
+    def test_the_fallback_token_file_counts_as_a_login(self):
+        """v5 c: 키체인 항목은 없지만(44) 파일 폴백 `~/.gemini/antigravity-cli/antigravity-oauth-token` 이
+        있다(키체인을 못 쓰는 환경의 agy) → 로그인된 것으로 보고 agy 를 띄워 행을 낸다. 파일을 읽지는
+        않는다(존재와 mtime 만 본다 — 내용은 여기서 빈 JSON 이다).
+        Rival: 키체인만 봄(파일 저장소를 쓰는 사용자는 영영 '로그인 안 됨')."""
+        _require("parse_agy_usage")
+        self.fake.keychain = "absent"
+        self.write_fallback(1_800_000_000)
+        rows = self.fetch()
+        self.assertEqual(len(self.fake.calls), 1, "폴백 파일이 있는데 agy 를 띄우지 않았다")
+        assert_rows(self, rows, EXPECTED_ROWS)
+        self.assertIs(self.status().get("auth_error"), False)
+
+    def test_a_locked_keychain_is_not_asked_and_the_last_answer_stands(self):
+        """`keychain_locked()` 이면 존재 확인도 하지 않고 직전 판단을 유지한다: '있음'이었으면 agy 를 계속
+        띄우고, '없음'이었으면 계속 띄우지 않는다. 잠긴 채 시작했으면 security 호출 0(그때 agy 를 띄우는지는
+        계약에 없다 — 보지 않는다).
+        Rivals: 잠겨도 확인함(잠긴 키체인에 묻는 것이 암호 창의 기회다); 잠기면 '없음'으로 봄(로그인된
+        사용자의 수치가 사라짐); 잠기면 '있음'으로 봄(로그인 안 된 사용자에게 agy 를 띄움)."""
+        _require("parse_agy_usage")
+        locked = {"v": True}
+        self._patch(mock.patch.object(claude_pet, "keychain_locked", lambda: locked["v"]))
+        clock = {"now": 1_800_000_000.0}
+        self._patch(mock.patch.object(claude_pet, "time", _FakeTime(clock)))
+        self.fake.clock = _FakeTime(clock)
+        self.fetch()
+        self.assertEqual(self.fake.security, [], "잠긴 키체인에 물었다")
+        for known, spawns in (("present", 1), ("absent", 0)):
+            with self.subTest(known=known):
+                reset_gemini_state()
+                self.fake.calls.clear()
+                del self.fake.security[:]
+                self.fake.keychain = known
+                locked["v"] = False
+                self.fetch()
+                self.assertEqual(len(self.fake.calls), spawns)
+                asked = len(self.fake.security)
+                self.assertGreaterEqual(asked, 1)
+                locked["v"] = True
+                self.fake.keychain = "absent" if known == "present" else "present"   # 물으면 답이 바뀐다
+                clock["now"] += 330
+                rows = self.fetch()
+                self.assertEqual(len(self.fake.security), asked, "잠긴 키체인에 물었다")
+                self.assertEqual(len(self.fake.calls), spawns * 2,
+                                 "잠긴 동안 직전 판단(%s)을 유지하지 않았다" % known)
+                self.assertEqual(bool(rows), known == "present")
+
+    def test_agy_asking_for_a_login_is_ended_at_once(self):
+        """항목은 있는데 agy 가 로그인을 요구한다(refresh token 만료·취소): stdout 없이 stderr 에 로그인
+        안내를 쓰고 끝나지 않는다 → **그 즉시 끝낸다**: 상한(여기서는 8초)을 기다리지 않고 돌아오고, agy
+        프로세스가 남지 않고, None, last_error "login", auth_error True.
+        Rivals: 63d5420(상한까지 기다리고 "timeout" — 로그인 절차가 30초 동안 열려 있다); 상한까지 기다린 뒤
+        예외의 출력에서 알아냄(v3 — 판정은 맞지만 그동안 프로세스가 산다); 판정만 하고 agy 를 끝내지 않고
+        돌아옴(로그인 절차가 뒤에 남는다); agy 만 끝내고 그것이 띄운 자식은 남김(그룹이 아니라 pid 하나만). 이 테스트는 **돌고 있는** 프로세스만 본다 — 끝낸 뒤 거두지 않은
+        좀비는 가르지 못한다(상태를 묻는 순간 거둬진다)."""
+        self.never_exits("login_wait", wait=8)
+        t0 = _real_time.time()
+        rows = self.fetch()
+        took = _real_time.time() - t0
+        self.assertEqual(len(self.fake.calls), 1)
+        self.assertIsNone(rows)
+        self.assertEqual(self.status().get("last_error"), "login")
+        self.assertIs(self.status().get("auth_error"), True)
+        self.assertLess(took, 4.0, "로그인 안내가 나왔는데 agy 를 바로 끝내지 않았다(%.1f초)" % took)
+        # v5 b: 프로세스 **그룹**을 끝낸다 — 대역 agy 는 이 mode 에서 같은 그룹에 자식을 하나 띄워 둔다.
+        self.assertEqual(self.fake.alive(), 0, "agy 프로세스(또는 그것이 띄운 자식)가 남았다")
+        env = self.fake.calls[0][2].get("env") or {}
+        self.assertEqual(env.get("SSH_TTY"), "1", "로그인을 요구하는 agy 를 SSH_TTY 없이 띄웠다")
+        self.assert_only_existence_checks()
+
+    def test_an_immediate_authentication_required_error_is_login(self):
+        """바로 실패하는 로그인 요구: 0 아닌 종료, 빈 stdout, stderr "Error: authentication required. Run
+        'agy' to log in." → "login", auth_error True.
+        Rival: 63d5420(stdout 이 비면 로그인 낱말을 찾지 않음 → "agy_failed")."""
+        self.fake.mode = "login_exit"
+        self.assertIsNone(self.fetch())
+        self.assertEqual(self.status().get("last_error"), "login")
+        self.assertIs(self.status().get("auth_error"), True)
+
+    def test_a_login_wait_that_ran_out_is_login_though_its_stdout_matches_offline(self):
+        """60초를 다 기다린 로그인 요구: 종료 1, stdout 은 오프라인 실패와 **같은** ERROR JSON, stderr 에
+        "Authentication required … Run 'agy' interactively to log in." → "login", auth_error True.
+        Rivals: stdout 의 error 문구만 보고 가름(오프라인과 구분 못 함 → 일시 실패로 보고 5분마다 로그인
+        절차를 다시 시작); stdout 이 비었을 때만 stderr 를 봄."""
+        self.fake.mode = "login_timeout_exit"
+        self.assertIsNone(self.fetch())
+        self.assertEqual(self.status().get("last_error"), "login")
+        self.assertIs(self.status().get("auth_error"), True)
+
+    def test_offline_token_refresh_failures_are_not_login(self):
+        """로그인된 사용자의 오프라인 토큰 갱신 실패는 로그인 안 됨이 아니다 — 일시 실패다(v5 d: stdout 은
+        ERROR JSON "authentication failed or timed out", 종료 1, stderr 에 "token refresh failed due to
+        network error"): "agy_failed", 끝나지 않으면 상한까지 기다려 "timeout", 어느 쪽도 auth_error False.
+        **63d5420 에서는 판정 자체는 맞다**(그때는 stderr 를 거의 안 봤다) — 로그인 판정을 넓히는 구현을
+        가르는 가드다. Rivals: 낱말을 "authentication"/"auth" 로 넓힘(오프라인인 사용자에게 로그인하라고
+        함); stderr 에 무엇이든 나오면 바로 끝냄."""
+        _require("parse_agy_usage")
+        for mode, want in (("offline_exit_a", "agy_failed"), ("offline_exit_b", "agy_failed"),
+                           ("offline_wait", "timeout")):
+            with self.subTest(mode=mode):
+                reset_gemini_state()
+                self.fake.calls.clear()
+                if want == "timeout":
+                    self.never_exits(mode)
+                else:
+                    self.fake.mode = mode
+                self.assertIsNone(self.fetch())
+                self.assertEqual(len(self.fake.calls), 1)
+                self.assertEqual(self.status().get("last_error"), want)
+                self.assertIs(self.status().get("auth_error"), False)
+                self.assertEqual(self.fake.alive(), 0, "agy 프로세스가 남았다")
+
+
+# ═════════════════════════════ v3: 펫 기분 ═════════════════════════════
+
+
+class GeminiMoodTests(AgyCase):
+    """`mood_for(stats, rows, runtime, codex_rows=…, gemini_rows=…)` — 이름 `gemini_rows` 는 이 파일이 건다
+    (codex_rows 의 짝). 보이는 Gemini 의 고른 게이지 행만 센다."""
+
+    def rt(self, **over):
+        rt = {"mode": "sub", "show_claude": False, "claude_gauges": ["session", "weekly"],
+              "show_codex": False, "codex_mode": "sub", "codex_gauges": ["session", "weekly"],
+              "show_gemini": True, "gemini_gauges": ["gemini"]}
+        rt.update(over)
+        return rt
+
+    def mood(self, rt, gemini_rows, rows=None, codex_rows=None):
+        try:
+            return claude_pet.mood_for(None, rows, rt, codex_rows=codex_rows, gemini_rows=gemini_rows)
+        except TypeError as e:
+            self.fail("mood_for 가 gemini_rows 를 받지 않는다 — v3 계약 3 이 아직 구현되지 않았다 (%s)" % e)
+
+    def test_the_headline_row_sets_the_mood_at_the_same_thresholds(self):
+        """Gemini 만 보이는 사용자: 0행 90% → failed, 60% → waiting, 10% → idle. 경계는 다른 제공자와
+        같다(≥85, ≥50). Rivals: 63d5420(Gemini 를 안 봄 — 늘 idle); 남은 비율로 착각(10% 에서 failed)."""
+        for pct, want in ((90.0, "failed"), (85.0, "failed"), (84.0, "waiting"), (60.0, "waiting"),
+                          (50.0, "waiting"), (49.0, "idle"), (10.0, "idle")):
+            with self.subTest(pct=pct):
+                self.assertEqual(self.mood(self.rt(), [("gemini", pct, None, None)]), want)
+
+    def test_hidden_gemini_and_unchosen_gauges_do_not_move_the_pet(self):
+        """숨긴 Gemini 의 95% 는 기분을 바꾸지 않는다. 고르지 않은 게이지의 행도 그렇다(0행만 골랐는데 묶음
+        행이 95%). 다른 제공자와 합치면 가장 높은 것이 이긴다 — 어느 쪽이 높든.
+        Rivals: 표시 설정을 안 봄; 게이지 선택을 안 봄(모든 Gemini 행을 셈); Gemini 가 있으면 Claude 행을
+        버림; Gemini 를 Codex 행 자리에 넣어 codex_gauges 로 거름(전부 사라짐)."""
+        rows = [("gemini", 20.0, None, None), ("gemini_group:x-1", 95.0, None, None)]
+        self.assertEqual(self.mood(self.rt(show_gemini=False), [("gemini", 95.0, None, None)]), "idle")
+        self.assertEqual(self.mood(self.rt(gemini_gauges=[]), [("gemini", 95.0, None, None)]), "idle")
+        self.assertEqual(self.mood(self.rt(), rows), "idle")
+        both = self.rt(show_claude=True, claude_gauges=["session"])
+        session = claude_pet.t("session")     # Claude 행은 번역된 라벨로 분류된다(_label_order)
+        self.assertEqual(self.mood(both, [("gemini", 90.0, None, None)],
+                                   rows=[(session, 10.0, None, None)]), "failed")
+        self.assertEqual(self.mood(both, [("gemini", 10.0, None, None)],
+                                   rows=[(session, 60.0, None, None)]), "waiting")
+        self.assertEqual(self.mood(both, None, rows=[(session, 60.0, None, None)]), "waiting")
+
+    def test_limits_and_group_gauges_follow_the_fetched_bucket_membership(self):
+        """조회 경로로 받은 행: Gemini 묶음 버킷 5%, 나머지 묶음 버킷 95%. "limits" 만 고르면 idle, "group"
+        만 고르면 failed, "gemini" 만 고르면 idle(0행 5%).
+        Rivals: limits/group 을 가르지 않고 묶음 행을 다 셈; 필과 다른 분류(id 접두사)를 씀."""
+        gem = {"name": "Gemini Models", "buckets": [_bucket("g-1", "5h", 0.95, "2026-11-18T07:00:00Z")]}
+        other = {"name": "Claude and GPT models",
+                 "buckets": [_bucket("p-1", "5h", 0.05, "2026-11-18T07:00:00Z")]}
+        self.fake.payload = agy_payload([other, gem])
+        rows = claude_pet.fetch_gemini_usage()
+        self.assertIsInstance(rows, list)
+        self.assertEqual(self.mood(self.rt(gemini_gauges=["limits"]), rows), "idle")
+        self.assertEqual(self.mood(self.rt(gemini_gauges=["group"]), rows), "failed")
+        self.assertEqual(self.mood(self.rt(gemini_gauges=["gemini"]), rows), "idle")
+
+    def test_the_app_passes_its_gemini_rows_to_mood_for(self):
+        """run_gui 의 current_mood 가 mood_for 에 `gemini_rows=` 로 state 의 Gemini 행을 넘긴다.
+        Rival: mood_for 만 고치고 앱은 넘기지 않음(펫은 그대로 idle)."""
+        tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+        gui = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_gui")
+        fn = [n for n in ast.walk(gui) if isinstance(n, ast.FunctionDef) and n.name == "current_mood"]
+        self.assertEqual(len(fn), 1)
+        calls = [c for c in ast.walk(fn[0]) if isinstance(c, ast.Call)
+                 and isinstance(c.func, ast.Name) and c.func.id == "mood_for"]
+        self.assertTrue(calls, "current_mood 가 mood_for 를 부르지 않는다")
+        for call in calls:
+            kw = {k.arg: k.value for k in call.keywords}
+            self.assertIn("gemini_rows", kw, "current_mood 가 Gemini 행을 넘기지 않는다")
+            consts = {n.value for n in ast.walk(kw["gemini_rows"]) if isinstance(n, ast.Constant)}
+            self.assertIn("gemini", consts, 'gemini_rows 가 state["gemini"] 가 아니다')
 
 
 if __name__ == "__main__":
