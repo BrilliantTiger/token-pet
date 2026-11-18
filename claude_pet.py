@@ -2296,6 +2296,9 @@ _keychain_prompt_until = [0.0]
 # 있는 동안 기다린 모양) 사용자가 창에서 취소했다(종료 코드 128, errSecUserCanceled). 항목이 없는
 # 것(None)과 다르다: 다시 물으면 창이 또 뜬다.
 _KEYCHAIN_BLOCKED = object()
+# _security_read_blob(item=…) 의 '항목이 없다'(security 종료 44, errSecItemNotFound) — agy 에 로그인한 적
+# 없는 Mac 의 평범한 상태다. 호출자는 자동 다시 읽기를 길게 물러선다.
+_KEYCHAIN_MISSING = object()
 
 
 def keychain_locked():
@@ -2368,8 +2371,8 @@ def _security_read_blob(timeout, item=None):
     argv.append("-w")
     if item is not None:
         # 이 갈래는 읽기가 **막혔는지**도 알린다(_KEYCHAIN_BLOCKED): 시간 초과는 창이 떠 있는 동안
-        # security 가 기다린 모양이고, 128 은 사용자가 그 창에서 취소한 것이다. 둘 다 다시 물으면 창이
-        # 또 뜨므로 호출자는 자동 읽기를 멈춘다. 항목 없음(44) 같은 나머지 실패는 None 이다.
+        # security 가 기다린 모양이고, 128·51 은 사용자가 그 창에서 취소·거부한 것이다. 다시 물으면 창이
+        # 또 뜨므로 호출자는 자동 읽기를 멈춘다. 항목 없음(44)은 _KEYCHAIN_MISSING, 나머지 실패는 None.
         try:
             r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -2378,9 +2381,13 @@ def _security_read_blob(timeout, item=None):
         except Exception as e:
             _dbg("keychain: security failed", type(e).__name__)
             return None
-        if r.returncode == 128 or "User canceled" in str(r.stderr or ""):
-            _dbg("keychain: security canceled", r.returncode)
+        if r.returncode in (51, 128) or "User canceled" in str(r.stderr or ""):
+            # 128 = 사용자 취소(errSecUserCanceled), 51 = 사용자 거부(errSecAuthFailed 의 하위 바이트).
+            _dbg("keychain: security canceled or denied", r.returncode)
             return _KEYCHAIN_BLOCKED
+        if r.returncode == 44:
+            _dbg("keychain: item not found")
+            return _KEYCHAIN_MISSING
         if r.returncode != 0 or not r.stdout.strip():
             _dbg("keychain: security rc", r.returncode)
             return None
@@ -4550,32 +4557,42 @@ _gemini_cache = {"t": 0.0, "rows": None, "ok_t": None}   # ok_t: 마지막 '성�
 # 읽던 security 가 시간 초과·사용자 취소로 끝나 자동 읽기를 멈췄다(사용자가 펫을 누르거나 재시작할
 # 때까지). 그때 auth_error 는 내린다 — 필이 보일 할 일은 '토큰 만료'가 아니라 '다시 눌러 주세요'다.
 GEMINI_STATUS = {"auth_error": False, "last_error": None}
-# summary 버킷의 창(window: "5h"·"weekly" …) — parse_gemini_quota 가 bucketId 로 적고 필 구간
-# (gemini_row_label)이 라벨을 고를 때 읽는다. CODEX_WINDOWS 와 같은 꼴이다. 라벨을 bucketId 의 모양에서
-# 짐작하지 않는다(관측된 id "3p-weekly" 는 우연히 창을 담고 있을 뿐이다).
+# summary 버킷의 창(window: "5h"·"weekly" …) — 조회 경로(fetch_gemini_usage)가 gemini_group_windows 로
+# 꺼내 bucketId 로 적고, 필 구간(gemini_summary_segment → gemini_row_label)이 라벨을 고를 때 읽는다.
+# CODEX_WINDOWS 와 같은 꼴이다. 파서(parse_gemini_quota)는 이 표를 건드리지 않는다(순수). 라벨을
+# bucketId 의 모양에서 짐작하지 않는다(관측된 id "3p-weekly" 는 우연히 창을 담고 있을 뿐이다).
 GEMINI_GROUP_WINDOWS = {}
 
 # ── 키체인 조용히(리뷰 M1) ──
 # 해석한 자격증명을 기억하고, agy 항목은 필요할 때만 다시 읽는다. 비밀값을 복호화하는 일 자체가
 # SecurityAgent 창의 기회라서다 — Claude 쪽이 v1.1.1 에서 같은 문제를 _oauth_blob_noprompt 로 고쳤다.
 # 다시 읽는 때(_gemini_should_read):
-#   · 기억한 것이 없을 때, 401/403 을 받았을 때(reread),
-#   · 만료가 GEMINI_REREAD_BEFORE_SEC 안으로 다가왔을 때 — agy 는 떠 있으면 만료 전에 새 토큰을 쓴다,
-#   · 기억한 토큰이 이미 못 보낼 만큼 만료됐으면 GEMINI_EXPIRED_REREAD_SEC 마다(agy 가 닫혀 있는
-#     평범한 상태라 매분 복호화할 이유가 없다 — 사용자가 펫을 누르면 그 즉시),
-#   · 그 밖에는 KEYCHAIN_FACTS_TTL(1800초)마다 한 번(로그아웃·계정 전환을 따라잡는다), 그리고
-#     조회가 GEMINI_FETCH_GAP_SEC 넘게 끊겼다가 다시 시작될 때(잠자기·숨겨 둠 뒤 — 그동안 agy 가
-#     무엇을 했는지 모른다).
-#   어느 경우든 **KEYCHAIN_FACTS_MIN_INTERVAL(60초)에 한 번보다 자주 읽지 않는다**.
-# security 가 시간 초과하거나 사용자가 취소하면(_KEYCHAIN_BLOCKED) 자동 읽기를 멈춘다(blocked_at) —
-# allow_keychain_prompt() 가 그 뒤에 열렸을 때(사용자가 펫을 누름) 또는 재시작
+#   · 기억한 것이 없을 때, 401/403 을 받았을 때(reread), 사용자가 펫을 눌렀을 때,
+#   · 기억한 만료 GEMINI_REREAD_BEFORE_SEC(300초) 전부터 GEMINI_REREAD_AFTER_SEC(600초) 뒤까지 —
+#     agy 는 게으르게 바꾼다(관측: 옛 토큰 만료 약 1초 **뒤에** 새 토큰을 쓴다, Coordinator 2026-11-18),
+#   · 그보다 더 지난 만료 토큰이면 GEMINI_EXPIRED_REREAD_SEC 마다(agy 가 닫혀 있는 평범한 상태),
+#   · 항목이 없으면(종료 44 — agy 를 안 쓰는 Mac) GEMINI_MISSING_REREAD_SEC(1800초)마다,
+#   · 그 밖에는 KEYCHAIN_FACTS_TTL(1800초)마다 한 번(로그아웃·계정 전환을 따라잡는다).
+#   어느 경우든 **KEYCHAIN_FACTS_MIN_INTERVAL(60초)에 한 번보다 자주 읽지 않는다**(사용자 클릭도).
+# 자동 읽기의 security timeout 은 짧게(GEMINI_KEYCHAIN_AUTO_TIMEOUT), 사용자가 누른 직후의 읽기는
+# GEMINI_KEYCHAIN_USER_TIMEOUT(60초) — 사람이 창에 답할 시간이다.
+# security 가 시간 초과하거나 사용자가 취소·거부하면(_KEYCHAIN_BLOCKED: 128·51) 자동 읽기를 멈춘다
+# (blocked_at) — allow_keychain_prompt() 가 그 뒤에 열렸을 때(사용자가 펫을 누름) 또는 재시작
 # (_reset_keychain_quiet_state)까지. 잠긴 키체인(keychain_locked)에서는 읽지 않고 기억한 토큰을 쓴다.
+# 만료 직후 유예(fetch_gemini_usage): 토큰을 보낼 수 없게 된 때(만료 − GEMINI_EXPIRY_MARGIN_SEC)부터
+# 만료 GEMINI_EXPIRY_GRACE_SEC(120초) 뒤까지는, 직전 조회가 성공했으면 직전 행을 그대로 보이고
+# "expired" 를 올리지 않는다 — agy 가 새 토큰을 쓰는 몇 초 동안 필이 '만료'로 깜빡이지 않게. 그 토큰은
+# 여전히 보내지 않는다.
 # 이름에 gemini 와 cache 가 함께 들어 있다 — 테스트 하네스가 조회마다 처음 모양으로 되돌리는 표시다.
 GEMINI_REREAD_BEFORE_SEC = 300
+GEMINI_REREAD_AFTER_SEC = 600
 GEMINI_EXPIRED_REREAD_SEC = 300
-GEMINI_FETCH_GAP_SEC = 600
-_GEMINI_CRED_EMPTY = {"cred": None, "t_read": None, "t_seen": None, "reread": False,
-                      "blocked_at": None}
+GEMINI_EXPIRY_GRACE_SEC = 120
+GEMINI_MISSING_REREAD_SEC = 1800
+GEMINI_KEYCHAIN_AUTO_TIMEOUT = 5
+GEMINI_KEYCHAIN_USER_TIMEOUT = 60
+_GEMINI_CRED_EMPTY = {"cred": None, "t_read": None, "reread": False, "blocked_at": None,
+                      "missing": False}
 _gemini_cred_cache = dict(_GEMINI_CRED_EMPTY)
 # 새로고침 워커가 Gemini 를 자기 스레드에서 받는 중인가(start_gemini_refresh) — 한 번에 하나만.
 _gemini_refresh = {"busy": False}
@@ -4668,11 +4685,11 @@ def _gemini_used_pct(fraction):
     return 100.0 - fraction * 100.0
 
 
-def parse_gemini_quota(quota, summary=None, windows=None):
+def parse_gemini_quota(quota, summary=None):
     """retrieveUserQuota(+ retrieveUserQuotaSummary) 응답 → [(label, pct, reset_dt, None)] 또는 None.
 
-    summary 버킷의 창(window)은 windows 표(기본 GEMINI_GROUP_WINDOWS)에 bucketId 로 적는다 — 행 모양
-    (4-튜플)을 바꾸지 않고 필 라벨에 창을 넘기는 통로다(parse_codex_usage 의 windows 와 같다).
+    순수 함수다 — 모듈 상태를 읽지도 쓰지도 않는다. 그룹 행의 창(window)은 gemini_group_windows 가 같은
+    summary 에서 따로 꺼내고, 조회 경로(fetch_gemini_usage)가 GEMINI_GROUP_WINDOWS 로 나른다.
 
     pct 는 **쓴** 비율(0–100), reset_dt 는 aware UTC 또는 None. 순서:
       · "gemini" — modelId 가 "gemini-" 로 시작하고 쓸 수 있는 비율을 가진 버킷 중 남은 비율이
@@ -4713,24 +4730,34 @@ def parse_gemini_quota(quota, summary=None, windows=None):
             frac = _gemini_fraction(b.get("remainingFraction"))
             if frac is None:
                 continue
-            window = b.get("window")
-            table = GEMINI_GROUP_WINDOWS if windows is None else windows
-            if isinstance(window, str) and window.strip():
-                table[bucket_id] = window.strip()
-            else:
-                table.pop(bucket_id, None)
             rows.append(("gemini_group:" + bucket_id, _gemini_used_pct(frac),
                          _parse_rfc3339(b.get("resetTime")), None))
     return rows or None
 
 
-def _read_antigravity_secret():
-    """agy 의 키체인 비밀값 문자열. 없거나 못 읽으면 None.
+def gemini_group_windows(summary):
+    """retrieveUserQuotaSummary 응답 → {bucketId: window}(순수). window 가 문자열이 아닌 버킷은 뺀다."""
+    out = {}
+    groups = summary.get("groups") if isinstance(summary, dict) else None
+    for g in groups if isinstance(groups, list) else ():
+        gb = g.get("buckets") if isinstance(g, dict) else None
+        for b in gb if isinstance(gb, list) else ():
+            if not isinstance(b, dict):
+                continue
+            bucket_id, window = b.get("bucketId"), b.get("window")
+            if isinstance(bucket_id, str) and bucket_id.strip() and isinstance(window, str) \
+                    and window.strip():
+                out[bucket_id] = window.strip()
+    return out
+
+
+def _read_antigravity_secret(timeout=GEMINI_KEYCHAIN_AUTO_TIMEOUT):
+    """agy 의 키체인 비밀값 문자열, 또는 _KEYCHAIN_BLOCKED / _KEYCHAIN_MISSING, 그 밖의 실패는 None.
 
     _security_read_blob 을 거친다 — 키체인이 잠겨 있으면 묻지 않는다(잠긴 키체인에 묻는 것이
     '키체인 암호' 창의 기회다). 네이티브 Keychain API 는 쓰지 않는다: 그쪽은 프롬프트를 띄울 수
     있는 경로다."""
-    return _security_read_blob(5, item=(GEMINI_KEYCHAIN_SERVICE, GEMINI_KEYCHAIN_ACCOUNT))
+    return _security_read_blob(timeout, item=(GEMINI_KEYCHAIN_SERVICE, GEMINI_KEYCHAIN_ACCOUNT))
 
 
 def _gemini_arch():
@@ -4811,20 +4838,25 @@ def _gemini_should_read(now, mem):
     if blocked_at is not None and not _gemini_user_acted_since(blocked_at):
         return False                     # 멈춤 — 사용자가 누르거나 재시작할 때까지
     last = mem.get("t_read")
-    if last is not None and now - last < KEYCHAIN_FACTS_MIN_INTERVAL:
+    if last is None:
+        return True
+    if now - last < KEYCHAIN_FACTS_MIN_INTERVAL:
         return False                     # 어떤 이유로도 60초에 한 번보다 자주 읽지 않는다
-    cred = mem.get("cred")
-    if cred is None or last is None or mem.get("reread"):
-        return True
-    seen = mem.get("t_seen")
-    if seen is not None and now - seen > GEMINI_FETCH_GAP_SEC:
-        return True                      # 조회가 오래 끊겼다 — 잠자기·숨겨 둠 뒤
+    if _gemini_user_acted_since(last):
+        return True                      # 사용자가 마지막 읽기 뒤에 눌렀다 — 한 번 읽는다
     since = now - last
-    left = _gemini_seconds_left(cred)
-    if left is not None and left < GEMINI_EXPIRY_MARGIN_SEC:
-        return since >= GEMINI_EXPIRED_REREAD_SEC or _gemini_user_acted_since(last)
-    if left is not None and left < GEMINI_REREAD_BEFORE_SEC:
+    cred = mem.get("cred")
+    if cred is None:
+        return since >= GEMINI_MISSING_REREAD_SEC if mem.get("missing") else True
+    if mem.get("reread"):
         return True
+    left = _gemini_seconds_left(cred)
+    if left is None:
+        return since >= KEYCHAIN_FACTS_TTL
+    if -GEMINI_REREAD_AFTER_SEC <= left < GEMINI_REREAD_BEFORE_SEC:
+        return True                      # 만료 앞뒤 — agy 가 새 토큰을 쓰는 때
+    if left < -GEMINI_REREAD_AFTER_SEC:
+        return since >= GEMINI_EXPIRED_REREAD_SEC
     return since >= KEYCHAIN_FACTS_TTL
 
 
@@ -4840,42 +4872,47 @@ def _gemini_credential(now):
     if keychain_locked() is True:
         _dbg("gemini cred: keychain locked; using the remembered credential")
         return mem.get("cred")
+    timeout = (GEMINI_KEYCHAIN_USER_TIMEOUT if _keychain_prompt_allowed()
+               else GEMINI_KEYCHAIN_AUTO_TIMEOUT)
     mem["t_read"] = now
-    secret = _read_antigravity_secret()
+    secret = _read_antigravity_secret(timeout)
     if secret is _KEYCHAIN_BLOCKED:
         mem["blocked_at"] = now
         _dbg("gemini cred: keychain read blocked; automatic reads stop")
         return mem.get("cred")
     mem["blocked_at"] = None
     mem["reread"] = False
-    mem["cred"] = parse_antigravity_credential(secret)
+    mem["missing"] = secret is _KEYCHAIN_MISSING
+    mem["cred"] = None if mem["missing"] else parse_antigravity_credential(secret)
     return mem["cred"]
 
 
 def _gemini_query(token):
-    """loadCodeAssist → retrieveUserQuota → retrieveUserQuotaSummary → (행 | None, 오류 종류 | None)."""
+    """loadCodeAssist → retrieveUserQuota → retrieveUserQuotaSummary
+    → (행 | None, 오류 종류 | None, 그룹 창 표 | None). 창 표는 summary 를 받았을 때만 있다."""
     load, err = _gemini_call("loadCodeAssist", token, {"metadata": {
         "ideType": "ANTIGRAVITY",
         "platform": "DARWIN_ARM64" if _gemini_arch() == "arm64" else "DARWIN_AMD64",
         "pluginType": "GEMINI"}})
     if err is not None:
-        return None, err
+        return None, err, None
     project = _gemini_project_id(load)
     if project is None:
         _dbg("gemini fetch: loadCodeAssist without a project")
-        return None, "parse"
+        return None, "parse", None
     quota, err = _gemini_call("retrieveUserQuota", token, {"project": project})
     if err is not None:
-        return None, err
+        return None, err, None
     summary, summary_err = _gemini_call("retrieveUserQuotaSummary", token, {"project": project})
     if summary_err is not None:
         summary = None
         _dbg("gemini fetch: summary skipped", summary_err)
     try:
-        return parse_gemini_quota(quota, summary), None
+        windows = gemini_group_windows(summary) if summary is not None else None
+        return parse_gemini_quota(quota, summary), None, windows
     except Exception as e:
         _dbg("gemini fetch: parse", type(e).__name__)
-        return None, "parse"
+        return None, "parse", None
 
 
 def fetch_gemini_usage():
@@ -4905,9 +4942,18 @@ def fetch_gemini_usage():
     prev = _gemini_cache.get("rows")
     fail_short = now - (OAUTH_CACHE_SEC - OAUTH_FAIL_RETRY_SEC)
     cred = _gemini_credential(now)
-    _gemini_cred_cache["t_seen"] = now
     blocked = _gemini_cred_cache.get("blocked_at") is not None
     if not _gemini_sendable(cred):
+        left = _gemini_seconds_left(cred) if cred is not None else None
+        if (not blocked and left is not None and left > -GEMINI_EXPIRY_GRACE_SEC and prev
+                and GEMINI_STATUS.get("last_error") is None):
+            # 만료 직후 유예 — agy 가 새 토큰을 쓰는 중일 수 있다. 직전 행을 그대로 보이고 상태는 건드리지
+            # 않는다(성공 캐시를 몇 분 늘이는 것과 같다 — 캐시 적중이 리셋 지난 레인을 빼지 않듯 여기서도
+            # 빼지 않는다; 유예는 만료 뒤 GEMINI_EXPIRY_GRACE_SEC 에서 끝난다). 이 토큰은 보내지 않는다.
+            # 60초 뒤에 다시 본다.
+            _dbg("gemini fetch: token at expiry; keeping last rows during the grace")
+            _gemini_cache["t"] = fail_short
+            return prev
         _gemini_cache["rows"] = None
         if blocked:
             _dbg("gemini fetch: keychain blocked; nothing to send")
@@ -4928,14 +4974,20 @@ def fetch_gemini_usage():
         # 않고 내린다(이번 요청이 일시 실패로 끝나도 '만료'가 남지 않게).
         GEMINI_STATUS["auth_error"] = False
     token = cred["access_token"]
-    rows, err = _gemini_query(token)
+    rows, err, windows = _gemini_query(token)
     if err in ("http:401", "http:403"):
         # 서버가 기억한 토큰을 거부했다 — agy 가 그 사이 토큰을 바꿨을 수 있다. 한 번 다시 읽어 본다.
         _gemini_cred_cache["reread"] = True
         fresh = _gemini_credential(now)
         if fresh is not None and fresh.get("access_token") != token and _gemini_sendable(fresh):
-            rows, err = _gemini_query(fresh["access_token"])
+            rows, err, windows = _gemini_query(fresh["access_token"])
         blocked = _gemini_cred_cache.get("blocked_at") is not None
+    if windows is not None:
+        # 그룹 창 표를 조회 경로가 나른다(파서는 순수하다). 새 값을 먼저 넣고 사라진 버킷만 뺀다 —
+        # 다른 스레드가 읽는 사이 표가 잠깐 비지 않게.
+        GEMINI_GROUP_WINDOWS.update(windows)
+        for stale in [k for k in GEMINI_GROUP_WINDOWS if k not in windows]:
+            GEMINI_GROUP_WINDOWS.pop(stale, None)
     if rows is None and err and err != "http:429":
         _gemini_cache["t"] = fail_short
     if err is None:
@@ -8780,7 +8832,7 @@ def filter_gemini_rows(rows, gauges):
     return [r for r in rows if gemini_gauge_class(r[0]) in chosen]
 
 
-def gemini_row_label(label):
+def gemini_row_label(label, windows=None):
     """Gemini 행 라벨 → 필에 보일 글자.
 
       · "gemini" → t("gemini") ("Gemini", 모든 로케일 같음).
@@ -8798,16 +8850,18 @@ def gemini_row_label(label):
         words = [w for w in model.split("-") if w]
         return " ".join(w[0].upper() + w[1:] if w.isalpha() else w for w in words)
     if label.startswith("gemini_group:"):
-        window = GEMINI_GROUP_WINDOWS.get(label[len("gemini_group:"):])
+        table = GEMINI_GROUP_WINDOWS if windows is None else windows
+        window = table.get(label[len("gemini_group:"):])
         key = {"5h": "gemini_group_5h", "weekly": "gemini_group_weekly"}.get(window, "gemini_group")
         return t(key)
     return label
 
 
-def gemini_summary_segment(runtime, rows, auth_error=False, last_error=None):
+def gemini_summary_segment(runtime, rows, auth_error=False, last_error=None, windows=None):
     """Gemini 구간 하나(표시 설정·게이지 선택 반영). 보일 게 없으면 None — codex_summary_segment 의 짝.
 
-    어댑터의 gemini_summary 훅이 부른다(RUNTIME, state["gemini"], GEMINI_STATUS). 고른 게이지의 행을
+    어댑터의 gemini_summary 훅이 부른다(RUNTIME, state["gemini"], GEMINI_STATUS, GEMINI_GROUP_WINDOWS —
+    windows 를 주지 않으면 모듈 표). 고른 게이지의 행을
     행 순서대로, 라벨은 gemini_row_label 로, 리셋은 지금 기준 카운트다운으로. Gemini 에는 급증 감지가
     없으므로 ▲ 칸은 언제나 False 다. 행이 없을 때만 상태를 본다(행이 이긴다):
       · last_error "keychain_blocked" → ("status", "gemini_keychain_blocked") — 펫을 눌러 다시 읽게,
@@ -8825,7 +8879,7 @@ def gemini_summary_segment(runtime, rows, auth_error=False, last_error=None):
         for row in picked:
             label, pct, reset_dt, reset_text = (list(row) + [None, None])[:4]
             shown = fmt_countdown(reset_dt, now_utc) if reset_dt is not None else (reset_text or None)
-            out.append((gemini_row_label(label), float(pct), False, shown))
+            out.append((gemini_row_label(label, windows), float(pct), False, shown))
         return ("exact", out)
     if last_error == "keychain_blocked":
         return ("status", "gemini_keychain_blocked")
@@ -9637,7 +9691,7 @@ def run_gui():
     # 행이 없을 때의 상태 문구를 고른다.
     state["gemini_summary"] = lambda: gemini_summary_segment(
         RUNTIME, state.get("gemini"), auth_error=bool(GEMINI_STATUS.get("auth_error")),
-        last_error=GEMINI_STATUS.get("last_error"))
+        last_error=GEMINI_STATUS.get("last_error"), windows=GEMINI_GROUP_WINDOWS)
     sticky = {"on": False}
     ui = {}   # 설정 창 위젯 참조 (GC 방지)
     def _run_update_check():
