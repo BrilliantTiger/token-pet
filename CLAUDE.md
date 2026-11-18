@@ -868,7 +868,7 @@ only, never key bytes.
 **There is no fallback to the logs.** With no server value the pill shows a status:
 `token_expired` when the server rejected the OAuth token (401/403 — whatever the logs
 hold), onboarding (`onb_install` / `onb_login`) when there is no Claude OAuth token,
-`loading` / `scanning` while waiting for the first answer, `no_providers` when both
+`loading` / `scanning` while waiting for the first answer, `no_providers` when all
 providers are hidden. Codex has the same expiry status: `fetch_codex_usage()` sets
 `CODEX_STATUS["auth_error"]` on 401/403 (and clears it on a success, or when there is no Codex
 token at all — no credentials is the "no row, no status" case, not expiry), and
@@ -1045,7 +1045,8 @@ was measured:
   rows stay), plus whether the CLI's fallback file
   `~/.gemini/antigravity-cli/antigravity-oauth-token` exists. Nothing secret is read: the
   marker is `(item present, the item's "mdat" line, (file exists, mtime))`. No item and no file
-  → zero runs, no line, and the right-click menu offers `menu_gemini_login`
+  → zero runs, no line, and, when `agy` is installed, the right-click menu offers
+  `menu_gemini_login`
   (`compute_gemini_onboard_state()` → `start_gemini_login()`, which opens Terminal with plain
   `agy`). A locked keychain is not asked; with no earlier answer nothing is run at all.
   `agy` not installed → `not_installed`, decided before `security` is called.
@@ -1054,7 +1055,7 @@ was measured:
   sign-in — judged from stderr only (`_agy_wants_login()`), and the process is ended at once —
   the marker of that moment is stored as `auth_failed_marker` and automatic runs stop. They
   resume when the marker changes (the user signed in: `mdat` moved, or the fallback file
-  appeared or vanished) or when the user clicks. Choosing the menu's sign-in item is not itself
+  appeared, changed, or vanished) or when the user clicks. Choosing the menu's sign-in item is not itself
   a retry signal.
 - **`SSH_*` is removed from the child's environment, and the browser is blocked by a fake
   `open`** (`_agy_env()`). A signed-out `agy` opens the default browser with `open <url>`. The
