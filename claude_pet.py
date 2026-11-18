@@ -2299,20 +2299,37 @@ def _reset_keychain_quiet_state():
     _keychain_prompt_until[0] = 0.0
 
 
-def _security_read_blob(timeout):
+def _security_read_blob(timeout, item=None):
     """security CLI 로 claudeAiOauth 객체를 읽는다. 키체인이 잠겨 있으면 아예 묻지 않는다.
 
     성공하면 _keychain_facts 에 기억해 둔다 — 만료 확인(oauth_token_facts)이 30초마다
-    비밀값을 다시 복호화하지 않고 이 값을 쓴다."""
+    비밀값을 다시 복호화하지 않고 이 값을 쓴다.
+
+    item=(service, account) 를 주면 Claude 항목 대신 그 항목의 비밀값 **문자열**을 그대로 돌려준다
+    (Gemini/agy — 해석은 호출자의 몫이고, _keychain_facts 에는 아무것도 적지 않는다). 키체인을
+    security 로 읽는 argv 는 이 함수 한 곳에만 둔다 — 잠긴 키체인 검사를 거치지 않는 두 번째
+    호출 자리를 만들지 않기 위해서다(v1.1.1)."""
     if keychain_locked() is True:
         _dbg("keychain: locked; security read skipped")
         return None
+    service, account = item if item is not None else ("Claude Code-credentials", None)
+    argv = ["security", "find-generic-password", "-s", service]
+    if account is not None:
+        argv += ["-a", account]
+    argv.append("-w")
+    if item is not None:
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        except Exception as e:
+            _dbg("keychain: security failed", type(e).__name__)
+            return None
+        if r.returncode != 0 or not r.stdout.strip():
+            _dbg("keychain: security rc", r.returncode)
+            return None
+        return r.stdout
     _keychain_facts["t_try"] = time.time()
     try:
-        r = subprocess.run(
-            ["security", "find-generic-password",
-             "-s", "Claude Code-credentials", "-w"],
-            capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
         if r.returncode == 0 and r.stdout.strip():
             obj = json.loads(r.stdout.strip()).get("claudeAiOauth")
             if isinstance(obj, dict):
@@ -4428,6 +4445,332 @@ def fetch_codex_usage():
 def codex_window_seconds(lane):
     """Codex 레인의 창 길이(초). 서버가 준 값이 있으면 그것, 없으면 관측 기준값."""
     return CODEX_WINDOWS.get(lane) or CODEX_LANE_WINDOWS.get(lane)
+
+
+# ─────────────── Gemini(Antigravity CLI, agy) 사용량 — 읽기만 하는 관찰자 ───────────────
+#
+# 관측(2026-11-18, 이 저장소 주인의 Mac 한 대, agy 1.5.10, Google AI Ultra 계정 하나 — 표본이지
+# 불변식이 아니다):
+#   · 자격증명은 로그인 키체인의 generic password, service "gemini" / account "antigravity".
+#     값은 zalando/go-keyring 의 macOS 인코딩 "go-keyring-base64:" + base64(JSON) 이고, JSON 은
+#     {"token": golang.org/x/oauth2 Token, "auth_method", "id_token_email"} 다. security CLI 로
+#     읽을 때 프롬프트는 뜨지 않았다. (까닭은 추정이다 — go-keyring 의 macOS 구현이 항목을
+#     /usr/bin/security 로 쓰므로 security 가 항목의 접근 목록에 들어 있을 것이다. 관측 아님.)
+#   · 액세스 토큰은 한 시간짜리고, agy 는 자기 프로세스가 떠 있을 때만 키체인 항목을 갱신한다.
+#     agy 를 닫아 두면 만료된 토큰이 그대로 남는다 — 드문 일이 아니라 평범한 상태다.
+#   · 같은 토큰으로 retrieveUserQuota 를 부르면 User-Agent 가 없을 때 403, "antigravity/1.5.10
+#     darwin/arm64" 일 때 200 이었다. 그래서 agy 와 같은 모양의 UA 를 싣는다.
+#
+# 원칙은 Codex 와 같다:
+#   1. 읽기만 한다. 갱신(refresh_token)은 agy 의 일이다 — 우리가 갱신하면 agy 가 들고 있는
+#      토큰과 어긋난다. 만료된 토큰은 **보내지 않고** "expired" 상태만 남긴다.
+#   2. 0% 를 지어내지 않는다. 쓸 비율이 없는 버킷은 행을 만들지 않고, 쓸 게 없으면 None.
+#   3. 액세스 토큰·refresh 토큰·이메일·프로젝트 id 는 로그(_dbg)·예외·행·상태 어디에도 남기지
+#      않는다. 프로젝트 id 는 계정에 묶인 식별자라 Codex 의 계정 id 와 같이 다룬다.
+# Windows 판 자격증명 위치는 아직 보지 않았다 — 지금은 macOS 에서만 읽는다(later issue).
+
+GEMINI_API_BASE = "https://cloudcode-pa.googleapis.com/v1internal:"
+GEMINI_KEYCHAIN_SERVICE = "gemini"
+GEMINI_KEYCHAIN_ACCOUNT = "antigravity"
+# User-Agent 에 싣는 agy 버전. 서버가 보는 것은 "antigravity/" 접두사였다(위 관측) — 이 숫자는
+# 관측 당시 agy 의 버전을 그대로 적은 것이고, 설치된 agy 를 실행해 알아내지는 않는다(CLI 를
+# 자식으로 띄우지 않는다 — CLAUDE.md 의 claude CLI 사례).
+GEMINI_AGY_UA_VERSION = "1.5.10"
+GEMINI_HTTP_TIMEOUT = 10
+# 만료까지 이보다 적게 남은 토큰은 이미 만료된 것으로 본다. 한 번의 조회는 요청 셋이고 각각
+# GEMINI_HTTP_TIMEOUT(10초)까지 걸릴 수 있다 — 30초 + 여유. 토큰 수명(한 시간)에 비해 작아야
+# 하고(크면 멀쩡한 시간에도 못 읽는다), agy 자신이 쓰는 여백(oauth2 defaultExpiryDelta 10초)보다
+# 커야 요청 도중에 죽지 않는다.
+GEMINI_EXPIRY_MARGIN_SEC = 60
+_GO_KEYRING_PREFIX = "go-keyring-base64:"
+
+_gemini_cache = {"t": 0.0, "rows": None, "ok_t": None}   # ok_t: 마지막 '성공' 응답 시각
+# Gemini 조회 상태 — CODEX_STATUS 와 같은 모양·같은 어휘(http:<code>, net, parse; 성공 뒤 None)에
+# 하나를 더한다: "expired" = 키체인의 토큰이 이미(또는 곧) 만료돼 보내지 않았다. 그때 auth_error 도
+# 올린다(Coordinator 결정 2026-11-18 — 필이 보일 것은 '자격증명 없음'이 아니라 '만료'다).
+# 자격증명이 아예 없으면 auth_error 를 내린다(만료가 아니다).
+GEMINI_STATUS = {"auth_error": False, "last_error": None}
+
+# Go time.Time 의 JSON(RFC 3339 — 소수 초 0–9 자리, UTC 면 Z)과 proto3 Timestamp JSON 을 함께 받는다.
+# datetime.fromisoformat 은 파이썬 버전마다 받는 소수 초 자릿수와 'Z' 가 달라 직접 읽는다.
+_RFC3339_RE = re.compile(
+    r"(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?"
+    r"([Zz]|[+-]\d{2}:\d{2})")
+
+
+def _parse_rfc3339(value):
+    """RFC 3339 문자열 → aware UTC datetime, 못 읽으면 None. 소수 초는 마이크로초로 자른다."""
+    if not isinstance(value, str):
+        return None
+    m = _RFC3339_RE.fullmatch(value.strip())
+    if not m:
+        return None
+    y, mo, d, h, mi, s, frac, tz = m.groups()
+    us = int(frac[:6].ljust(6, "0")) if frac else 0
+    if tz in ("Z", "z"):
+        offset = timedelta(0)
+    else:
+        offset = timedelta(hours=int(tz[1:3]), minutes=int(tz[4:6]))
+        if tz[0] == "-":
+            offset = -offset
+    try:
+        dt = datetime(int(y), int(mo), int(d), int(h), int(mi), int(s), us,
+                      tzinfo=timezone(offset))
+        return dt.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+
+
+def parse_antigravity_credential(secret):
+    """agy 키체인 비밀값 → {"access_token": str, "expiry": aware datetime | None}, 못 쓰면 None.
+
+    "go-keyring-base64:" + base64(JSON) 과 평문 JSON 을 받는다. 토큰은 JSON 의 token.access_token
+    (공백이 아닌 문자열)이다. expiry 가 없거나 Go 의 영(0001-01-01) 시각이면 None — oauth2 에서
+    영 시각은 '만료 없음'이다. 어떤 입력에도 예외를 내지 않고, 로그에는 실패의 종류만 남긴다.
+    """
+    if not isinstance(secret, str):
+        return None
+    text = secret.strip()
+    if not text:
+        return None
+    try:
+        if text.startswith(_GO_KEYRING_PREFIX):
+            import base64
+            text = base64.b64decode(text[len(_GO_KEYRING_PREFIX):], validate=True).decode("utf-8")
+        obj = json.loads(text)
+    except Exception as e:
+        _dbg("gemini cred: unreadable", type(e).__name__)
+        return None
+    tok = obj.get("token") if isinstance(obj, dict) else None
+    access = tok.get("access_token") if isinstance(tok, dict) else None
+    if not isinstance(access, str) or not access.strip():
+        _dbg("gemini cred: no access token")
+        return None
+    expiry = _parse_rfc3339(tok.get("expiry"))
+    if expiry is not None and expiry.year <= 1:
+        expiry = None
+    return {"access_token": access.strip(), "expiry": expiry}
+
+
+def _gemini_fraction(value):
+    """remainingFraction → [0,1] 실수, 못 쓰면 None.
+
+    숫자와 숫자 문자열(proto3 JSON 이 쓰는 모양)을 받는다. bool 은 int 지만 비율이 아니고,
+    NaN·inf·숫자 아닌 문자열·없음은 '모른다'다 — 0 도 1 도 아니므로 그 버킷은 행을 내지 않는다.
+    범위 밖은 버리지 않고 자른다(Codex 의 102% 와 같은 규칙)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            v = float(value.strip())
+        except ValueError:
+            return None
+    elif isinstance(value, (int, float)):
+        v = float(value)
+    else:
+        return None
+    if not math.isfinite(v):
+        return None
+    return max(0.0, min(1.0, v))
+
+
+def _gemini_used_pct(fraction):
+    """남은 비율 → 쓴 퍼센트(float)."""
+    return 100.0 - fraction * 100.0
+
+
+def parse_gemini_quota(quota, summary=None):
+    """retrieveUserQuota(+ retrieveUserQuotaSummary) 응답 → [(label, pct, reset_dt, None)] 또는 None.
+
+    pct 는 **쓴** 비율(0–100), reset_dt 는 aware UTC 또는 None. 순서:
+      · "gemini" — modelId 가 "gemini-" 로 시작하고 쓸 수 있는 비율을 가진 버킷 중 남은 비율이
+        가장 낮은 것(동률이면 리셋이 가장 이른 것). 비-Gemini 버킷(claude-*, gpt-oss-*, chat_*,
+        tab_*)도 summary 도 이 행에 섞지 않는다.
+      · "gemini:<modelId>" — 그 Gemini 버킷마다 한 행, modelId 순.
+      · "gemini_group:<bucketId>" — summary 의 모든 그룹의 버킷마다 한 행, 서버 순서.
+    reset_text 는 None 이다 — 남은 시간 문구는 렌더 쪽 몫이다. 쓸 게 하나도 없으면 None.
+    """
+    models = []
+    buckets = quota.get("buckets") if isinstance(quota, dict) else None
+    for b in buckets if isinstance(buckets, list) else ():
+        if not isinstance(b, dict):
+            continue
+        model = b.get("modelId")
+        if not (isinstance(model, str) and model.startswith("gemini-")):
+            continue
+        frac = _gemini_fraction(b.get("remainingFraction"))
+        if frac is None:
+            continue
+        models.append((model, frac, _parse_rfc3339(b.get("resetTime"))))
+    rows = []
+    if models:
+        far = datetime.max.replace(tzinfo=timezone.utc)
+        _model, frac, reset = min(models, key=lambda m: (m[1], m[2] or far))
+        rows.append(("gemini", _gemini_used_pct(frac), reset, None))
+        for model, frac, reset in sorted(models, key=lambda m: m[0]):
+            rows.append(("gemini:" + model, _gemini_used_pct(frac), reset, None))
+    groups = summary.get("groups") if isinstance(summary, dict) else None
+    for g in groups if isinstance(groups, list) else ():
+        gb = g.get("buckets") if isinstance(g, dict) else None
+        for b in gb if isinstance(gb, list) else ():
+            if not isinstance(b, dict):
+                continue
+            bucket_id = b.get("bucketId")
+            if not isinstance(bucket_id, str) or not bucket_id.strip():
+                continue
+            frac = _gemini_fraction(b.get("remainingFraction"))
+            if frac is None:
+                continue
+            rows.append(("gemini_group:" + bucket_id, _gemini_used_pct(frac),
+                         _parse_rfc3339(b.get("resetTime")), None))
+    return rows or None
+
+
+def _read_antigravity_secret():
+    """agy 의 키체인 비밀값 문자열. 없거나 못 읽으면 None.
+
+    _security_read_blob 을 거친다 — 키체인이 잠겨 있으면 묻지 않는다(잠긴 키체인에 묻는 것이
+    '키체인 암호' 창의 기회다). 네이티브 Keychain API 는 쓰지 않는다: 그쪽은 프롬프트를 띄울 수
+    있는 경로다."""
+    return _security_read_blob(5, item=(GEMINI_KEYCHAIN_SERVICE, GEMINI_KEYCHAIN_ACCOUNT))
+
+
+def _gemini_arch():
+    """Go 의 GOARCH 철자 — arm64 또는 amd64."""
+    try:
+        import platform
+        machine = (platform.machine() or "").lower()
+    except Exception:
+        machine = ""
+    return "arm64" if machine in ("arm64", "arm64e", "aarch64") else "amd64"
+
+
+def _gemini_call(endpoint, token, body):
+    """cloudcode-pa v1internal:<endpoint> 에 JSON 을 POST → (응답, None) 또는 (None, 오류 종류).
+
+    오류 종류는 CODEX_STATUS 의 어휘다: "http:<code>", "net"(시간 초과 포함), "parse".
+    로그에는 엔드포인트 이름·상태 코드·예외 클래스만 남긴다 — 본문(프로젝트 id)과 헤더(토큰)는
+    남기지 않는다."""
+    arch = _gemini_arch()
+    req = urllib.request.Request(
+        GEMINI_API_BASE + endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Authorization": "Bearer " + token,
+                 "Content-Type": "application/json",
+                 "Accept": "application/json",
+                 "User-Agent": "antigravity/%s darwin/%s" % (GEMINI_AGY_UA_VERSION, arch)},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=GEMINI_HTTP_TIMEOUT) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        _dbg("gemini fetch:", endpoint, "http", e.code)
+        return None, "http:%s" % e.code
+    except Exception as e:
+        _dbg("gemini fetch:", endpoint, "net", type(e).__name__)
+        return None, "net"
+    try:
+        return json.loads(raw.decode("utf-8")), None
+    except Exception as e:
+        _dbg("gemini fetch:", endpoint, "parse", type(e).__name__)
+        return None, "parse"
+
+
+def _gemini_project_id(load):
+    """loadCodeAssist 응답의 cloudaicompanionProject — 문자열 또는 {"id": …} — → id, 없으면 None."""
+    project = load.get("cloudaicompanionProject") if isinstance(load, dict) else None
+    if isinstance(project, dict):
+        project = project.get("id")
+    if isinstance(project, str) and project.strip():
+        return project.strip()
+    return None
+
+
+def fetch_gemini_usage():
+    """Gemini(agy) 사용량 행 [(label, pct, reset_dt, None)], 읽을 게 없으면 None.
+
+    macOS 에서만 읽는다(호출 시점의 sys.platform). 키체인의 agy 자격증명으로
+    loadCodeAssist → retrieveUserQuota → retrieveUserQuotaSummary 를 차례로 부르고
+    parse_gemini_quota 에 넘긴다. summary 는 덤이다 — 그쪽 실패는 로그만 남기고 quota 행을 지킨다.
+
+    캐시와 실패 처리는 fetch_codex_usage 와 같다: 성공과 429 는 OAUTH_CACHE_SEC(180초), 그 밖의
+    실패는 OAUTH_FAIL_RETRY_SEC(60초). 일시 실패(429·5xx·네트워크·파싱)면 직전에 성공한 행을
+    리셋 지난 레인만 빼고 돌려준다. 401/403 은 행을 지우고 auth_error 를 올린다.
+
+    만료됐거나 GEMINI_EXPIRY_MARGIN_SEC 안에 만료될 토큰은 **보내지 않는다**: None, last_error
+    "expired", auth_error True, 직전 행도 지운다(옛 숫자가 '만료'를 가리지 않게). 실패처럼 60초 뒤에
+    다시 본다 — agy 를 다시 열면 그 사이 키체인의 토큰이 새것으로 바뀐다. 자격증명이 없으면
+    (항목 없음·잠긴 키체인·망가진 값) 요청 없이 None, auth_error 를 내린다.
+    """
+    if sys.platform != "darwin":
+        return None
+    now = time.time()
+    if now - _gemini_cache["t"] < OAUTH_CACHE_SEC:
+        return _gemini_cache["rows"]
+    _gemini_cache["t"] = now
+    prev = _gemini_cache.get("rows")
+    cred = parse_antigravity_credential(_read_antigravity_secret())
+    if cred is None:
+        _dbg("gemini fetch: no credential")
+        GEMINI_STATUS["auth_error"] = False      # 자격증명 없음은 만료가 아니다
+        _gemini_cache["rows"] = None
+        return None
+    expiry = cred.get("expiry")
+    if expiry is not None and \
+            (expiry - datetime.now(timezone.utc)).total_seconds() < GEMINI_EXPIRY_MARGIN_SEC:
+        _dbg("gemini fetch: token expired or expiring; not sent")
+        GEMINI_STATUS["auth_error"] = True
+        GEMINI_STATUS["last_error"] = "expired"
+        _gemini_cache["rows"] = None
+        _gemini_cache["t"] = now - (OAUTH_CACHE_SEC - OAUTH_FAIL_RETRY_SEC)
+        return None
+    if GEMINI_STATUS.get("last_error") == "expired":
+        # 만료 깃발은 우리가 토큰을 보고 올린 것이고, 지금 토큰은 만료가 아니다 — 서버의 답을 기다리지
+        # 않고 내린다(이번 요청이 일시 실패로 끝나도 '만료'가 남지 않게).
+        GEMINI_STATUS["auth_error"] = False
+    token = cred["access_token"]
+    rows, err = None, None
+    load, err = _gemini_call("loadCodeAssist", token, {"metadata": {
+        "ideType": "ANTIGRAVITY",
+        "platform": "DARWIN_ARM64" if _gemini_arch() == "arm64" else "DARWIN_AMD64",
+        "pluginType": "GEMINI"}})
+    project = None
+    if err is None:
+        project = _gemini_project_id(load)
+        if project is None:
+            err = "parse"
+            _dbg("gemini fetch: loadCodeAssist without a project")
+    if err is None:
+        quota, err = _gemini_call("retrieveUserQuota", token, {"project": project})
+    if err is None:
+        summary, summary_err = _gemini_call("retrieveUserQuotaSummary", token, {"project": project})
+        if summary_err is not None:
+            summary = None
+            _dbg("gemini fetch: summary skipped", summary_err)
+        try:
+            rows = parse_gemini_quota(quota, summary)
+        except Exception as e:
+            err = "parse"
+            _dbg("gemini fetch: parse", type(e).__name__)
+    if rows is None and err and err != "http:429":
+        _gemini_cache["t"] = now - (OAUTH_CACHE_SEC - OAUTH_FAIL_RETRY_SEC)
+    if err is None:
+        GEMINI_STATUS["auth_error"] = False
+        GEMINI_STATUS["last_error"] = None
+        _gemini_cache["ok_t"] = now
+    else:
+        GEMINI_STATUS["last_error"] = err
+        if err in ("http:401", "http:403"):
+            GEMINI_STATUS["auth_error"] = True
+        elif prev and is_transient_fetch_error(err):
+            _dbg("gemini fetch: kept last rows", len(prev))
+            # 일시 실패 — 직전 서버 값 유지(ok_t 는 그대로), 리셋 지난 레인은 뺀다.
+            kept = drop_reset_rows(prev)
+            _gemini_cache["rows"] = kept
+            return kept
+    _gemini_cache["rows"] = rows
+    _dbg("gemini fetch: rows", len(rows or ()))
+    return rows
 
 
 # ─────────────── Codex 세션 로그 (급증 감지 전용) ───────────────
