@@ -1052,7 +1052,7 @@ was measured:
   → zero runs, no line, and, when `agy` is installed, the right-click menu offers
   `menu_gemini_login`
   (`compute_gemini_onboard_state()`; the item starts the in-app flow, which opens a visible
-  window running plain `agy` — see [Installing and signing in](#installing-and-signing-in-to-the-three-clis-from-the-app)). A locked keychain is not asked; with no earlier answer nothing is run at all.
+  window running the same `agy -p /usage --output-format json`, never bare `agy` — see [Installing and signing in](#installing-and-signing-in-to-the-three-clis-from-the-app)). A locked keychain is not asked; with no earlier answer nothing is run at all.
   `agy` not installed → `not_installed`, decided before `security` is called.
 - **The fingerprint stops it and restarts it.** A keychain item can exist and still be dead
   (signed out with the item left behind, an expired refresh token). When a run asks for a
@@ -1072,7 +1072,8 @@ was measured:
   (`_gemini_fake_open_dir()`). The folder and file are re-checked immediately before every
   run and made again if missing or altered — without them `PATH` falls through to
   `/usr/bin/open`. If they cannot be made, `agy` is not run. The app's own environment is never
-  changed, and `start_gemini_login()` uses neither — there the browser must open. Do not put
+  changed. `start_gemini_login()` removes `SSH_*` in its window too but never uses the fake
+  `open` — there the browser must open. Do not put
   `SSH_TTY` back, and do not add the fake `open` to the menu path.
 - **The process is its own group and is always reaped** (`_agy_exec()`:
   `start_new_session=True`, `os.killpg`, then `wait`). The limit is measured with
