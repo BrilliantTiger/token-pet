@@ -1,5 +1,4 @@
 # self-hosted 러너를 이 Windows PC 에 등록한다 (TOK-62). **대표님 PC 에 프로그램을 깔고 로그인 때 자동으로
-# 시작하게 한다 — 대표님이 확인한 뒤에만 돌린다.** 절차와 먼저 바꿔야 하는 저장소 설정은 ci\SELF_HOSTED_RUNNERS.md.
 #
 #   powershell -ExecutionPolicy Bypass -File ci\register-runner-windows.ps1            등록 + 로그인 때 시작
 #   powershell -ExecutionPolicy Bypass -File ci\register-runner-windows.ps1 -Remove    등록 해제
@@ -21,7 +20,6 @@ if ($Remove) {
     Set-Location $Dir
     $token = gh api -X POST "repos/$Repo/actions/runners/remove-token" --jq .token
     .\config.cmd remove --token $token
-    gh variable delete SELF_HOSTED_WINDOWS --repo $Repo
     Write-Host "해제했습니다. 폴더는 남아 있습니다: $Dir"
     exit 0
 }
@@ -61,5 +59,4 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName $Task -Action $action -Trigger $trigger -Settings $settings | Out-Null
 Start-ScheduledTask -TaskName $Task
-gh variable set SELF_HOSTED_WINDOWS --repo $Repo --body 1
 Write-Host "등록했습니다: $env:COMPUTERNAME (labels: self-hosted, Windows)"

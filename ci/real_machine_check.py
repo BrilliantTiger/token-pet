@@ -8,6 +8,8 @@
 
   · CLI 가 없거나 로그인 정보가 없으면 — 그 사실만 적고 넘어간다(이 기기의 상태이지 결함이 아니다).
     단, 그때 설정 줄은 [설치]/[로그인]이어야 한다.
+  · 이 잡은 막는 게이트다. 세 제공자 중 **하나도 확인하지 못했으면 실패**다 — 아무것도 로그인돼 있지 않은
+    기기는 아무것도 검증하지 못한 것이고, 그것을 초록이라고 하지 않는다.
   · 로그인 정보가 있으면 — 사용량을 한 번 읽는다. 값(행)이 나와야 한다. 안 나오면 실패이고 오류의
     종류(http:<코드>·net·agy_failed·timeout·login …)를 적는다. 설정 줄은 [로그인]·[설치]를 내밀면 안 되고,
     흐름을 시작해도(run_ai_connect) 로그인 창·프로세스·설치가 뜨면 안 된다.
@@ -75,6 +77,7 @@ def main():
     cp.install_cli = tripwire("cli download", (False, "network"))
 
     failures = []
+    verified = 0
     for p in PROVIDERS:
         installed = bool(cp.find_cli(p))
         # 앱의 새로고침과 같은 순서: 먼저 읽는다. 키체인에 로그인 정보를 둔 Claude 사용자는 읽고 난 뒤에야
@@ -93,6 +96,7 @@ def main():
         row = cp.ai_connect_row(p, installed, cp.cli_logged_in(p), cp.new_ai_job())
         print("%-7s installed=True sign-in=yes rows=%d error=%s login-demanded=%s row: %s / %s"
               % (p, count, err, asked, row["status"], row["button"]))
+        verified += 1
         if asked:
             # 로그인 정보는 남아 있지만 서버·CLI 가 로그인을 요구했다(만료·로그아웃) — 이때는 [로그인]이 맞다.
             if row["button"] != "ai_btn_login":
@@ -107,6 +111,9 @@ def main():
         if len(opened) != before:
             failures.append("%s: signed in, but starting the flow opened: %s" % (p, ", ".join(opened[before:])))
 
+    if not verified:
+        failures.append("no provider is signed in on this machine — nothing was verified")
+    print("providers verified: %d of %d" % (verified, len(PROVIDERS)))
     for f in failures:
         print("FAIL ", f)
     print("real machine:", "FAILED (%d)" % len(failures) if failures else "OK")

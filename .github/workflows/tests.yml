@@ -17,10 +17,13 @@ name: tests
 #                                   소스로만 돌면 번들에만 있는 결함을 못 본다(py2app 의 SSL_CERT_*).
 #   real-macos / real-windows       self-hosted 실기기 — 실제로 깔린 CLI 와 실제 로그인 상태.
 #
-# 실기기 잡은 **pull_request 에서 절대 돌지 않는다** — 공개 저장소라, 포크의 코드가 대표님 PC 에서
-# 돌게 된다. main·dev push, 태그, workflow_dispatch 에서만, 그리고 그 러너가 등록됐다는 저장소 변수
-# (SELF_HOSTED_MACOS / SELF_HOSTED_WINDOWS = 1)가 있을 때만 돈다 — 러너가 없는데 잡이 만들어지면
-# 하루 동안 대기하다 실패해 게이트를 막는다. 등록 절차는 ci/SELF_HOSTED_RUNNERS.md.
+# 실기기 잡은 **막는 게이트다**(대표님, 2026-11-19: "막히지 않으면 뭐 어쩔건데? 어디서 검증하게?").
+# 같은 저장소의 PR, main·dev push, 태그, workflow_dispatch 에서 돌고, 실패하면 머지·게시를 막는다.
+# 러너가 내려가 있으면 잡은 대기하다 실패한다 — 그것도 막는 것이 맞다: 실기기에서 확인하지 못한 것을
+# 내보내지 않는다. 1.2.1 부터 게시는 main 의 실기기 잡 두 개가 초록일 때만 한다.
+# **포크의 PR 에서는 돌지 않는다** — 공개 저장소라, 포크의 코드가 대표님 PC 에서 돌게 된다. 포크는
+# 워크플로 파일도 고칠 수 있으므로 이 조건만으로는 부족하고, 저장소 설정(외부 기여자의 워크플로는 전부
+# 승인 필요)이 함께 막는다. 등록 절차는 ci/SELF_HOSTED_RUNNERS.md.
 on:
   push:
     branches: ["claude/**", "dev", "main"]
@@ -167,9 +170,10 @@ jobs:
   real-macos:
     name: Real Mac — installed CLIs, real sign-in
     if: >-
-      github.event_name != 'pull_request' && vars.SELF_HOSTED_MACOS == '1' &&
-      (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' ||
-       github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/'))
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' ||
+                                       startsWith(github.ref, 'refs/tags/')))
     runs-on: [self-hosted, macOS]
     timeout-minutes: 15
     steps:
@@ -181,9 +185,10 @@ jobs:
   real-windows:
     name: Real Windows — installed CLIs, real sign-in
     if: >-
-      github.event_name != 'pull_request' && vars.SELF_HOSTED_WINDOWS == '1' &&
-      (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' ||
-       github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/'))
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' ||
+                                       startsWith(github.ref, 'refs/tags/')))
     runs-on: [self-hosted, Windows]
     timeout-minutes: 15
     steps:

@@ -1,6 +1,5 @@
 #!/bin/bash
 # self-hosted 러너를 이 Mac 에 등록한다 (TOK-62). **대표님 PC 에 프로그램을 깔고 로그인 항목을 만든다 —
-# 대표님이 확인한 뒤에만 돌린다.** 절차와 먼저 바꿔야 하는 저장소 설정은 ci/SELF_HOSTED_RUNNERS.md.
 #
 #   ci/register-runner-macos.sh            등록 + 로그인 항목(LaunchAgent)으로 시작
 #   ci/register-runner-macos.sh remove     서비스 내리고 등록 해제
@@ -22,7 +21,6 @@ if [ "${1:-}" = "remove" ]; then
   ./svc.sh stop || true
   ./svc.sh uninstall || true
   ./config.sh remove --token "$(gh api -X POST "repos/$REPO/actions/runners/remove-token" --jq .token)"
-  gh variable delete SELF_HOSTED_MACOS --repo "$REPO" || true
   echo "해제했습니다. 폴더는 남아 있습니다: $DIR"
   exit 0
 fi
@@ -54,5 +52,4 @@ tar xzf "$PKG"
   --token "$(gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq .token)"
 ./svc.sh install
 ./svc.sh start
-gh variable set SELF_HOSTED_MACOS --repo "$REPO" --body 1
 echo "✅ 등록했습니다: $NAME (labels: self-hosted, macOS). 확인: gh api repos/$REPO/actions/runners --jq '.runners[].name'"

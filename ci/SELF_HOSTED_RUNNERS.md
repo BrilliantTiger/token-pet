@@ -16,8 +16,8 @@ gh api -X PUT repos/BrilliantTiger/token-pet/actions/permissions/fork-pr-contrib
   -f approval_policy=all_external_contributors
 ```
 
-(Settings → Actions → General → "Require approval for all external contributors". 2026-11-19 현재 값은
-`first_time_contributors` 다 — 한 번 머지된 적 있는 외부 기여자의 PR 은 승인 없이 돈다.) 두 등록
+(Settings → Actions → General → "Require approval for all external contributors". 2026-11-19 에 이 값으로
+바꿨다 — 그 전의 `first_time_contributors` 는 한 번 머지된 적 있는 외부 기여자의 PR 을 승인 없이 돌린다.) 두 등록
 스크립트는 이 값이 아니면 등록을 거절한다. 외부 PR 의 워크플로 실행을 승인하기 전에는 `.github/` 와
 `ci/` 의 변경을 본다.
 
@@ -29,17 +29,17 @@ gh api -X PUT repos/BrilliantTiger/token-pet/actions/permissions/fork-pr-contrib
 | Windows | `powershell -ExecutionPolicy Bypass -File ci\register-runner-windows.ps1` | 로그인 때 시작하는 예약 작업 (`%USERPROFILE%\actions-runner-token-pet`) |
 
 둘 다 `gh` 로그인이 필요하다(저장소 관리자 권한). 스크립트가 하는 일: 최신 actions/runner 를 받아 SHA-256 을
-릴리스 노트의 값과 대조 → 저장소에 등록(라벨 `self-hosted` + `macOS`/`Windows`) → 로그인 때 자동 시작 →
-저장소 변수 `SELF_HOSTED_MACOS` / `SELF_HOSTED_WINDOWS` 를 `1` 로.
+릴리스 노트의 값과 대조 → 저장소에 등록(라벨 `self-hosted` + `macOS`/`Windows`) → 로그인 때 자동 시작.
 
-그 변수가 잡을 켠다. 러너가 없는데 잡이 만들어지면 하루 동안 대기하다 실패해 게이트를 막으므로, 변수가
-없으면 잡은 건너뛴다. 러너를 내리면 변수도 지운다(`remove` / `-Remove` 가 같이 한다).
+**두 잡은 막는 게이트다.** 러너가 내려가 있으면 잡은 대기하다 실패하고, 그동안 머지와 게시는 막힌다 —
+실기기에서 확인하지 못한 것은 내보내지 않는다. 게시는 `main` 의 실기기 잡 두 개가 초록일 때만 한다.
+세 제공자 중 하나도 로그인돼 있지 않은 기기에서는 잡이 실패한다(아무것도 검증하지 못한 것은 초록이 아니다).
 
 서비스(데몬·Windows 서비스)로 돌리지 않는다 — 사용자의 키체인·자격 증명 관리자·CLI 로그인을 볼 수 없다.
 
 ## 언제 도는가
 
-`main`·`dev` push, `v*` 태그, `workflow_dispatch`. `pull_request` 에서는 돌지 않는다.
+같은 저장소의 PR, `main`·`dev` push, `v*` 태그, `workflow_dispatch`. 포크의 PR 에서는 돌지 않는다.
 
 ## 잡이 하지 않는 것
 
