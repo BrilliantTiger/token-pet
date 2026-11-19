@@ -857,7 +857,11 @@ class GeminiLoginMenuTests(_Guard):
         login = _require("start_gemini_login")
         seen = []
         path_before = os.environ.get("PATH")
-        with mock.patch.object(claude_pet, "_run_in_terminal", side_effect=seen.append), \
+        # agy 가 깔려 있는지는 이 테스트가 정한다 — 이 기기에 진짜 agy 가 있는지에 기대지 않는다(CI 러너에는
+        # 없다: start_gemini_login 은 agy 를 못 찾으면 창을 열지 않고 돌아온다). 있지 않은 경로의 문자열이다.
+        agy = "/tmp/claudepet-test-no-such-dir/bin/agy"
+        with mock.patch.object(claude_pet, "_find_agy_cli", lambda: agy), \
+                mock.patch.object(claude_pet, "_run_in_terminal", side_effect=seen.append), \
                 mock.patch.object(claude_pet.subprocess, "run",
                                   side_effect=AssertionError("프로세스를 띄웠다")), \
                 mock.patch.object(claude_pet.subprocess, "Popen",
@@ -867,6 +871,7 @@ class GeminiLoginMenuTests(_Guard):
         lines = [ln.strip().strip("\"'") for ln in str(seen[0]).splitlines()]
         del lines
         self.assertRegex(seen[0], r"agy\S*\s+-p\s+\S*/usage", "Terminal 명령이 `agy -p /usage` 를 실행하지 않는다")
+        self.assertIn(agy, seen[0], "Terminal 명령이 찾은 agy 의 경로를 쓰지 않는다")
         self.assertNotIn("agy login", seen[0])
         # v5-1: 가짜 open 은 백그라운드 실행에만 둔다 — 사용자가 고른 로그인에서는 브라우저가 열려야 한다.
         # Terminal 명령에 나오는 어느 폴더에도 `open` 이 없고(PATH 에 가짜 open 폴더를 넣지 않았다),
