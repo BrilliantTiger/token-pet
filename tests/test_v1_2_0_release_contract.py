@@ -3970,7 +3970,13 @@ class PublishedV111NotesContractTests(unittest.TestCase):
         bullet = self._bullet(r"GitHub\s*주소")
         named = re.search(r"\(([\w.-]+/[\w.-]+)\)", bullet)
         repo = _literal_assignments(APP_SOURCE, "GITHUB_REPO")
-        if repo != ["BrilliantTiger/claude-pet"] or not named or [named.group(1)] != repo:
+        # Re-scoped 2026-11-19 (TOK-59): the repository was renamed BrilliantTiger/token-pet
+        # on 2026-11-12.  The published bullet is frozen and still says what was true when it
+        # shipped (BrilliantTiger/claude-pet, which redirects); the constant carries the
+        # current name, under the same owner the bullet names.
+        if repo != ["BrilliantTiger/token-pet"] or not named \
+                or named.group(1) != "BrilliantTiger/claude-pet" \
+                or named.group(1).split("/")[0] != str(repo[0]).split("/")[0]:
             problems.append(f"the bullet names {named and named.group(1)!r}; GITHUB_REPO is {repo!r}")
         check = self.defs.get("check_github_update")
         if check is None or "GITHUB_REPO" not in _names(check) or not any(
@@ -3986,8 +3992,9 @@ class PublishedV111NotesContractTests(unittest.TestCase):
         if select is None or "browser_download_url" not in _code_strings([select]):
             problems.append("the download must be the release's browser_download_url")
         iss = (REPO / "windows" / "installer.iss").read_text(encoding="utf-8")
-        if "https://github.com/BrilliantTiger/claude-pet" not in iss or "uygnoey" in iss:
-            problems.append("windows/installer.iss must point at the new address only")
+        if "https://github.com/BrilliantTiger/token-pet" not in iss or "uygnoey" in iss \
+                or "BrilliantTiger/claude-pet" in iss:
+            problems.append("windows/installer.iss must point at the current address only")
         for path in (APP_SOURCE, WIN_APP, WIN_UPDATE, WIN_BUILD):
             old = sorted(s for s in _code_strings([_module_tree(path)]) if "uygnoey" in s)
             if old:

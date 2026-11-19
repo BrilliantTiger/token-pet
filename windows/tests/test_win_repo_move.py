@@ -1,4 +1,10 @@
-"""Gates for the repository move uygnoey/claude-pet -> BrilliantTiger/claude-pet (Windows half).
+"""Gates for the repository move uygnoey/claude-pet -> BrilliantTiger/claude-pet -> BrilliantTiger/token-pet
+(Windows half).
+
+**Renamed 2026-11-12, pinned here 2026-11-19 (TOK-59).**  The repository is now
+``BrilliantTiger/token-pet``; the old name only redirects.  In the table below read
+"BrilliantTiger" as ``BrilliantTiger/token-pet``.  Both former names are refused in the update
+URL and in the installer's two URLs (``FormerNamesTests``).
 
 Run from the worktree root:
 
@@ -35,11 +41,13 @@ if ROOT not in sys.path:
 
 ISS = os.path.join(ROOT, "windows", "installer.iss")
 
-NEW_API_LATEST = "https://api.github.com/repos/BrilliantTiger/claude-pet/releases/latest"
-NEW_SUPPORT = "https://github.com/BrilliantTiger/claude-pet"
-NEW_UPDATES = "https://github.com/BrilliantTiger/claude-pet/releases/latest"
+NEW_API_LATEST = "https://api.github.com/repos/BrilliantTiger/token-pet/releases/latest"
+NEW_SUPPORT = "https://github.com/BrilliantTiger/token-pet"
+NEW_UPDATES = "https://github.com/BrilliantTiger/token-pet/releases/latest"
+FORMER_REPOS = ("uygnoey/claude-pet", "BrilliantTiger/claude-pet")
 OLD_DL = "https://github.com/uygnoey/claude-pet/releases/download/v9.9/"
-NEW_DL = "https://github.com/BrilliantTiger/claude-pet/releases/download/v9.9/"
+MID_DL = "https://github.com/BrilliantTiger/claude-pet/releases/download/v9.9/"
+NEW_DL = "https://github.com/BrilliantTiger/token-pet/releases/download/v9.9/"
 
 
 def _wu():
@@ -89,19 +97,41 @@ class InstallerUrlTests(unittest.TestCase):
         self.assertEqual(_iss_setup_value("AppUpdatesURL"), NEW_UPDATES)
 
 
+class FormerNamesTests(unittest.TestCase):
+    """Neither former name in the URL the port fetches, nor in the installer's URLs."""
+
+    def test_the_fetched_url_names_neither_former_repository(self):
+        calls = []
+
+        def fetch_json(url):
+            calls.append(url)
+            return {"tag_name": "v0.0.1", "assets": []}
+
+        _wu().check_github_update_win(fetch_json, "AMD64", "inno", "1.1.0")
+        self.assertEqual(len(calls), 1)
+        for former in FORMER_REPOS:
+            self.assertNotIn(former, calls[0])
+            self.assertNotIn(former, _wu().LATEST_RELEASE_URL)
+
+    def test_the_installer_names_neither_former_repository(self):
+        for key in ("AppSupportURL", "AppUpdatesURL"):
+            for former in FORMER_REPOS:
+                self.assertNotIn(former, _iss_setup_value(key), key)
+
+
 class WinAssetOwnerAgnosticTests(unittest.TestCase):
     """Regression guard: green before and after the move."""
 
     def test_asset_url_ok_accepts_both_owners(self):
         wu = _wu()
-        for base in (OLD_DL, NEW_DL):
+        for base in (OLD_DL, MID_DL, NEW_DL):
             for name in (wu.SETUP_ASSET, wu.ZIP_ASSET):
                 with self.subTest(url=base + name):
                     self.assertIs(wu._asset_url_ok(base + name), True)
 
     def test_selection_accepts_both_owners(self):
         wu = _wu()
-        for base in (OLD_DL, NEW_DL):
+        for base in (OLD_DL, MID_DL, NEW_DL):
             for kind, name in (("inno", wu.SETUP_ASSET), ("portable", wu.ZIP_ASSET)):
                 with self.subTest(base=base, kind=kind):
                     assets = [{"name": name, "browser_download_url": base + name,
