@@ -25,12 +25,18 @@ wording:
 
 * the Gemini usage line — one bullet names Gemini and 사용량, names where the numbers come
   from (Antigravity or its ``agy`` CLI — 1.2.0 reads only that; the user: "1.2.0은
-  Antigravity만, API 키는 다음"), and says macOS, because ``fetch_gemini_usage`` returns
-  nothing off macOS and the Windows port has no Gemini code;
-* the sign-in menu item — the notes quote ``TR["ko"]["menu_gemini_login"]`` (leading glyph
-  and trailing ellipsis may be dropped), every quoted string is a real Korean UI string,
-  the item exists in all four locales and ``rightMouseDown_`` builds it;
-* "Windows도 같은 1.2.0" against ``APP_VERSION`` and ``windows/build_win.py``;
+  Antigravity만, API 키는 다음"), and says macOS **and Windows**: 1.2.0 grew a Windows
+  reader (TOK-55), so the earlier "Windows는 … 읽지 않습니다" is refused (re-scoped
+  2026-11-19);
+* install and sign-in from Settings — one bullet quotes the column title
+  ``TR["ko"]["ai_sec"]`` ("AI 연결"), names the three CLIs, 설치 and 로그인, and whatever it
+  claims (공식 서버, 서명, 전용 폴더, PATH left alone) is tied to the source;
+* the Gemini sign-in — a bullet says the code is pasted (코드 … 붙여) and a sentence says
+  the app does not open the browser on its own;
+* quotes — every quoted string is a real Korean UI string (leading glyph and trailing
+  ellipsis may be dropped); the right-click sign-in item still exists in all four locales,
+  but the notes no longer have to quote it;
+* Windows is mentioned, and any version a Windows bullet names is ``APP_VERSION``;
 * numbers: the version, plus only figures this tree can audit ("4개 언어" against the TR
   table, "5분" against ``GEMINI_AUTO_SEC``).
 
@@ -3964,7 +3970,13 @@ class PublishedV111NotesContractTests(unittest.TestCase):
         bullet = self._bullet(r"GitHub\s*주소")
         named = re.search(r"\(([\w.-]+/[\w.-]+)\)", bullet)
         repo = _literal_assignments(APP_SOURCE, "GITHUB_REPO")
-        if repo != ["BrilliantTiger/claude-pet"] or not named or [named.group(1)] != repo:
+        # Re-scoped 2026-11-19 (TOK-59): the repository was renamed BrilliantTiger/token-pet
+        # on 2026-11-12.  The published bullet is frozen and still says what was true when it
+        # shipped (BrilliantTiger/claude-pet, which redirects); the constant carries the
+        # current name, under the same owner the bullet names.
+        if repo != ["BrilliantTiger/token-pet"] or not named \
+                or named.group(1) != "BrilliantTiger/claude-pet" \
+                or named.group(1).split("/")[0] != str(repo[0]).split("/")[0]:
             problems.append(f"the bullet names {named and named.group(1)!r}; GITHUB_REPO is {repo!r}")
         check = self.defs.get("check_github_update")
         if check is None or "GITHUB_REPO" not in _names(check) or not any(
@@ -3980,8 +3992,9 @@ class PublishedV111NotesContractTests(unittest.TestCase):
         if select is None or "browser_download_url" not in _code_strings([select]):
             problems.append("the download must be the release's browser_download_url")
         iss = (REPO / "windows" / "installer.iss").read_text(encoding="utf-8")
-        if "https://github.com/BrilliantTiger/claude-pet" not in iss or "uygnoey" in iss:
-            problems.append("windows/installer.iss must point at the new address only")
+        if "https://github.com/BrilliantTiger/token-pet" not in iss or "uygnoey" in iss \
+                or "BrilliantTiger/claude-pet" in iss:
+            problems.append("windows/installer.iss must point at the current address only")
         for path in (APP_SOURCE, WIN_APP, WIN_UPDATE, WIN_BUILD):
             old = sorted(s for s in _code_strings([_module_tree(path)]) if "uygnoey" in s)
             if old:
@@ -4034,6 +4047,9 @@ WIN_CORE = REPO / "windows" / "win_core.py"
 GEMINI_USAGE_GATE = REPO / "tests" / "test_gemini_usage.py"
 GEMINI_CADENCE_GATE = REPO / "tests" / "test_gemini_agy_cadence.py"
 GEMINI_PILL_GATE = REPO / "tests" / "test_gemini_pill.py"
+GEMINI_WINDOWS_GATE = REPO / "tests" / "test_gemini_windows.py"
+CLI_INSTALL_GATE = REPO / "tests" / "test_cli_install_login.py"
+V8_GATE = REPO / "tests" / "test_v8_fixes.py"
 
 
 def _class_names(path: Path) -> set[str]:
@@ -4383,28 +4399,37 @@ class StagedV120NotesFormatTests(unittest.TestCase):
                          f"the staged heading is v{heading}; APP_VERSION is {versions!r}")
         self.assertEqual(heading, "1.2.0")
 
-    def test_v120_gemini_usage_comes_from_antigravity_on_macos(self):
+    def test_v120_gemini_usage_comes_from_antigravity_on_macos_and_windows(self):
         """The notes tell users the pill now shows Gemini usage.  One bullet must name
         Gemini and 사용량, name the source (Antigravity or its ``agy`` CLI — the only source
-        1.2.0 reads), and say macOS.
+        1.2.0 reads), and say **macOS and Windows**.
+
+        Re-scoped 2026-11-19 (Verifier gemini-tests-v2): 1.2.0 grew a Windows Gemini reader
+        (TOK-55), so the earlier "Windows는 … Gemini 사용량을 읽지 않습니다" is now false and
+        this test, which used to require macOS only, requires both and refuses that sentence.
 
         Ties: ``fetch_gemini_usage`` runs ``GEMINI_AGY_ARGS`` (``-p /usage --output-format
-        json``) and returns before anything else when the platform is not darwin; no Windows
-        module names it; ``show_gemini`` is a runtime default and ``GEMINI_GAUGES`` exists,
-        so the line can be switched on and off; the behavioural gates the sentence rests on
-        exist by name.
+        json``) and its first guard lets darwin and win32 through; the Windows port starts
+        the read (``start_gemini_refresh``); ``show_gemini`` is a runtime default and
+        ``GEMINI_GAUGES`` exists, so the line can be switched on and off; the behavioural
+        gates the sentence rests on exist by name, the Windows one included.
 
-        Rivals: notes that promise Gemini through an API key (next release); notes silent
-        on the platform, so a Windows user looks for a line the port cannot draw; a Gemini
-        reader that grew a second source the notes do not mention."""
+        Rivals: notes that still say Windows does not read Gemini; notes silent on Windows;
+        notes that promise Gemini through an API key (not in this version); a port that
+        lost the read while the notes promise it."""
         problems: list[str] = []
         usage = [b for b in self._bullets(r"Gemini") if re.search(r"사용량", b)]
         if not usage:
             problems.append("no bullet says Gemini 사용량 is shown")
         if not any(re.search(r"Antigravity|\bagy\b", b) for b in usage):
             problems.append("the Gemini usage bullet must name Antigravity (or agy) as the source")
-        if not any(re.search(r"macOS", b) for b in self._bullets(r"Gemini")):
-            problems.append("a Gemini bullet must say macOS — the Windows port has no Gemini reader")
+        if not any(re.search(r"macOS", b) and re.search(r"Windows", b) for b in usage):
+            problems.append("the Gemini usage bullet must say macOS and Windows — 1.2.0 reads it on both")
+        for bullet in self._bullets(r"Windows"):
+            for sentence in _sentences(bullet):
+                if re.search(r"Windows", sentence) and re.search(r"읽지\s*않", sentence):
+                    problems.append("the notes still say Windows does not read Gemini usage: "
+                                    f"{sentence!r}")
         for bullet in self._bullets(r"API\s*키"):
             # An API key may be mentioned only as something that is not in this version —
             # judged per sentence, so a "아직" elsewhere in the section does not excuse it.
@@ -4421,8 +4446,9 @@ class StagedV120NotesFormatTests(unittest.TestCase):
         else:
             first_guard = next((n for n in ast.walk(fetch) if isinstance(n, ast.If)), None)
             guard_src = ast.unparse(first_guard.test) if first_guard is not None else ""
-            if "sys.platform" not in guard_src or "darwin" not in guard_src:
-                problems.append("fetch_gemini_usage no longer starts with the macOS-only guard")
+            if "sys.platform" not in guard_src or "darwin" not in guard_src or "win32" not in guard_src:
+                problems.append("fetch_gemini_usage's first guard must let darwin and win32 "
+                                f"through and nothing else: {guard_src!r}")
         args = _module_literals(APP_SOURCE).get("GEMINI_AGY_ARGS", set())
         if not {"-p", "/usage", "--output-format", "json"} <= set(args):
             problems.append(f"GEMINI_AGY_ARGS is not the agy /usage call: {sorted(args)!r}")
@@ -4430,29 +4456,125 @@ class StagedV120NotesFormatTests(unittest.TestCase):
             problems.append("show_gemini is not a runtime default")
         if not _literal_assignments(APP_SOURCE, "GEMINI_GAUGES") and "GEMINI_GAUGES" not in _module_literals(APP_SOURCE):
             problems.append("GEMINI_GAUGES is gone")
-        for path in (WIN_APP, WIN_UPDATE, WIN_BUILD, WIN_CORE):
-            if "fetch_gemini_usage" in _attrs_and_names(path):
-                problems.append(f"{path.name} names fetch_gemini_usage; the notes say macOS only")
+        if "start_gemini_refresh" not in _attrs_and_names(WIN_APP):
+            problems.append(f"{WIN_APP.name} does not start the Gemini read; the notes say Windows shows it")
         for gate, classes in ((GEMINI_USAGE_GATE, ("FetchViaAgyTests", "AgyLoginTests")),
                               (GEMINI_CADENCE_GATE, ("AutomaticCadenceTests",)),
-                              (GEMINI_PILL_GATE, ("GeminiSegmentTests", "GeminiLoginMenuTests"))):
+                              (GEMINI_PILL_GATE, ("GeminiSegmentTests", "GeminiLoginMenuTests")),
+                              (GEMINI_WINDOWS_GATE, ("FetchOnWindowsTests", "FindAgyOnWindowsTests"))):
             missing = [c for c in classes if c not in _class_names(gate)]
             if missing:
                 problems.append(f"{gate.name} lacks the gate class(es) {missing!r}")
         self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
 
-    def test_v120_the_sign_in_menu_item_is_quoted_and_exists_in_four_languages(self):
-        """The notes tell a signed-out user where to sign in: the right-click item.  They
-        must quote ``TR["ko"]["menu_gemini_login"]`` (the leading glyph and the trailing
-        ellipsis may be dropped, as every earlier section does), and every quoted string in
-        the section must be a real Korean UI string under the same two variants.
+    def test_v120_cli_install_and_sign_in_from_the_ai_connections_column(self):
+        """The notes tell users they can install the three CLIs and sign in from Settings.
+        One bullet must name Claude Code, Codex and Gemini, say 설치 and 로그인, and quote
+        the column's title, ``TR["ko"]["ai_sec"]`` ("AI 연결") — that is where the user goes.
+
+        What the bullet may claim is tied to the source: "공식 서버" needs the three vendor
+        URLs, "서명" needs ``cli_signature_ok`` with a team per provider, "앱 전용 폴더"
+        needs ``app_cli_bin_dir``, and a sentence that names PATH must say it is left alone.
+
+        Rivals: notes that leave the feature out (the largest change in 1.2.0); a provider
+        dropped from the list; "PATH에 추가합니다"; a claim of signature checking after the
+        check was removed; a title that drifted from the UI."""
+        problems: list[str] = []
+        table = _tr_table()
+        title = table["ko"].get("ai_sec")
+        if title != "AI 연결":
+            problems.append(f"TR['ko']['ai_sec'] is {title!r}; the notes were reviewed against 'AI 연결'")
+        bullets = [b for b in self.bullets if f'"{title}"' in b]
+        if not bullets:
+            problems.append(f'no bullet quotes the settings column "{title}"')
+        for bullet in bullets:
+            for word in ("Claude Code", "Codex", "Gemini", "설치", "로그인"):
+                if word not in bullet:
+                    problems.append(f"the AI 연결 bullet does not say {word!r}")
+        defs = _module_defs(APP_SOURCE)
+        literals = _module_literals(APP_SOURCE)
+        for needed in ("install_cli", "run_cli_login", "run_ai_connect", "ai_connect_row"):
+            if needed not in defs:
+                problems.append(f"{needed} is gone; the notes promise install and sign-in")
+        claims = (
+            (r"공식", lambda: all(any(host in str(v) for v in literals.get(name, ()))
+                                 for name, host in (("CLAUDE_RELEASES_URL", "downloads.claude.ai"),
+                                                    ("CODEX_CHANNEL_URL", "releases.openai.com"))),
+             "the vendor download URLs"),
+            (r"서명", lambda: "cli_signature_ok" in defs and "cli_signing_requirement" in defs
+             and [len(v) for v in _literal_assignments(APP_SOURCE, "CLI_TEAM_IDS")] == [3],
+             "the signature check"),
+            (r"전용\s*폴더", lambda: "app_cli_bin_dir" in defs, "the app-private bin"),
+        )
+        for pattern, holds, what in claims:
+            if any(re.search(pattern, b) for b in bullets) and not holds():
+                problems.append(f"the notes mention {pattern!r} but the source lost {what}")
+        for bullet in self._bullets(r"PATH"):
+            for sentence in _sentences(bullet):
+                if "PATH" in sentence and not re.search(r"않|그대로|건드리지", sentence):
+                    problems.append(f"the notes read as if the app changes PATH: {sentence!r}")
+        for gate, classes in ((CLI_INSTALL_GATE, ("InstallTests", "SignatureTests", "RunAiConnectTests",
+                                                  "AppBinTests")),
+                              (V8_GATE, ("SignatureRequirementTests",))):
+            missing = [c for c in classes if c not in _class_names(gate)]
+            if missing:
+                problems.append(f"{gate.name} lacks the gate class(es) {missing!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v120_gemini_sign_in_is_a_pasted_code_and_the_browser_is_not_opened_unasked(self):
+        """Two things a Gemini user has to know.  Signing in ends when the code the browser
+        shows is pasted into the opened window — one bullet says 코드 and 붙여.  And the
+        app does not open the browser's sign-in page on its own — one bullet says 브라우저
+        with a negation.
+
+        Ties: the three window lines exist in en/ko/ja/es and the third says Enter;
+        ``start_gemini_login`` exists; the background environment still hides ``open``
+        (``_gemini_fake_open_dir``); the gates exist by name.
+
+        Rivals: notes that say "sign in from the menu" and nothing about the code (the user
+        waits for a browser callback that never comes); notes that dropped the promise about
+        the browser; a locale without the window lines."""
+        problems: list[str] = []
+        if not any(re.search(r"코드", b) and re.search(r"붙여", b) for b in self._bullets(r"Gemini")):
+            problems.append("no Gemini bullet says the sign-in code is pasted (코드 … 붙여)")
+        quiet = [s for b in self.bullets for s in _sentences(b)
+                 if re.search(r"브라우저", s) and re.search(r"않", s)]
+        if not quiet:
+            problems.append("no sentence says the app does not open the browser on its own")
+        table = _tr_table()
+        for lang in ("en", "ko", "ja", "es"):
+            steps = [table.get(lang, {}).get(f"term_gemini_step{i}") for i in (1, 2, 3)]
+            if not all(isinstance(x, str) and x.strip() for x in steps):
+                problems.append(f"TR[{lang!r}] lacks the three Gemini window lines")
+            elif "Enter" not in steps[2]:
+                problems.append(f"TR[{lang!r}]['term_gemini_step3'] does not say Enter")
+        defs = _module_defs(APP_SOURCE)
+        for needed in ("start_gemini_login", "_gemini_fake_open_dir"):
+            if needed not in defs:
+                problems.append(f"{needed} is gone")
+        for gate, classes in ((V8_GATE, ("GeminiWindowScriptTests", "GeminiWindowOnWindowsTests")),
+                              (CLI_INSTALL_GATE, ("GeminiLoginTests",))):
+            missing = [c for c in classes if c not in _class_names(gate)]
+            if missing:
+                problems.append(f"{gate.name} lacks the gate class(es) {missing!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v120_every_quote_is_a_real_ui_string_and_the_sign_in_item_exists_in_four_languages(self):
+        """Every quoted string in the section must be a real Korean UI string (the leading
+        glyph and the trailing ellipsis may be dropped, as every earlier section does).
+
+        Re-scoped 2026-11-19 (Verifier gemini-tests-v2): the section used to have to quote
+        the right-click item ``TR["ko"]["menu_gemini_login"]``.  With install and sign-in in
+        Settings the place the notes send the user is the "AI 연결" column (gated in
+        ``test_v120_cli_install_and_sign_in_from_the_ai_connections_column``), so quoting the
+        menu item is allowed but no longer required.  The item itself still has to exist.
 
         Ties: the key exists in en/ko/ja/es and each value names Gemini and agy;
         ``rightMouseDown_`` builds the item from that key with the ``loginGemini:`` action,
         behind ``state["gemini_onboard"]``; ``start_gemini_login`` opens Terminal.
 
-        Rivals: a label that drifted from the menu; a quote of something that is not on
-        screen; a locale left without the item; the item built unconditionally."""
+        Rivals: a quote of something that is not on screen; a label that drifted from the
+        menu; a locale left without the item; the item built unconditionally."""
         problems: list[str] = []
         table = _tr_table()
 
@@ -4469,8 +4591,8 @@ class StagedV120NotesFormatTests(unittest.TestCase):
             problems.append(f"TR['ko']['menu_gemini_login'] is {label!r}, the notes were "
                             f"reviewed against {KO_GEMINI_LOGIN_LABEL!r}")
         quotes = re.findall(r'"([^"]+)"', self.body)
-        if not any(q in forms(label or "") for q in quotes):
-            problems.append(f"the notes must quote the menu item {label!r}; quotes: {quotes!r}")
+        if not quotes:
+            problems.append("the notes quote no UI string at all — the user is not told where to look")
         known = set()
         for value in table["ko"].values():
             if isinstance(value, str):
@@ -4498,17 +4620,22 @@ class StagedV120NotesFormatTests(unittest.TestCase):
         self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
 
     def test_v120_windows_ships_the_same_version(self):
-        """One bullet names Windows and the version, and that version is ``APP_VERSION``
-        — which ``windows/build_win.py``'s ``app_version`` reads, so the two platforms
-        cannot carry different numbers.  Rivals: a version in the bullet other than
-        ``APP_VERSION``; no word about Windows at all (a release is both platforms)."""
+        """The section mentions Windows (a release is both platforms), and any version a
+        Windows bullet names is ``APP_VERSION`` — which ``windows/build_win.py``'s
+        ``app_version`` reads, so the two platforms cannot carry different numbers.
+
+        Re-scoped 2026-11-19: the bullet no longer has to spell the version out (the old
+        sentence "Windows도 같은 1.2.0으로 나오지만 … 읽지 않습니다" is gone with the
+        limitation it announced); a version, if written, must still be the right one.
+        Rivals: no word about Windows at all; a version in the bullet other than
+        ``APP_VERSION``."""
         problems: list[str] = []
         windows = self._bullets(r"Windows")
         versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
         named = [m.group(1) for b in windows for m in re.finditer(r"(\d+\.\d+(?:\.\d+)?)", b)]
         if not windows:
             problems.append("no bullet mentions Windows")
-        elif not named or any([v] != versions for v in named):
+        elif any([v] != versions for v in named):
             problems.append(f"the Windows bullet names {named!r}; APP_VERSION is {versions!r}")
         win_version = _module_defs(WIN_BUILD).get("app_version")
         if win_version is None or not any("APP_VERSION" in s for s in _code_strings([win_version])):

@@ -830,8 +830,11 @@ class GeminiLoginMenuTests(_Guard):
 
     def test_the_context_menu_offers_the_gemini_login_item_from_its_flag(self):
         """rightMouseDown_ 이 state["gemini_onboard"] 를 읽어 t("menu_gemini_login") 항목을 "loginGemini:"
-        로 달고, Handler.loginGemini_ 가 start_gemini_login 을 부른다.
-        Rivals: 항목 없음(로그인하라는 말이 어디에도 없다); 깃발 없이 늘 보임; 핸들러가 Codex 도우미를 부름."""
+        로 달고, Handler.loginGemini_ 가 설치·로그인 흐름(start_ai_connect 또는 run_ai_connect, "gemini")으로
+        간다. v7-I1: 우클릭의 로그인 안내도 터미널 대신 이 흐름을 쓴다 — start_gemini_login(Terminal)을 부르지
+        않는다(자세한 것은 tests/test_cli_install_login.py).
+        Rivals: 항목 없음(로그인하라는 말이 어디에도 없다); 깃발 없이 늘 보임; 핸들러가 Codex 도우미를 부름;
+        여전히 Terminal 을 엶."""
         run_gui = _run_gui_tree()
         menu = _nested(run_gui, "rightMouseDown_")
         self.assertIsNotNone(menu)
@@ -839,17 +842,26 @@ class GeminiLoginMenuTests(_Guard):
         self.assertLessEqual({"loginGemini:", "gemini_onboard"}, _str_consts(menu))
         fn = _nested(run_gui, "loginGemini_")
         self.assertIsNotNone(fn, "Handler.loginGemini_ 가 없다")
-        self.assertIn("start_gemini_login", _called_names(fn))
+        called = _called_names(fn)
+        self.assertTrue({"start_ai_connect", "run_ai_connect"} & set(called),
+                        "loginGemini_ 가 설치·로그인 흐름으로 가지 않는다")
+        self.assertNotIn("start_gemini_login", called)
+        self.assertIn("gemini", _str_consts(fn))
 
     def test_the_login_helper_opens_agy_itself_in_terminal(self):
-        """start_gemini_login 은 Terminal 에서 `agy` 를 연다(사용자가 직접 로그인한다) — `-p`·`/usage` 가
-        아니다. 아무것도 실행하지 않는다: `_run_in_terminal` 은 기록기다.
-        Rivals: `agy -p /usage` 를 엶(한 번 묻고 끝난다 — 로그인 화면이 아니다); `agy login`(그런 명령은
-        없다); 앱이 직접 agy 를 띄움(숨은 프로세스로 OAuth)."""
+        """start_gemini_login 은 Terminal 에서 agy 를 연다(사용자가 직접 로그인한다). 아무것도 실행하지
+        않는다: `_run_in_terminal` 은 기록기다.
+        v8-G1(2026-11-19): 창에서 실행하는 것은 `agy -p "/usage" --output-format json` 이다 — 인자 없는
+        `agy`(TUI)는 대체 화면으로 바뀌어 맨 위 안내를 가린다. 자세한 것은 tests/test_v8_fixes.py.
+        Rivals: 인자 없는 agy; `agy login`(그런 명령은 없다); 앱이 직접 agy 를 띄움(숨은 프로세스로 OAuth)."""
         login = _require("start_gemini_login")
         seen = []
         path_before = os.environ.get("PATH")
-        with mock.patch.object(claude_pet, "_run_in_terminal", side_effect=seen.append), \
+        # agy 가 깔려 있는지는 이 테스트가 정한다 — 이 기기에 진짜 agy 가 있는지에 기대지 않는다(CI 러너에는
+        # 없다: start_gemini_login 은 agy 를 못 찾으면 창을 열지 않고 돌아온다). 있지 않은 경로의 문자열이다.
+        agy = "/tmp/claudepet-test-no-such-dir/bin/agy"
+        with mock.patch.object(claude_pet, "_find_agy_cli", lambda: agy), \
+                mock.patch.object(claude_pet, "_run_in_terminal", side_effect=seen.append), \
                 mock.patch.object(claude_pet.subprocess, "run",
                                   side_effect=AssertionError("프로세스를 띄웠다")), \
                 mock.patch.object(claude_pet.subprocess, "Popen",
@@ -857,9 +869,9 @@ class GeminiLoginMenuTests(_Guard):
             login()
         self.assertEqual(len(seen), 1)
         lines = [ln.strip().strip("\"'") for ln in str(seen[0]).splitlines()]
-        self.assertTrue(any(ln == "agy" or ln.endswith("/agy") for ln in lines),
-                        "Terminal 명령에 `agy` 만 실행하는 줄이 없다: %r" % seen[0])
-        self.assertNotIn("/usage", seen[0])
+        del lines
+        self.assertRegex(seen[0], r"agy\S*\s+-p\s+\S*/usage", "Terminal 명령이 `agy -p /usage` 를 실행하지 않는다")
+        self.assertIn(agy, seen[0], "Terminal 명령이 찾은 agy 의 경로를 쓰지 않는다")
         self.assertNotIn("agy login", seen[0])
         # v5-1: 가짜 open 은 백그라운드 실행에만 둔다 — 사용자가 고른 로그인에서는 브라우저가 열려야 한다.
         # Terminal 명령에 나오는 어느 폴더에도 `open` 이 없고(PATH 에 가짜 open 폴더를 넣지 않았다),

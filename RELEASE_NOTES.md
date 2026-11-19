@@ -81,9 +81,9 @@ macOS 12+ (Apple Silicon · Intel con el zip universal) · autocontenido
 
 **v1.2.0**
 
-- macOS에서 Gemini 사용량을 필에 표시합니다. Antigravity CLI에 로그인되어 있을 때만 줄이 생기고, 설치나 로그인이 안 되어 있으면 아무것도 표시하지 않으며 CLI가 설치되어 있으면 우클릭 메뉴에 "Gemini 로그인(agy)" 항목이 나옵니다.
-- 설정 창에 Gemini 구역이 생겨 필 표시 여부와 볼 게이지를 고릅니다. 사용량은 5분마다 새로 읽고, 로그인이 풀려도 앱이 브라우저에 로그인 창을 멋대로 열지 않습니다.
-- Windows도 같은 1.2.0으로 나오지만 이번에는 Gemini 사용량을 읽지 않습니다. Gemini를 API 키로 보는 방식도 아직 없습니다.
+- 설정 창 "AI 연결"에서 Claude Code·Codex·Gemini CLI를 [설치] 한 번으로 받고 로그인 창까지 이어집니다. 공식 서버에서 받아 서명을 확인한 뒤 앱 전용 폴더에 두고 PATH는 바꾸지 않습니다.
+- Gemini (Antigravity) 사용량을 macOS와 Windows 필에 표시합니다. 로그인하지 않았으면 표시하지 않고, 앱이 브라우저를 멋대로 열지 않습니다.
+- Gemini 로그인은 열린 창에 브라우저에서 받은 코드를 붙여 넣으면 끝납니다. Gemini를 API 키로 보는 방식은 아직 없습니다.
 
 **v1.1.2**
 

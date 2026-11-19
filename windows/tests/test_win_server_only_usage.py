@@ -197,16 +197,21 @@ class WinContextMenuParityTests(unittest.TestCase):
                              {n.attr for n in ast.walk(menu) if isinstance(n, ast.Attribute)})
 
     def test_the_console_commands(self):
-        """Same commands as macOS, in a new console like ``_install_claude``. Rivals: a
-        hidden subprocess (the user cannot finish ``codex login``); a different package."""
-        for name, needle in (("_install_codex", "npm install -g @openai/codex"),
-                             ("_login_codex", "codex login")):
+        """Contract v7-I1 (2026-11-19) replaced the console: both items start the same
+        in-app install-and-sign-in flow as macOS (``cp.start_ai_connect`` or
+        ``cp.run_ai_connect`` with ``"codex"``) — no new PowerShell console, no ``npm install``
+        (the official binary is downloaded and verified instead; behaviour is gated in
+        tests/test_cli_install_login.py and windows/tests/test_win_ai_connect.py).
+        The name of this test is historical."""
+        for name in ("_install_codex", "_login_codex"):
             with self.subTest(method=name):
                 fn = _method(self.win, name)
                 self.assertIsNotNone(fn, f"PetWindow.{name} missing")
-                self.assertIn("_run_in_console", _called(fn))
-                self.assertTrue(any(needle in s for s in _str_consts(fn)),
-                                f"{name} does not run {needle!r}")
+                self.assertTrue({"start_ai_connect", "run_ai_connect"} & _called(fn),
+                                f"{name} does not start the install-and-sign-in flow")
+                self.assertNotIn("_run_in_console", _called(fn))
+                self.assertIn("codex", _str_consts(fn))
+                self.assertFalse(any("npm install" in s for s in _str_consts(fn)))
 
 
 class WinRound2CallSiteTests(unittest.TestCase):
