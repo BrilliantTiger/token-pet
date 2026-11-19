@@ -1233,7 +1233,8 @@ class LoginTableTests(CliCase):
         argv = _require("cli_login_argv")
         self.assertEqual(argv("claude", "/x/claude"), ["/x/claude", "auth", "login", "--claudeai"])
         self.assertEqual(argv("codex", "/x/codex"), ["/x/codex", "login"])
-        self.assertEqual(argv("gemini", "/x/agy"), ["/x/agy"])
+        # v8-G1: 창에서는 `agy -p /usage --output-format json`(대체 화면이 없어 안내 세 줄이 가려지지 않는다).
+        self.assertEqual(argv("gemini", "/x/agy"), ["/x/agy", "-p", "/usage", "--output-format", "json"])
         self.assertEqual(getattr(claude_pet, "CLI_LOGIN_TIMEOUT_SEC", None), {"claude": 300, "codex": 300})
         self.assertEqual(getattr(claude_pet, "GEMINI_LOGIN_HINT_SEC", None), 300)
         self.assertEqual(claude_pet.LOGIN_TIMEOUT_SEC, 300, "Claude 로그인 job 의 상한이 300초가 아니다")
@@ -1432,7 +1433,7 @@ class GeminiLoginTests(LoginCase):
     def test_the_terminal_window_prints_the_three_steps_before_agy_in_the_app_language(self):
         """I5(대표님 보완): 띄우는 터미널 창 **맨 위에 안내 세 줄**을 먼저 찍고 agy 를 실행한다 — 앱 언어로
         (4개 로케일): ① 브라우저에서 계정을 고르고 로그인 ② 나온 코드를 복사 ③ 이 창에 붙여 넣고 Enter.
-        `agy` 만 연다(`-p`·`/usage` 없음).
+        무엇을 어떻게 실행하는지(v8-G1: `-p /usage`, stdout 숨김, 끝맺는 줄)는 tests/test_v8_fixes.py 가 본다.
         Rivals: 안내 없이 agy 만 띄움(코드를 어디에 넣는지 모른다); 안내를 agy 뒤에 찍음(agy 가 끝나야 보인다);
         영어로만; 한 줄만."""
         self._window_patch.stop()
@@ -1453,12 +1454,10 @@ class GeminiLoginTests(LoginCase):
                 self.assertNotIn(-1, at, "터미널 창에 안내 세 줄이 다 없다")
                 self.assertEqual(at, sorted(at), "안내 순서가 ①②③ 이 아니다")
                 lines = script.splitlines()
-                agy_line = [i for i, ln in enumerate(lines)
-                            if ln.strip().strip("\"'") == "agy" or ln.strip().strip("\"'").endswith("/agy")]
-                self.assertTrue(agy_line, "`agy` 만 실행하는 줄이 없다")
+                agy_line = [i for i, ln in enumerate(lines) if self.cli["gemini"] in ln]
+                self.assertTrue(agy_line, "agy 를 실행하는 줄이 없다")
                 step_lines = [i for i, ln in enumerate(lines) if any(x in ln for x in steps)]
                 self.assertLess(max(step_lines), agy_line[0], "안내를 agy 보다 먼저 찍지 않았다")
-                self.assertNotIn("/usage", script)
                 self.assertNotIn("fake-open", script)
 
     def test_on_windows_the_same_steps_and_agy_open_in_a_new_console_window(self):
@@ -1492,7 +1491,6 @@ class GeminiLoginTests(LoginCase):
         at = [text.find(x) for x in steps] + [text.find(agy)]
         self.assertNotIn(-1, at, "안내 세 줄과 agy.exe 가 명령에 다 없다")
         self.assertEqual(at, sorted(at), "안내 세 줄 → agy.exe 순서가 아니다")
-        self.assertNotIn("/usage", text)
         env = kw.get("env")
         if env is not None:
             self.assertNotIn("fake-open", str(env.get("PATH", "")))
@@ -1516,7 +1514,7 @@ class ClaudeLoginTests(LoginCase):
         jobs = []
         token = {"on": False}
 
-        def job(argv, label, stem, timeout):
+        def job(argv, label, stem, timeout, *a, **k):      # v8-B4: cancel 을 받는 인자가 더해질 수 있다
             jobs.append((list(argv), label, timeout))
             token["on"] = token["after"]
             return token["out"]

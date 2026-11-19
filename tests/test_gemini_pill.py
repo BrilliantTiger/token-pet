@@ -849,10 +849,11 @@ class GeminiLoginMenuTests(_Guard):
         self.assertIn("gemini", _str_consts(fn))
 
     def test_the_login_helper_opens_agy_itself_in_terminal(self):
-        """start_gemini_login 은 Terminal 에서 `agy` 를 연다(사용자가 직접 로그인한다) — `-p`·`/usage` 가
-        아니다. 아무것도 실행하지 않는다: `_run_in_terminal` 은 기록기다.
-        Rivals: `agy -p /usage` 를 엶(한 번 묻고 끝난다 — 로그인 화면이 아니다); `agy login`(그런 명령은
-        없다); 앱이 직접 agy 를 띄움(숨은 프로세스로 OAuth)."""
+        """start_gemini_login 은 Terminal 에서 agy 를 연다(사용자가 직접 로그인한다). 아무것도 실행하지
+        않는다: `_run_in_terminal` 은 기록기다.
+        v8-G1(2026-11-19): 창에서 실행하는 것은 `agy -p "/usage" --output-format json` 이다 — 인자 없는
+        `agy`(TUI)는 대체 화면으로 바뀌어 맨 위 안내를 가린다. 자세한 것은 tests/test_v8_fixes.py.
+        Rivals: 인자 없는 agy; `agy login`(그런 명령은 없다); 앱이 직접 agy 를 띄움(숨은 프로세스로 OAuth)."""
         login = _require("start_gemini_login")
         seen = []
         path_before = os.environ.get("PATH")
@@ -864,9 +865,8 @@ class GeminiLoginMenuTests(_Guard):
             login()
         self.assertEqual(len(seen), 1)
         lines = [ln.strip().strip("\"'") for ln in str(seen[0]).splitlines()]
-        self.assertTrue(any(ln == "agy" or ln.endswith("/agy") for ln in lines),
-                        "Terminal 명령에 `agy` 만 실행하는 줄이 없다: %r" % seen[0])
-        self.assertNotIn("/usage", seen[0])
+        del lines
+        self.assertRegex(seen[0], r"agy\S*\s+-p\s+\S*/usage", "Terminal 명령이 `agy -p /usage` 를 실행하지 않는다")
         self.assertNotIn("agy login", seen[0])
         # v5-1: 가짜 open 은 백그라운드 실행에만 둔다 — 사용자가 고른 로그인에서는 브라우저가 열려야 한다.
         # Terminal 명령에 나오는 어느 폴더에도 `open` 이 없고(PATH 에 가짜 open 폴더를 넣지 않았다),
