@@ -830,8 +830,11 @@ class GeminiLoginMenuTests(_Guard):
 
     def test_the_context_menu_offers_the_gemini_login_item_from_its_flag(self):
         """rightMouseDown_ 이 state["gemini_onboard"] 를 읽어 t("menu_gemini_login") 항목을 "loginGemini:"
-        로 달고, Handler.loginGemini_ 가 start_gemini_login 을 부른다.
-        Rivals: 항목 없음(로그인하라는 말이 어디에도 없다); 깃발 없이 늘 보임; 핸들러가 Codex 도우미를 부름."""
+        로 달고, Handler.loginGemini_ 가 설치·로그인 흐름(start_ai_connect 또는 run_ai_connect, "gemini")으로
+        간다. v7-I1: 우클릭의 로그인 안내도 터미널 대신 이 흐름을 쓴다 — start_gemini_login(Terminal)을 부르지
+        않는다(자세한 것은 tests/test_cli_install_login.py).
+        Rivals: 항목 없음(로그인하라는 말이 어디에도 없다); 깃발 없이 늘 보임; 핸들러가 Codex 도우미를 부름;
+        여전히 Terminal 을 엶."""
         run_gui = _run_gui_tree()
         menu = _nested(run_gui, "rightMouseDown_")
         self.assertIsNotNone(menu)
@@ -839,7 +842,11 @@ class GeminiLoginMenuTests(_Guard):
         self.assertLessEqual({"loginGemini:", "gemini_onboard"}, _str_consts(menu))
         fn = _nested(run_gui, "loginGemini_")
         self.assertIsNotNone(fn, "Handler.loginGemini_ 가 없다")
-        self.assertIn("start_gemini_login", _called_names(fn))
+        called = _called_names(fn)
+        self.assertTrue({"start_ai_connect", "run_ai_connect"} & set(called),
+                        "loginGemini_ 가 설치·로그인 흐름으로 가지 않는다")
+        self.assertNotIn("start_gemini_login", called)
+        self.assertIn("gemini", _str_consts(fn))
 
     def test_the_login_helper_opens_agy_itself_in_terminal(self):
         """start_gemini_login 은 Terminal 에서 `agy` 를 연다(사용자가 직접 로그인한다) — `-p`·`/usage` 가
