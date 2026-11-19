@@ -63,6 +63,8 @@ def why_no_rows(provider):
                 bool(cp._token_from_file()), cp.keychain_locked())
         return "request sent; last error: %s" % cp.OAUTH_STATUS.get("last_error")
     if provider == "codex":
+        if not cp.read_codex_token(cp.codex_auth_path()):
+            return "no sign-in data — no request was sent"
         if cp._codex_cache.get("ok_t") is not None:
             return "the server answered, but with no usable usage window"
         return "last error: %s" % cp.CODEX_STATUS.get("last_error")
@@ -114,7 +116,7 @@ def main():
              bool(os.environ.get("HOME") or os.environ.get("USERPROFILE"))))
     if locked is True:
         failures.append("the login keychain is locked in the runner's session — Claude Code and Gemini cannot be "
-                        "verified. Run the runner as the signed-in user's LaunchAgent (ci/SELF_HOSTED_RUNNERS.md)")
+                        "verified. Remove SessionCreate from the runner's LaunchAgent (ci/SELF_HOSTED_RUNNERS.md)")
     for p in PROVIDERS:
         if locked is True and p in ("claude", "gemini"):
             print("%-7s not checked — keychain locked" % p)

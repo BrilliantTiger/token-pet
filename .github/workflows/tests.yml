@@ -23,7 +23,7 @@ name: tests
 # 내보내지 않는다. 1.2.1 부터 게시는 main 의 실기기 잡 두 개가 초록일 때만 한다.
 # **포크의 PR 에서는 돌지 않는다** — 공개 저장소라, 포크의 코드가 대표님 PC 에서 돌게 된다. 포크는
 # 워크플로 파일도 고칠 수 있으므로 이 조건만으로는 부족하고, 저장소 설정(외부 기여자의 워크플로는 전부
-# 승인 필요)이 함께 막는다. 등록 절차는 ci/SELF_HOSTED_RUNNERS.md.
+# 승인 필요)이 함께 막는다. 러너는 조직 러너 그룹 'token-pet' 의 두 대다(ci/SELF_HOSTED_RUNNERS.md).
 on:
   push:
     branches: ["claude/**", "dev", "main"]
@@ -174,7 +174,7 @@ jobs:
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' ||
                                        startsWith(github.ref, 'refs/tags/')))
-    runs-on: [self-hosted, macOS]
+    runs-on: [self-hosted, macOS, token-pet]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -189,7 +189,7 @@ jobs:
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' ||
                                        startsWith(github.ref, 'refs/tags/')))
-    runs-on: [self-hosted, Windows]
+    runs-on: [self-hosted, Windows, token-pet]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
