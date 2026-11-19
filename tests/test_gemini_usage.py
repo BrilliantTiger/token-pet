@@ -484,6 +484,9 @@ class AgyCase(unittest.TestCase):
             # assertNotIn 은 실패 때 env 전체를 찍는다 — 환경변수 값이 기록에 남지 않게 참·거짓만 본다.
             self.assertFalse(key in env, "%s 가 agy 의 env 에 있다 — agy 가 토큰 저장소를 파일로 바꾼다" % key)
         self.assertEqual(env.get("NO_COLOR"), "1")
+        # v7-W4: 조회용 agy 가 자동 업데이터를 띄우지 않게 — 끊을 때 바이너리 교체 도중 죽지 않는다.
+        self.assertEqual(env.get("AGY_CLI_DISABLE_AUTO_UPDATE"), "1",
+                         "백그라운드 agy 의 env 에 AGY_CLI_DISABLE_AUTO_UPDATE=1 이 없다")
         self.assertEqual(env.get("HOME"), self.home, "env 가 os.environ 의 사본이 아니다(HOME 이 없다)")
         self.assertTrue(dict(os.environ) == app_env_before, "앱 자신의 환경을 바꿨다")
 
@@ -914,9 +917,10 @@ class FetchViaAgyTests(AgyCase):
                 self.assertEqual(self.fake.alive(), 0, "agy 프로세스가 남았다")
 
     def test_off_macos_nothing_is_spawned(self):
-        """macOS 가 아니면 None, 프로세스 0. Rival: 플랫폼을 안 봄."""
+        """macOS·Windows 가 아니면 None, 프로세스 0. Rival: 플랫폼을 안 봄.
+        (v7-W: Windows 는 이제 읽는다 — 그 동작은 tests/test_gemini_windows.py 가 가른다.)"""
         _require("parse_agy_usage")
-        for plat in ("win32", "linux"):
+        for plat in ("linux",):
             with self.subTest(platform=plat):
                 with mock.patch.object(sys, "platform", plat):
                     self.assertIsNone(self.fetch())
