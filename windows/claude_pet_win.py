@@ -2497,7 +2497,10 @@ class SettingsDialog(QDialog):
     def ai_rows_refresh(self):
         """"AI 연결" 세 줄을 지금 상태로 고친다 (macOS 판 ai_rows_refresh)."""
         for p, w in self.ai_rows.items():
-            row = cp.ai_connect_row(p, bool(cp.find_cli(p)), cp.cli_logged_in(p), self.win.ai_jobs[p])
+            if p == "gemini":
+                cp.gemini_row_refresh()
+            row = cp.ai_connect_row(p, bool(cp.find_cli(p)), cp.cli_logged_in(p), self.win.ai_jobs[p],
+                                    detail=cp.ai_connect_detail(p))
             status, button, hint = cp.ai_connect_text(row)
             w["status"].setText(status)
             w["hint"].setText(self._wrap_words(hint, w["hint"]))

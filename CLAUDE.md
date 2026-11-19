@@ -68,6 +68,7 @@ invites the reader to reason from it.
 | `tests/test_v020_boundaries.py` | Upgrade-boundary verification for v0.20. Fail-closed: it refuses to run unless launched with the allow-list environment its header specifies. |
 | `tests/test_autostart.py` | Gating tests for the "Start at sign-in" menu item: the status table, the toggle's truth table, the `do_uninstall()` ordering, the TR keys, and the menu wiring (by AST, no GUI). Every service is a fake; `sys.modules["ServiceManagement"]` is a tripwire for the duration of the module. |
 | `tests/test_cli_install_login.py` | Gates for installing and signing in to the three CLIs from the app: release lookup, staged download and hash, single-entry extraction, signature check, the app-private bin, the daily update, each provider's sign-in, the "AI connections" rows, and the macOS wiring (by AST). Every server, archive and CLI is a stand-in under a temp directory; nothing is downloaded or run for real. |
+| `tests/test_gemini_login_check.py` | TOK-61: a signed-in Gemini is never offered [Sign in] (`gemini_link_state`, `ai_connect_detail`, the check before the sign-in window), a failed read is retried soon, and `child_env()` keeps the bundle's `SSL_CERT_FILE` / `SSL_CERT_DIR` away from every child. In the Windows CI job's list. |
 | `tests/test_gemini_windows.py` | The Windows side of Gemini reading, run on macOS by switching `sys.platform` and on real Windows in CI: where `agy.exe` is looked for, the credential probe's answer format, the `rundll32.exe` stand-in, `taskkill`. |
 | `windows/tests/test_win_ai_connect.py`, `windows/tests/test_win_gemini.py` | The port's wiring for the two above, by AST (PySide6 is not needed to run them). |
 | `verify_pet_payload.py` | Build gate: checks that the bundled `.claude_pet` payload actually landed in an artifact and matches the repo source byte for byte. It reads the expected file list out of `claude_pet.py`'s `BUNDLED_PET_README` / `BUNDLED_PET_IDS` / `BUNDLED_PET_FILES` via AST rather than importing it, so adding a pet cannot leave a hardcoded count checking the wrong number. Called by `release.sh` (`build`, and per-artifact before upload) and by `build_app.sh`. |
@@ -1219,8 +1220,17 @@ token.
   in the browser, copy the code, paste it here and press Enter), and the settings row shows
   `ai_login_paste` with the same guidance. **Do not run bare `agy` there**: its TUI switches
   to the alternate screen and hides those three lines. **Only stdout is discarded** (the JSON
-  body); stderr — the sign-in notice and the paste prompt — must stay visible. When `agy`
-  ends, its exit code picks one closing line, `term_gemini_done` or `term_gemini_timeout`.
+  body); stderr — the sign-in notice and the paste prompt — must stay visible and must stay
+  the terminal (do not pipe it through `tee` to read it: the sign-in leans on that terminal
+  and a signed-out `agy` cannot be tried here). When `agy` ends, its exit code picks the
+  closing: `term_gemini_done`, or `term_gemini_failed` plus `term_gemini_cert_hint`. **A
+  non-zero exit never prints a time-out line** — 1.2.0 printed "time ran out" after an `agy`
+  that had died at once on a certificate error, and there is no `term_gemini_timeout` key any
+  more. **The window opens only when there is no sign-in, or `agy` has asked for one**
+  (`_gemini_login_precheck()`): with a keychain item / Credential Manager entry present, the
+  app first does one hidden read — it answers `already` when that works and `unreadable` when
+  it fails for any reason other than a sign-in demand, and no window opens. While that check
+  runs the job's phase is `verify`; it becomes `login` only when the window really opens.
   `SSH_*` is removed and `AGY_CLI_DISABLE_AUTO_UPDATE=1` set in the window too, but the fake
   `open` / `rundll32` is not used — the browser has to open. **The app does not close that
   window, kill that process, or handle the code**, and it cannot see that exit code: its own
@@ -1230,9 +1240,35 @@ token.
 
 **"Connected" means the usage can be read now**, not that sign-in data exists
 (`cli_logged_in()`): Claude — a token and no `OAUTH_STATUS["auth_error"]`; Codex — a token
-and no `CODEX_STATUS["auth_error"]`; Gemini — a successful read and no
-`GEMINI_STATUS["auth_error"]`. Otherwise the row offers [Install] or [Sign in] according to
-whether the CLI is found. Right after a sign-in returns `ok`, `run_ai_connect()` clears what
+and no `CODEX_STATUS["auth_error"]`. Otherwise the row offers [Install] or [Sign in] according to
+whether the CLI is found.
+
+**Gemini is the exception, since TOK-61: [Sign in] appears only when there is no sign-in or
+`agy` asked for one.** The user's words: "이미 로그인되어있으면 … 로그인이 왜 필요해! 그냥
+바로 로딩되서 가져와야지!". `gemini_link_state()` is `connected`, `unreadable` / `cert` (a
+sign-in exists and the last read failed for a reason other than a sign-in demand —
+`_GEMINI_TRANSIENT`), `login` (no sign-in, or `_agy_wants_login`), or `unknown`.
+`cli_logged_in("gemini")` is true for the first three, so a network or certificate failure
+never offers [Sign in]: the row reads `ai_unreadable` ("connected · can't read usage now")
+with the tail of `agy`'s own error line in the hint (`ai_connect_detail()` → `detail=` of
+`ai_connect_row()`; shown on screen only, never logged), and the read is retried after
+`GEMINI_FAIL_RETRY_SEC` (60 s) instead of five minutes. `unknown` before the first answer
+shows "checking" with no button. Both settings windows call `gemini_row_refresh()` once a
+second so the row is read even when Gemini is hidden from the pill; how often `agy` actually
+runs is still `fetch_gemini_usage()`'s decision.
+
+**No child inherits the bundle's `SSL_CERT_FILE` / `SSL_CERT_DIR`** (`child_env()`). A py2app
+bundle puts both in its own environment, pointing at
+`…/Contents/Resources/openssl.ca/no-such-file`. `agy` (Go) started by the app, and the
+Terminal the app opened, inherited them and failed every request with `x509: certificate
+signed by unknown authority` — measured on the maintainer's Mac mini with 1.2.0, while `agy`
+in an ordinary terminal worked. A from-source run has no such variables, which is why
+development and CI never saw it. `cli_env()`, `_agy_env()`, the opt-in `claude -p /usage`
+and the `open` that starts Terminal all go through `child_env()`, and every Terminal script
+(`_run_in_terminal`) and the Windows console command begin by clearing the two
+(`_SSL_UNSET_SH` / `_SSL_UNSET_PS`). The rule is the same everywhere: drop a value that
+points inside an `.app` or at nothing; keep a real file the user set themselves (a company
+CA bundle). The app's own `os.environ` and its own HTTPS are not touched. Right after a sign-in returns `ok`, `run_ai_connect()` clears what
 the earlier failure left behind so the row turns to connected at once: for Gemini `t = 0`,
 `ok_t = now`, `auth_error = False`; for Codex `auth_error = False`; for Claude
 `_oauth_token_cache`'s `next_retry` and `declined` and `OAUTH_STATUS["auth_error"]`, followed

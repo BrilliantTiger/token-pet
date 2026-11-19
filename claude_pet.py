@@ -1180,7 +1180,12 @@ TR = {
     "term_gemini_step2": "② Copy the code the browser shows.",
     "term_gemini_step3": "③ Paste it into this window and press Enter.",
     "term_gemini_done": "✅ Done — you can close this window.",
-    "term_gemini_timeout": "⏱ Time ran out — press [Sign in] in Settings again.",
+    "term_gemini_failed": "❌ Sign-in did not finish — check the error above.",
+    "term_gemini_cert_hint": "If the error above mentions certificate or x509, it is a certificate error: company security software or a proxy may be intercepting the connection.",
+    "ai_unreadable": "Connected · can't read usage now",
+    "ai_hint_unreadable": "You are signed in. Retrying automatically.",
+    "ai_hint_cert": "Certificate error — security software or a proxy may be intercepting the connection. Retrying automatically.",
+    "ai_hint_error": "Error: {err}",
     "ai_fail_unsupported": "This computer is not supported",
     "ai_fail_manifest": "The download server gave an unexpected answer",
     "ai_fail_network": "Could not reach the download server",
@@ -1294,7 +1299,12 @@ TR = {
     "term_gemini_step2": "② 브라우저에 나온 코드를 복사하세요.",
     "term_gemini_step3": "③ 이 창에 붙여 넣고 Enter 를 누르세요.",
     "term_gemini_done": "✅ 완료 — 창을 닫아도 됩니다.",
-    "term_gemini_timeout": "⏱ 시간이 지났어요 — 설정에서 [로그인]을 다시 누르세요.",
+    "term_gemini_failed": "❌ 로그인하지 못했어요 — 위 오류를 확인하세요.",
+    "term_gemini_cert_hint": "위 오류에 certificate 나 x509 가 있으면 인증서 오류예요: 회사 보안 프로그램·프록시가 연결을 가로채고 있을 수 있어요.",
+    "ai_unreadable": "연결됨 · 지금은 사용량을 못 읽음",
+    "ai_hint_unreadable": "로그인돼 있어요. 자동으로 다시 읽습니다.",
+    "ai_hint_cert": "인증서 오류 — 회사 보안 프로그램·프록시가 연결을 가로채고 있을 수 있어요. 자동으로 다시 읽습니다.",
+    "ai_hint_error": "오류: {err}",
     "ai_fail_unsupported": "이 컴퓨터는 지원하지 않습니다",
     "ai_fail_manifest": "받는 서버의 답이 예상과 다릅니다",
     "ai_fail_network": "받는 서버에 연결하지 못했습니다",
@@ -1410,7 +1420,12 @@ TR = {
     "term_gemini_step2": "② ブラウザに表示されたコードをコピーしてください。",
     "term_gemini_step3": "③ このウィンドウに貼り付けて Enter を押してください。",
     "term_gemini_done": "✅ 完了 — このウィンドウは閉じて構いません。",
-    "term_gemini_timeout": "⏱ 時間切れです — 設定で［ログイン］をもう一度押してください。",
+    "term_gemini_failed": "❌ ログインできませんでした — 上のエラーを確認してください。",
+    "term_gemini_cert_hint": "上のエラーに certificate や x509 とあれば証明書エラーです。会社のセキュリティソフトやプロキシが接続を傍受している可能性があります。",
+    "ai_unreadable": "接続済み · 今は使用量を読めません",
+    "ai_hint_unreadable": "ログイン済みです。自動で読み直します。",
+    "ai_hint_cert": "証明書エラー — セキュリティソフトやプロキシが接続を傍受している可能性があります。自動で読み直します。",
+    "ai_hint_error": "エラー: {err}",
     "ai_fail_unsupported": "このコンピューターには対応していません",
     "ai_fail_manifest": "ダウンロードサーバーの応答が想定と違います",
     "ai_fail_network": "ダウンロードサーバーに接続できません",
@@ -1528,7 +1543,12 @@ TR = {
     "term_gemini_step2": "② Copia el código que muestra el navegador.",
     "term_gemini_step3": "③ Pégalo en esta ventana y pulsa Enter.",
     "term_gemini_done": "✅ Listo: ya puedes cerrar esta ventana.",
-    "term_gemini_timeout": "⏱ Se agotó el tiempo: pulsa [Iniciar sesión] de nuevo en Ajustes.",
+    "term_gemini_failed": "❌ No se pudo iniciar sesión: revisa el error de arriba.",
+    "term_gemini_cert_hint": "Si el error de arriba menciona certificate o x509, es un error de certificado: el software de seguridad de la empresa o un proxy puede estar interceptando la conexión.",
+    "ai_unreadable": "Conectado · no se puede leer el uso",
+    "ai_hint_unreadable": "Has iniciado sesión. Se reintenta solo.",
+    "ai_hint_cert": "Error de certificado: un programa de seguridad o un proxy puede interceptar la conexión. Se reintenta solo.",
+    "ai_hint_error": "Error: {err}",
     "ai_fail_unsupported": "Este equipo no es compatible",
     "ai_fail_manifest": "El servidor de descarga respondió algo inesperado",
     "ai_fail_network": "No se pudo conectar con el servidor de descarga",
@@ -3268,6 +3288,48 @@ def claude_token_present():
     return keychain_locked() is True
 
 
+# 자식 프로세스에 물려주면 안 되는 인증서 변수(TOK-61). py2app 으로 만든 앱은 자기 환경에
+# SSL_CERT_FILE·SSL_CERT_DIR=<번들>/Contents/Resources/openssl.ca/no-such-file 을 넣는다. 앱이 띄운 agy 와
+# 앱이 연 Terminal 이 그 값을 물려받으면, Go 로 만든 agy 가 없는 경로에서 루트 인증서를 찾다가
+# "x509: certificate signed by unknown authority" 로 끝난다(대표님 Mac mini, 1.2.0 실측 — 앱 밖 터미널의
+# agy 는 정상). 소스로 돌릴 때는 이 변수가 없어 개발·CI 에서는 보이지 않았다.
+_SSL_ENV_KEYS = ("SSL_CERT_FILE", "SSL_CERT_DIR")
+
+
+def _ssl_env_value_bad(value):
+    """그 인증서 경로를 자식에게 넘기면 안 되는가 — 앱 번들 안을 가리키거나, 가리키는 것이 없다.
+    사용자가 직접 정한 값(회사 CA 묶음처럼 실제로 있는 파일)은 그대로 둔다."""
+    value = str(value or "")
+    if not value:
+        return True
+    if ".app/Contents/" in value.replace("\\", "/"):
+        return True
+    try:
+        return not os.path.exists(value)
+    except (OSError, ValueError):
+        return True
+
+
+def child_env(base_env=None):
+    """자식 프로세스에 넘길 환경 — base_env(없으면 os.environ)의 **사본**에서 못 쓸 SSL_CERT_FILE·
+    SSL_CERT_DIR 을 뺀 것. 앱 자신의 환경(os.environ)과 앱 자신의 HTTPS 는 건드리지 않는다."""
+    env = dict(os.environ if base_env is None else base_env)
+    for key in [k for k in env if k.upper() in _SSL_ENV_KEYS]:
+        if _ssl_env_value_bad(env[key]):
+            env.pop(key, None)
+    return env
+
+
+# 로그인 창 스크립트의 맨 앞 줄 — Terminal 이 이미 그 값을 물려받은 채 떠 있을 수 있다. 같은 기준이다:
+# 번들 안을 가리키거나 없는 경로일 때만 지운다.
+_SSL_UNSET_SH = "".join(
+    'case "${%s:-}" in "") ;; *.app/Contents/*) unset %s ;; *) [ -e "$%s" ] || unset %s ;; esac\n' % (k, k, k, k)
+    for k in _SSL_ENV_KEYS)
+_SSL_UNSET_PS = ("foreach ($n in 'SSL_CERT_FILE','SSL_CERT_DIR') { $v = [Environment]::GetEnvironmentVariable($n); "
+                 "if ($v -and (($v -like '*.app/Contents/*') -or -not (Test-Path -LiteralPath $v))) "
+                 "{ Remove-Item -ErrorAction SilentlyContinue ('Env:' + $n) } }")
+
+
 def _run_in_terminal(cmd):
     """새 Terminal 창에서 cmd(bash)를 실행한다.
 
@@ -3279,9 +3341,9 @@ def _run_in_terminal(cmd):
     import tempfile
     fd, path = tempfile.mkstemp(suffix=".command", prefix="claudepet-")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write("#!/bin/bash\n" + cmd + '\nrm -f -- "$0"\n')
+        f.write("#!/bin/bash\n" + _SSL_UNSET_SH + cmd + '\nrm -f -- "$0"\n')
     os.chmod(path, 0o755)
-    subprocess.Popen(["/usr/bin/open", "-a", "Terminal", path])
+    subprocess.Popen(["/usr/bin/open", "-a", "Terminal", path], env=child_env())
 
 
 def start_claude_install():
@@ -3434,7 +3496,7 @@ def _fetch_cli_usage():
         return None
     try:
         r = subprocess.run([cli, "-p", "/usage"], capture_output=True,
-                           text=True, timeout=90)
+                           text=True, timeout=90, env=child_env())
     except Exception:
         return None
     rows = []
@@ -4712,6 +4774,7 @@ GEMINI_AGY_ARGS = ("-p", "/usage", "--output-format", "json")
 GEMINI_AGY_TIMEOUT = 30        # agy 한 번의 상한(초) — 관측된 5초의 여섯 배
 GEMINI_AUTO_SEC = 300          # 자동 실행 사이의 최소 간격
 GEMINI_CLICK_MIN_SEC = 60      # 사용자가 눌러도 이보다 자주 띄우지 않는다
+GEMINI_FAIL_RETRY_SEC = 60     # 로그인 요구가 아닌 실패 뒤 자동으로 다시 읽기까지 — 로그인돼 있으면 곧 다시 읽는다
 GEMINI_CHECK_SEC = 300         # 읽지 않는 동안(로그인 안 됨·멈춤) 로그인 지문을 다시 보는 간격
 GEMINI_SECURITY_TIMEOUT = 5    # 존재 확인(security) 한 번의 상한(초)
 GEMINI_KEYCHAIN_SERVICE = "gemini"          # agy 의 키체인 항목 — 있는지만 본다
@@ -4737,12 +4800,16 @@ GEMINI_CLI_DIRNAME = "claudepet-agy"
 # 지문, auth_failed_marker: agy 가 로그인을 요구했을 때의 지문 — None 이 아니면 자동 실행이 멈춰 있다.
 _gemini_cache = {"t": 0.0, "rows": None, "ok_t": None, "click": False, "click_check": False,
                  "cwd": None, "check_t": 0.0, "login": None, "marker": None,
-                 "auth_failed_marker": None, "open_dir": None}
+                 "auth_failed_marker": None, "open_dir": None,
+                 # cause: 마지막 실패의 까닭("cert" | None), error_text: 그때 agy 가 낸 오류의 끝쪽(화면용).
+                 "cause": None, "error_text": None}
 # Gemini 조회 상태. last_error: None(성공) | "not_installed"(agy 없음) | "timeout" | "agy_failed"
 # (0 아닌 종료·실행 실패) | "parse"(JSON 이 아니거나 쓸 버킷이 없다) | "status"(SUCCESS 가 아닌 답) |
 # "login"(로그인 안 됨 — 항목이 없거나 agy 가 로그인을 요구했다). auth_error 는 "login" 일 때만 True —
 # 필에는 아무것도 보이지 않고, 우클릭 메뉴에 "Gemini 로그인(agy)" 이 뜬다(compute_gemini_onboard_state).
 GEMINI_STATUS = {"auth_error": False, "last_error": None}
+# 로그인 요구가 아닌 실패 — 로그인은 돼 있고 지금 못 읽었을 뿐이다. [로그인] 을 띄우는 까닭이 아니다(TOK-61).
+_GEMINI_TRANSIENT = ("timeout", "agy_failed", "parse", "status")
 # 버킷 표 {bucket id: (window 또는 None, Gemini 묶음인가)} — 조회 경로(fetch_gemini_usage)가
 # agy_usage_buckets 로 꺼내 적고, 필 구간(gemini_summary_segment)이 게이지와 라벨을 고를 때 읽는다.
 # 파서(parse_agy_usage)는 이 표를 건드리지 않는다(순수). bucket id 의 모양에서 창을 짐작하지 않는다
@@ -5184,7 +5251,12 @@ def start_gemini_login():
     창에서 도는 것은 `agy -p /usage --output-format json` 이다(v8-G1). 인자 없는 `agy`(TUI)는 대체 화면으로
     바뀌어 그 세 줄을 가린다. 이 명령은 화면을 바꾸지 않고, 로그인이 없으면 브라우저를 열고 코드를 받는다.
     **stdout(JSON 본문)만 버린다** — stderr(로그인 안내·붙여 넣기 프롬프트)는 창에 보여야 한다. 끝나면 agy
-    의 종료 코드로 한 줄을 찍는다: 0 이면 "완료", 아니면 "시간이 지났어요". 창은 닫지 않는다.
+    의 종료 코드로 끝맺는다: 0 이면 "완료", 아니면 "로그인하지 못했어요 — 위 오류를 확인하세요" 와 인증서
+    오류일 때의 안내 한 줄(TOK-61). **0 이 아닌 종료에 시간 초과 문구를 찍지 않는다** — 1.2.0 은 인증서
+    오류로 곧바로 끝난 agy 뒤에 "시간이 지났어요" 를 찍었다. agy 의 stderr 는 건드리지 않는다(파이프로
+    돌리면 터미널이 아니게 된다 — 로그인이 그 터미널에 기대고, 로그인 안 된 agy 로 확인해 볼 수도 없다).
+    그래서 창은 오류 글자를 읽지 못하고, 인증서 안내는 "위 오류에 certificate·x509 가 있으면" 으로 적는다.
+    창은 닫지 않는다.
 
     SSH_* 는 지우고(있으면 agy 가 토큰을 파일에 둔다) AGY_CLI_DISABLE_AUTO_UPDATE=1 을 준다. 가짜
     open/rundll32(_agy_env)는 쓰지 않는다 — 로그인에서는 브라우저가 열려야 한다. macOS 는 Terminal, Windows
@@ -5194,26 +5266,27 @@ def start_gemini_login():
     if not binp:
         return
     steps = [t("term_gemini_step1"), t("term_gemini_step2"), t("term_gemini_step3")]
-    done, late = t("term_gemini_done"), t("term_gemini_timeout")
+    done, failed, cert = t("term_gemini_done"), t("term_gemini_failed"), t("term_gemini_cert_hint")
     args = list(GEMINI_AGY_ARGS)
     if _gemini_edge_rules()["menu_login_retries"]:
         request_gemini_refresh()
     if sys.platform == "win32":
         ps = lambda x: "'" + str(x).replace("'", "''") + "'"
         script = "; ".join(
-            ["Write-Host " + ps(x) for x in steps] + ["Write-Host ''"]
+            [_SSL_UNSET_PS] + ["Write-Host " + ps(x) for x in steps] + ["Write-Host ''"]
             + ["& " + " ".join(ps(x) for x in [binp] + args) + " | Out-Null",
-               "if ($LASTEXITCODE -eq 0) { Write-Host %s } else { Write-Host %s }" % (ps(done), ps(late))])
+               "if ($LASTEXITCODE -eq 0) { Write-Host %s } else { Write-Host %s; Write-Host %s }"
+               % (ps(done), ps(failed), ps(cert))])
         subprocess.Popen([_windows_powershell_exe(), "-NoProfile", "-NoExit", "-Command", script],
                          creationflags=0x00000010,                 # CREATE_NEW_CONSOLE — 보이는 창
                          cwd=gemini_cli_cwd(), env=cli_env("gemini", binp))
         return
     import shlex
     q = shlex.quote
-    cmd = "".join("echo %s\n" % q(x) for x in steps) + "echo\n"
+    cmd = _SSL_UNSET_SH + "".join("echo %s\n" % q(x) for x in steps) + "echo\n"
     cmd += "unset SSH_CLIENT SSH_TTY SSH_CONNECTION\nexport AGY_CLI_DISABLE_AUTO_UPDATE=1\n"
     cmd += " ".join(q(x) for x in [binp] + args) + " > /dev/null\n"
-    cmd += "if [ $? -eq 0 ]; then echo %s; else echo %s; fi\n" % (q(done), q(late))
+    cmd += "if [ $? -eq 0 ]; then echo %s; else echo %s; echo %s; fi\n" % (q(done), q(failed), q(cert))
     _run_in_terminal(cmd)
 
 
@@ -5232,6 +5305,39 @@ def _agy_wants_login(stderr):
         stderr = bytes(stderr).decode("utf-8", errors="replace")
     text = (stderr or "").lower()
     return any(h in text for h in _AGY_LOGIN_HINTS)
+
+
+# 로그인 요구가 아닌 실패의 까닭(TOK-61). 인증서 오류는 따로 안내한다 — 회사 보안 프로그램·프록시가 연결을
+# 가로챌 때 Go 가 내는 말("tls: failed to verify certificate: x509: …"). 소문자로 비교한다.
+_AGY_CERT_HINTS = ("x509", "certificate")
+_AGY_ERROR_TEXT_CAP = 60       # 설정 줄에 보여 주는 오류 글자의 상한 — 안내 칸(세 줄)에 들어가야 한다
+
+
+def _agy_failure_cause(stderr):
+    """로그인 요구가 아닌 실패의 stderr → "cert"(인증서 오류) 또는 None. 순수."""
+    text = (stderr or "").lower()
+    return "cert" if any(h in text for h in _AGY_CERT_HINTS) else None
+
+
+def _agy_error_text(stderr):
+    """실패한 agy 의 stderr → 설정 줄에 **그대로** 보여 줄 짧은 오류 글자(마지막 줄의 끝쪽), 없으면 None. 순수.
+
+    Go 의 오류는 "바깥: … : 가장 안쪽 원인" 꼴이라 끝쪽이 원인이다. ": " 로 나눈 뒤쪽 토막을 상한까지 잇고,
+    그래도 길면 끝에서 자른다. 화면에만 쓴다 — 디버그 로그에는 넣지 않는다(주소가 들어 있을 수 있다)."""
+    lines = [ln.strip() for ln in (stderr or "").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    line = " ".join(lines[-1].split())
+    if len(line) <= _AGY_ERROR_TEXT_CAP:
+        return line
+    parts, kept = line.split(": "), []
+    for part in reversed(parts):
+        if len(": ".join([part] + kept)) > _AGY_ERROR_TEXT_CAP:
+            break
+        kept.insert(0, part)
+    if kept:
+        return "…" + ": ".join(kept)
+    return "…" + line[-_AGY_ERROR_TEXT_CAP:]
 
 
 _GEMINI_FAKE_OPEN = "#!/bin/sh\nexit 0\n"
@@ -5375,7 +5481,7 @@ def _agy_env(rules):
     folder = _gemini_fake_rundll_dir() if win else _gemini_fake_open_dir()
     if folder is None:
         return None
-    env = dict(os.environ)
+    env = child_env()          # 번들이 넣은 SSL_CERT_FILE·SSL_CERT_DIR 은 물려주지 않는다(TOK-61)
     for key in [k for k in env if k.upper() in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION")]:
         env.pop(key, None)
     path_key = "PATH"
@@ -5524,6 +5630,9 @@ def _run_agy_usage(agy, rules):
     if ended == "login" or _agy_wants_login(stderr):
         _dbg("gemini fetch: agy asks for a login")
         return None, "login", None
+    # 로그인 요구가 아닌 실패의 까닭과 오류 글자 — 설정 줄이 보여 준다(TOK-61). 성공하면 조회 경로가 지운다.
+    _gemini_cache["cause"] = _agy_failure_cause(stderr)
+    _gemini_cache["error_text"] = _agy_error_text(stderr)
     if ended == "timeout":
         _dbg("gemini fetch: agy timed out")
         return None, "timeout", None
@@ -5562,6 +5671,8 @@ def fetch_gemini_usage():
     6. 그 밖의 실패("timeout"·"agy_failed"·"parse"·"status" — 오프라인 토큰 갱신 실패 포함)는 일시
        실패다: 직전에 성공한 행이 있고 마지막 성공에서 GEMINI_KEEP_SEC 이 지나지 않았으면 리셋 지난
        레인만 빼고 그 행을 돌려준다.
+       로그인할 일이 아니다 — [로그인] 을 띄우지 않고(gemini_link_state), GEMINI_FAIL_RETRY_SEC(60초)
+       뒤에 누르지 않아도 다시 읽는다(TOK-61).
     """
     if sys.platform not in ("darwin", "win32"):
         return None
@@ -5580,8 +5691,11 @@ def fetch_gemini_usage():
     since_run = now - c["t"]
     floor_ok = not (0 <= since_run < GEMINI_CLICK_MIN_SEC)
 
+    # 로그인 요구가 아닌 실패(네트워크·인증서·서버) 뒤에는 5분을 기다리지 않고 곧 다시 읽는다(TOK-61).
+    auto_sec = GEMINI_FAIL_RETRY_SEC if GEMINI_STATUS.get("last_error") in _GEMINI_TRANSIENT else GEMINI_AUTO_SEC
+
     def run_due():
-        return bool((c.get("click") and floor_ok) or not (0 <= since_run < GEMINI_AUTO_SEC))
+        return bool((c.get("click") and floor_ok) or not (0 <= since_run < auto_sec))
 
     reading = c.get("login") is True and c.get("auth_failed_marker") is None
     if reading:
@@ -5627,7 +5741,10 @@ def fetch_gemini_usage():
     c["t"] = now
     c["click"] = False     # 띄우기 전에 내린다 — 도는 동안의 누름은 다음 실행으로 남는다
     prev = c.get("rows")
+    c["cause"] = c["error_text"] = None       # 이번 실행의 것만 남긴다(_run_agy_usage 가 실패 때 적는다)
     rows, err, buckets = _run_agy_usage(agy, rules)
+    if err is None or err == "login":
+        c["cause"] = c["error_text"] = None
     if err is None:
         # 버킷 표를 조회 경로가 나른다(파서는 순수하다). 새 값을 먼저 넣고 사라진 버킷만 뺀다 —
         # 다른 스레드가 읽는 사이 표가 잠깐 비지 않게.
@@ -5724,6 +5841,7 @@ CLI_TEAM_IDS = {"claude": "Q6L2SF6YDW", "codex": "2DC432GLL2", "gemini": "EQHXZ8
 CLI_AUTHENTICODE_ORGS = {"claude": "Anthropic, PBC", "codex": "OpenAI OpCo, LLC", "gemini": "Google LLC"}
 CLI_LOGIN_TIMEOUT_SEC = {"claude": 300, "codex": 300}   # 앱이 끊는 상한. Gemini 는 앱이 끊지 않는다
 GEMINI_LOGIN_HINT_SEC = 300      # 표시용 — 지나면 "다시 시도" 안내로 바뀔 뿐, 창도 프로세스도 건드리지 않는다
+GEMINI_ROW_KICK_SEC = 5          # 설정 창이 열려 있는 동안 Gemini 읽기를 걸어 보는 간격(띄우는 간격이 아니다)
 GEMINI_LOGIN_POLL_SEC = 1.5      # 로그인을 기다리는 동안 지문을 다시 보는 간격
 CODEX_LOGIN_CANCEL_URL = "http://127.0.0.1:1455/cancel"
 CLI_UPDATE_SEC = 86400           # 앱이 깐 CLI 의 새 버전 확인 — 하루에 한 번 이하
@@ -6367,11 +6485,12 @@ def cli_login_argv(provider, path):
 def cli_env(provider, path, base_env=None):
     """그 CLI 를 띄울 환경 — base_env(없으면 os.environ)의 **사본**. 앱의 환경은 바꾸지 않는다.
 
+      · 모두: 못 쓸 SSL_CERT_FILE·SSL_CERT_DIR 을 뺀다(child_env — py2app 번들이 넣은 없는 경로).
       · gemini: SSH_* 를 지운다(있으면 agy 가 토큰을 파일에 둔다), AGY_CLI_DISABLE_AUTO_UPDATE=1.
         조회용 env(_agy_env)와 달리 가짜 open 을 PATH 에 넣지 않는다 — 로그인에서는 브라우저가 떠야 한다.
       · 앱 전용 bin 의 claude: DISABLE_AUTOUPDATER=1, DISABLE_INSTALLATION_CHECKS=1 — 앱이 깐 것은 앱이
         갱신한다(update_app_cli). 사용자가 깐 claude 에는 넣지 않는다."""
-    env = dict(os.environ if base_env is None else base_env)
+    env = child_env(base_env)
     if provider == "gemini":
         for key in [k for k in env if k.upper() in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION")]:
             env.pop(key, None)
@@ -6388,12 +6507,36 @@ def cli_env(provider, path, base_env=None):
     return env
 
 
+def gemini_link_state():
+    """Gemini(agy) 의 연결 상태 — 기억해 둔 것만 본다(아무것도 띄우지 않는다).
+
+      "connected"   읽었다(또는 일시 실패 동안 직전 값을 보여 주고 있다).
+      "unreadable"  로그인 정보가 있고 agy 가 로그인을 요구하지 않았는데 지금 못 읽었다(네트워크·서버·시간 초과).
+      "cert"        같은 상태인데 까닭이 인증서 오류다.
+      "login"       로그인 정보가 없거나 agy 가 로그인을 요구했다 — **[로그인] 이 뜨는 유일한 상태**(TOK-61).
+      "unknown"     아직 모른다(확인 전·읽는 중, 또는 로그인 정보를 확인할 수 없었다).
+
+    1.2.0 은 "마지막 조회 성공"만 봐서, 로그인돼 있는데 조회가 인증서 오류로 실패한 사용자에게 [로그인] 을
+    띄웠다. 대표님: "이미 로그인되어있으면 … 로그인이 왜 필요해! 그냥 바로 로딩되서 가져와야지!"."""
+    c = _gemini_cache
+    if GEMINI_STATUS.get("auth_error"):
+        return "login"
+    err = GEMINI_STATUS.get("last_error")
+    if c.get("ok_t") is not None and (err is None or c.get("rows")):
+        return "connected"
+    if c.get("login") is True and err in _GEMINI_TRANSIENT:
+        return "cert" if c.get("cause") == "cert" else "unreadable"
+    return "unknown"
+
+
 def cli_logged_in(provider):
-    """그 제공자에 로그인돼 있는가 = **지금 사용량을 읽을 수 있는가** — 창이 뜰 수 없는 확인만.
+    """그 제공자에 로그인돼 있는가 — 창이 뜰 수 없는 확인만. False 일 때만 [로그인] 이 뜬다.
     로그인 정보가 남아 있어도 서버가 거절한 상태(auth_error)면 아니다: 그때는 [로그인] 이 떠야 한다.
 
-    claude: claude_token_present. codex: auth.json 의 토큰. gemini: 마지막 조회가 성공했고 로그인 요구가
-    없을 때 — agy 는 로그아웃해도 키체인 항목을 남기므로 항목이 있다는 것만으로는 알 수 없다."""
+    claude: claude_token_present. codex: auth.json 의 토큰. gemini: gemini_link_state 가 "connected" 이거나
+    "unreadable"/"cert"(로그인 정보가 있고 agy 가 로그인을 요구하지 않았다 — 네트워크·인증서 오류로 못 읽은
+    것은 로그인할 일이 아니다). agy 는 로그아웃해도 키체인 항목을 남기므로, 항목만 있고 아직 한 번도 띄워
+    보지 않았으면 False("unknown" — 설정 줄은 "확인 중" 을 보여 주며 바로 읽는다)."""
     try:
         if provider == "claude":
             return bool(claude_token_present()) and not OAUTH_STATUS.get("auth_error")
@@ -6401,7 +6544,7 @@ def cli_logged_in(provider):
             # 토큰 파일이 있어도 서버가 거절했으면(만료) 연결된 것이 아니다 — 사용량을 읽을 수 없다.
             return bool(read_codex_token(codex_auth_path())) and not CODEX_STATUS.get("auth_error")
         if provider == "gemini":
-            return bool(_gemini_cache.get("ok_t") is not None and not GEMINI_STATUS.get("auth_error"))
+            return gemini_link_state() in ("connected", "unreadable", "cert")
     except Exception as e:
         _dbg("cli login: state unknown", provider, type(e).__name__)
     return False
@@ -6525,14 +6668,60 @@ def _run_claude_login(path, cancel=None):
     return "failed"
 
 
-def _run_gemini_login(cancel):
-    """보이는 창에서 agy 를 띄우고(start_gemini_login) 로그인 지문이 **바뀔 때까지** 기다린다.
+def _gemini_read_now(cancel=None):
+    """Gemini 사용량을 **지금** 한 번 읽는다(60초 하한과 무관하게) — 사용자가 [로그인] 을 눌렀을 때의 확인.
+    새로고침 스레드가 읽는 중이면 끝나기를 기다렸다가 읽는다. 취소되면 읽지 않고 False."""
+    deadline = time.monotonic() + GEMINI_AGY_TIMEOUT + 5
+    while _gemini_refresh.get("busy") and time.monotonic() < deadline:
+        if cancel is not None and cancel():
+            return False
+        time.sleep(0.1)
+    _gemini_refresh["busy"] = True
+    try:
+        _gemini_cache.update(t=0.0, click=True, click_check=True)
+        fetch_gemini_usage()
+    finally:
+        _gemini_refresh["busy"] = False
+    return True
+
+
+def _gemini_login_precheck(marker, cancel=None):
+    """로그인 창을 띄워도 되는가 → None(띄운다) | "already" | "unreadable" | "cancelled" (TOK-61).
+
+    **로그인 정보가 있으면, agy 가 로그인을 요구한 경우가 아닌 한 창을 띄우지 않는다.**
+      · 로그인 정보가 없다(항목도 폴백 파일도 없다), 또는 있는지 알 수 없다 → 띄운다. agy 는 띄우지 않는다.
+      · agy 가 이미 로그인을 요구했고 지문이 그때 그대로다 → 띄운다(로그인 안 된 agy 를 또 띄우지 않는다).
+      · 그 밖(로그인 정보가 있다) → 숨은 조회를 한 번 해 본다: 읽히면 "already", agy 가 로그인을 요구하면
+        띄우고, 다른 이유(네트워크·인증서·서버)로 실패하면 "unreadable" — 설정 줄이 그 오류를 보여 준다."""
+    if not _gemini_marker_logged_in(marker):
+        return None
+    failed = _gemini_cache.get("auth_failed_marker")
+    if GEMINI_STATUS.get("auth_error") and failed is not None and failed == marker:
+        return None
+    if not _gemini_read_now(cancel):
+        return "cancelled"
+    state = gemini_link_state()
+    if state == "connected":
+        return "already"
+    if state == "login":
+        return None
+    return "unreadable"
+
+
+def _run_gemini_login(cancel, on_window=None):
+    """보이는 창에서 agy 를 띄우고(start_gemini_login) 로그인 지문이 **바뀔 때까지** 기다린다. 띄우기 전에
+    _gemini_login_precheck 가 막을 수 있다 — 로그인돼 있으면 창 없이 "already"/"unreadable" 로 끝난다.
 
     앱은 agy 를 직접 띄우지 않고, 창을 닫지 않고, 코드를 다루지 않는다. 끝나는 길은 셋: 지문이 바뀌었다
     ("ok"), 사용자가 취소했다("cancelled"), GEMINI_LOGIN_HINT_SEC 이 지났다("timeout" — "다시 시도" 안내로
     바뀔 뿐 창은 그대로 둔다; 그 뒤에 로그인을 마치면 조회 경로의 지문 확인이 알아챈다)."""
     rules = _gemini_edge_rules()
     before = _gemini_login_marker(rules)
+    held = _gemini_login_precheck(before, cancel)
+    if held is not None:
+        return held
+    if on_window is not None:
+        on_window()
     start_gemini_login()
     start = time.monotonic()
     next_check = start + min(GEMINI_LOGIN_POLL_SEC, 0.5)
@@ -6553,9 +6742,11 @@ def _run_gemini_login(cancel):
         time.sleep(0.1)
 
 
-def run_cli_login(provider, cancel=None):
+def run_cli_login(provider, cancel=None, on_window=None):
     """그 제공자의 공식 로그인을 한 번 → "ok" | "already" | "denied" | "timeout" | "cancelled" | "failed" |
-    "not_installed". 끝날 때까지 막힌다 — 메인 스레드에서 부르지 않는다. 예외를 내지 않는다."""
+    "not_installed" | "unreadable"(Gemini 만 — 로그인돼 있는데 지금 사용량을 못 읽었다; 창을 띄우지 않았다).
+    끝날 때까지 막힌다 — 메인 스레드에서 부르지 않는다. 예외를 내지 않는다. on_window: Gemini 의 로그인
+    창을 실제로 띄우기 직전에 한 번 불린다(그 전까지는 확인 중이다)."""
     try:
         path = find_cli(provider)
         if not path:
@@ -6565,7 +6756,7 @@ def run_cli_login(provider, cancel=None):
         if provider == "codex":
             return _run_codex_login(path, cancel)
         if provider == "gemini":
-            return _run_gemini_login(cancel)
+            return _run_gemini_login(cancel, on_window)
     except Exception as e:
         _dbg("cli login: failed", provider, type(e).__name__)
     return "failed"
@@ -6582,15 +6773,67 @@ def new_ai_job():
     return {"phase": None, "pct": None, "reason": None}
 
 
-def ai_connect_row(provider, installed, logged_in, job=None):
-    """설정 "AI 연결" 의 한 줄 → {"status", "button", "pct", "hint"} (모두 TR 키, 버튼은 없으면 None). 순수.
+def ai_connect_detail(provider):
+    """ai_connect_row 에 넘길 덧붙임 → None | (kind, 오류 글자 또는 None). 기억해 둔 것만 본다.
+
+    Gemini 만 낸다: ("unreadable" | "cert", agy 가 낸 오류의 끝쪽) — 로그인돼 있고 지금 못 읽었다;
+    ("checking", None) — agy 는 있고 로그인 정보를 아직 확인하지 않았거나, 있는 것을 알고 첫 조회를 기다린다."""
+    if provider != "gemini":
+        return None
+    state = gemini_link_state()
+    if state in ("unreadable", "cert"):
+        return state, _gemini_cache.get("error_text")
+    if state == "unknown" and GEMINI_STATUS.get("last_error") != "not_installed" and (
+            _gemini_cache.get("login") is True or not _gemini_cache.get("check_t")):
+        return "checking", None
+    return None
+
+
+def gemini_row_refresh():
+    """설정 창이 열려 있는 동안(1초마다 불린다) Gemini 를 자기 스레드에서 읽게 한다 → 시작했으면 True.
+
+    Gemini 를 필에서 숨겼으면 주 새로고침은 agy 를 띄우지 않는다 — 그래도 "AI 연결" 줄은 로그인돼 있는지
+    알아야 한다([로그인] 을 잘못 띄우지 않으려면). 얼마나 자주 띄우는지는 fetch_gemini_usage 가 정한다
+    (자동 5분, 실패 뒤 60초, 로그인 안 됨이면 띄우지 않는다). 연결된 뒤에는 아무것도 하지 않는다."""
+    if sys.platform not in ("darwin", "win32"):
+        return False
+    if gemini_link_state() == "connected" or _gemini_refresh.get("busy"):
+        return False
+    now = time.monotonic()
+    if now - _gemini_refresh.get("row_t", -1e9) < GEMINI_ROW_KICK_SEC:
+        return False
+    _gemini_refresh["row_t"] = now
+    _gemini_refresh["busy"] = True
+
+    def work():
+        try:
+            fetch_gemini_usage()
+        except Exception as e:
+            _dbg("gemini row refresh: failed", type(e).__name__)
+        finally:
+            _gemini_refresh["busy"] = False
+
+    threading.Thread(target=work, daemon=True).start()
+    return True
+
+
+def ai_connect_row(provider, installed, logged_in, job=None, detail=None):
+    """설정 "AI 연결" 의 한 줄 → {"status", "button", "pct", "hint", "error"} (TR 키, 버튼은 없으면 None;
+    error 는 그대로 보여 줄 오류 글자 또는 None). 순수.
 
     쉬는 상태: 설치 안 됨 [설치] → 로그인 필요 [로그인] → 연결됨(버튼 없음 — Codex 는 로그인 명령이 기존
-    토큰을 지운다). 진행 중: 받는 중 n% / 확인 중 / 로그인 안내 + [취소]. 실패: 짧은 이유 + [다시 시도]."""
-    row = {"status": None, "button": None, "pct": None, "hint": "ai_hint_" + provider}
+    토큰을 지운다). 진행 중: 받는 중 n% / 확인 중 / 로그인 안내 + [취소]. 실패: 짧은 이유 + [다시 시도].
+    detail(ai_connect_detail): 연결됐지만 지금 못 읽으면 "연결됨 · 지금은 사용량을 못 읽음" + 그 오류(버튼
+    없음 — 로그인할 일이 아니다); 로그인 정보를 확인하는 중이면 "확인 중"(버튼 없음)."""
+    row = {"status": None, "button": None, "pct": None, "hint": "ai_hint_" + provider, "error": None}
     phase = (job or {}).get("phase")
+    kind, error = detail if isinstance(detail, tuple) and len(detail) == 2 else (None, None)
     if logged_in:
-        row["status"] = "ai_connected"
+        if kind in ("unreadable", "cert"):
+            row.update(status="ai_unreadable", error=error,
+                       hint="ai_hint_cert" if kind == "cert" else "ai_hint_unreadable")
+        else:
+            row["status"] = "ai_connected"
     elif phase == "download":
         row.update(status="ai_downloading", button="ai_btn_cancel", pct=(job or {}).get("pct"))
     elif phase == "verify":
@@ -6604,6 +6847,8 @@ def ai_connect_row(provider, installed, logged_in, job=None):
         reason = (job or {}).get("reason")
         row.update(status="ai_fail_" + (reason if reason in _AI_FAIL_REASONS else "failed"),
                    button="ai_btn_retry")
+    elif installed and kind == "checking":
+        row["status"] = "ai_verifying"
     elif installed:
         row.update(status="ai_need_login", button="ai_btn_login")
     else:
@@ -6617,7 +6862,10 @@ def ai_connect_text(row):
     if row["status"] == "ai_downloading":
         pct = row.get("pct")
         status = status.replace("{pct}", "%d" % pct if isinstance(pct, (int, float)) else "…")
-    return status, (t(row["button"]) if row.get("button") else None), t(row["hint"])
+    hint = t(row["hint"])
+    if row.get("error"):
+        hint += " " + t("ai_hint_error").replace("{err}", str(row["error"]))
+    return status, (t(row["button"]) if row.get("button") else None), hint
 
 
 def run_ai_connect(provider, job, cancel=None):
@@ -6647,8 +6895,14 @@ def run_ai_connect(provider, job, cancel=None):
                 return finish(res, None if res == "cancelled" else res)
         if cli_logged_in(provider):
             return finish("already")
-        job.update(phase="login", pct=None, reason=None)
-        res = run_cli_login(provider, cancel=cancel)
+        if provider == "gemini":
+            # 창을 띄우기 전에 로그인돼 있는지부터 본다 — 그동안은 "확인 중", 창이 뜰 때 "붙여 넣으세요".
+            job.update(phase="verify", pct=None, reason=None)
+            res = run_cli_login(provider, cancel=cancel,
+                                on_window=lambda: job.update(phase="login", pct=None, reason=None))
+        else:
+            job.update(phase="login", pct=None, reason=None)
+            res = run_cli_login(provider, cancel=cancel)
         if res in ("ok", "already"):
             _oauth_cache["t"] = 0.0
             _codex_cache["t"] = 0.0
@@ -6661,6 +6915,7 @@ def run_ai_connect(provider, job, cancel=None):
                     _gemini_cache["t"] = 0
                     _gemini_cache["ok_t"] = time.time()
                     GEMINI_STATUS["auth_error"] = False
+                    GEMINI_STATUS["last_error"] = None
                 elif provider == "codex":
                     CODEX_STATUS["auth_error"] = False
                 elif provider == "claude":
@@ -6678,7 +6933,8 @@ def run_ai_connect(provider, job, cancel=None):
                 except Exception as e:
                     _dbg("ai connect: read after login failed", type(e).__name__)
             return out
-        if res == "cancelled":
+        if res in ("cancelled", "unreadable"):
+            # "unreadable": 로그인돼 있는데 지금 못 읽었다 — 실패가 아니다. 줄이 그 오류를 보여 준다.
             return finish(res)
         return finish(res, res if res in _AI_FAIL_REASONS else "failed")
     except Exception as e:
@@ -6691,7 +6947,9 @@ def start_ai_connect(provider, job, cancel=None, done=None):
     (받는 중·확인 중·로그인 중) 아무것도 하지 않는다 — 두 번 눌러도 한 번만 받는다."""
     if job.get("phase") in ("download", "verify", "login"):
         return False
-    job.update(phase="login" if find_cli(provider) else "download", pct=None, reason=None)
+    found = find_cli(provider)
+    job.update(phase=("verify" if provider == "gemini" else "login") if found else "download",
+               pct=None, reason=None)
 
     def work():
         result = run_ai_connect(provider, job, cancel=cancel)
@@ -12549,7 +12807,10 @@ def run_gui():
         if not rows or not ui.get("panel"):
             return
         for p, w in rows.items():
-            row = ai_connect_row(p, bool(find_cli(p)), cli_logged_in(p), ai_jobs[p])
+            if p == "gemini":
+                gemini_row_refresh()
+            row = ai_connect_row(p, bool(find_cli(p)), cli_logged_in(p), ai_jobs[p],
+                                 detail=ai_connect_detail(p))
             status, button, hint = ai_connect_text(row)
             w["status"].setStringValue_(status)
             w["hint"].setStringValue_(hint)
