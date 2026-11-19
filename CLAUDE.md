@@ -1149,27 +1149,42 @@ automatically. The one thing that runs unasked is the daily update below.
   into `bin/staging/` (0700, random name, `O_EXCL`) while hashing; `cli_extract_one()` takes
   exactly the one expected regular-file entry out of an archive (never `extractall`);
   `cli_signature_ok()` checks the code signature on the staged file — macOS
-  `/usr/bin/codesign --verify --strict` plus the vendor's `TeamIdentifier` (`CLI_TEAM_IDS`),
-  Windows Authenticode `Valid` plus the certificate's `O` (`CLI_AUTHENTICODE_ORGS`,
-  `authenticode_ok()`); only then one `os.replace` into the bin. The hash comes from the same
+  `/usr/bin/codesign --verify --strict -R <requirement>`, where the requirement
+  (`cli_signing_requirement()`) is an Apple-anchored Developer ID Application certificate
+  whose `subject.OU` is the vendor's team (`CLI_TEAM_IDS`), and then the `TeamIdentifier`
+  line as well; Windows Authenticode `Valid` plus the certificate's `O`
+  (`CLI_AUTHENTICODE_ORGS`, `authenticode_ok()`); only then one `os.replace` into the bin.
+  **Do not take the `-R` off.** Without a requirement `codesign --verify` passes an ad-hoc
+  signature, and an ad-hoc signature can carry any `TeamIdentifier` — the first version
+  checked only those two and would have installed such a copy. On Windows the PowerShell
+  child that reads the signature is started without `PSModulePath` (any spelling): when the
+  app was launched from PowerShell 7 that variable points at 7's modules and
+  `powershell.exe` 5.1 cannot load `Get-AuthenticodeSignature` — every install failed that
+  way on the first real Windows run. The hash comes from the same
   server as the file, so the signature is the check that survives a compromised server — do
   not drop it because the hash "already passed". Any failure empties staging and leaves the
   previous file. TLS verification is the app's ordinary certifi opener and is never relaxed.
 - **The app-private bin**: `~/Library/Application Support/me.yeongyu.claudepet/bin/` (0700,
   files 0755) on macOS, `%LOCALAPPDATA%\me.yeongyu.claudepet\bin\` on Windows
-  (`app_cli_bin_dir()`, which does not create it when merely asked).
+  (`app_cli_bin_dir()`, which does not create it when merely asked). On Windows a bin,
+  staging, target or `fake-open` folder that is a reparse point (a junction) is refused, by
+  the same test `app_cli_ok()` uses (`_is_reparse_point()`: `st_file_attributes & 0x400`) —
+  `os.path.islink` does not see a junction.
 - **The user's `PATH`, shell files and registry are never touched**, and the official install
   scripts (`install.sh`, `install.ps1`) and `claude install` are never run — those are what
   edit shell configuration and `~/.local/bin`. So a CLI the app installed is not on the user's
   `PATH`; that is intended.
-- **Daily update, app-installed CLIs only.** `install_cli()` writes a small meta file
-  (version, time checked). `start_app_cli_updates()`, called from the refresh timer, does
-  nothing unless `app_cli_update_due()` — the app installed it, the user has no copy of their
+- **Daily update, app-installed CLIs only, on both platforms.** `install_cli()` writes a
+  small meta file (version, time checked). `start_app_cli_updates()`, called from the refresh
+  on macOS (`refresh_`) and on Windows (`PetWindow.refresh()`), does nothing unless `app_cli_update_due()` — the app installed it, the user has no copy of their
   own, and `CLI_UPDATE_SEC` (a day) has passed. `update_app_cli()` downloads only when the
   version differs, by the same staged-and-verified route, and quietly skips a cycle when the
-  file cannot be replaced (Windows, CLI running). An app-installed `claude` gets
-  `DISABLE_AUTOUPDATER=1` / `DISABLE_INSTALLATION_CHECKS=1` (`cli_env()`), on macOS only — the
-  Windows spawn goes through WMI, which carries no environment.
+  file cannot be replaced (Windows, CLI running). An app-installed `claude` — and only that
+  one, never the user's own — is started with `DISABLE_AUTOUPDATER=1` /
+  `DISABLE_INSTALLATION_CHECKS=1` (`cli_env()`): through the launchd job's
+  `EnvironmentVariables` on macOS, and on Windows, where a WMI-created process inherits
+  nothing from us, by `set`-ting both inside the `cmd.exe` line that starts it
+  (`_win_app_claude_cmdline()`; not yet run on a real Windows machine).
 - **Uninstall removes it.** `UNINSTALL_PATHS` holds the macOS app folder; on Windows the
   port's uninstall already deletes `%LOCALAPPDATA%\me.yeongyu.claudepet`. The user's own CLIs
   and each CLI's sign-in data (`~/.claude`, `~/.codex`, `~/.gemini`) are left alone.
@@ -1182,24 +1197,50 @@ token.
   `_run_refresh_job`, up to `LOGIN_TIMEOUT_SEC` (300 s). Not started when a token is already
   present. Success is a token the app can see, or — for a keychain user, whose token cannot
   be read without a prompt — a changed keychain `mdat` or credentials-file signature.
+  Cancel takes effect at once: for a sign-in `_run_refresh_job` is given `cancel=` and
+  `outcome=`, and its wait (`_job_wait()`) then looks at the cancel flag every 0.1 s and takes
+  the job down (`cancelled`); past the limit it is `timeout`, not `failed`. Recovery passes
+  neither and keeps its 2-second polling.
 - **Codex** — `codex login` as our child with no terminal, in the private folder, up to
-  `CLI_LOGIN_TIMEOUT_SEC["codex"]`. **It is not started when `auth.json` already holds a
-  token**: that command discards the existing sign-in as it starts, so "sign in again" on a
-  signed-in user would sign them out if they then closed the browser. This guard is also why
-  a connected row has no button. Success is exit 0 **and** a token in `auth.json`. On cancel
+  `CLI_LOGIN_TIMEOUT_SEC["codex"]`. **It is not started when a valid sign-in exists**: that
+  command discards the existing sign-in as it starts, so "sign in again" on a signed-in user
+  would sign them out if they then closed the browser. This guard is also why a connected
+  row has no button. "Valid" is `cli_logged_in("codex")` — a token in `auth.json` **and** no
+  `CODEX_STATUS["auth_error"]`; a token the server rejected is not protected, so its
+  [Sign in] really runs `codex login`. Success is exit 0 **and** a token in `auth.json`. On cancel
   or timeout the app first asks the CLI's local callback server to stop
   (`CODEX_LOGIN_CANCEL_URL`, two seconds at most) and then ends the process tree.
-- **Gemini** — a **visible window** running plain `agy` (`start_gemini_login()`: Terminal on
-  macOS, a new console on Windows). `agy` finishes its sign-in only when the code the browser
-  shows is pasted into a real terminal; a piped child never receives it (measured on Windows,
-  2026-11-19). The window opens with three lines in the app's language
-  (`term_gemini_step1`–`3`: sign in in the browser, copy the code, paste it here and press
-  Enter), and the settings row shows `ai_login_paste` with the same guidance. **The app does
-  not close that window, kill that process, or handle the code.** Success is the sign-in
-  fingerprint *changing* (`_gemini_login_marker()`), never the process exiting. After
+- **Gemini** — a **visible window** (`start_gemini_login()`: Terminal on macOS, a new
+  console on Windows) running `agy -p /usage --output-format json`, the same arguments as the
+  background read. `agy` finishes its sign-in only when the code the browser shows is pasted
+  into a real terminal; a piped child never receives it (measured on Windows, 2026-11-19).
+  The window opens with three lines in the app's language (`term_gemini_step1`–`3`: sign in
+  in the browser, copy the code, paste it here and press Enter), and the settings row shows
+  `ai_login_paste` with the same guidance. **Do not run bare `agy` there**: its TUI switches
+  to the alternate screen and hides those three lines. **Only stdout is discarded** (the JSON
+  body); stderr — the sign-in notice and the paste prompt — must stay visible. When `agy`
+  ends, its exit code picks one closing line, `term_gemini_done` or `term_gemini_timeout`.
+  `SSH_*` is removed and `AGY_CLI_DISABLE_AUTO_UPDATE=1` set in the window too, but the fake
+  `open` / `rundll32` is not used — the browser has to open. **The app does not close that
+  window, kill that process, or handle the code**, and it cannot see that exit code: its own
+  success test is the sign-in fingerprint *changing* (`_gemini_login_marker()`). After
   `GEMINI_LOGIN_HINT_SEC` the row merely turns into "Try again"; a sign-in finished later is
-  still picked up by the ordinary read. The fake `open` / `rundll32` and the `SSH_*` trick
-  are not used here — the browser has to open.
+  still picked up by the ordinary read.
+
+**"Connected" means the usage can be read now**, not that sign-in data exists
+(`cli_logged_in()`): Claude — a token and no `OAUTH_STATUS["auth_error"]`; Codex — a token
+and no `CODEX_STATUS["auth_error"]`; Gemini — a successful read and no
+`GEMINI_STATUS["auth_error"]`. Otherwise the row offers [Install] or [Sign in] according to
+whether the CLI is found. Right after a sign-in returns `ok`, `run_ai_connect()` clears what
+the earlier failure left behind so the row turns to connected at once: for Gemini `t = 0`,
+`ok_t = now`, `auth_error = False`; for Codex `auth_error = False`; for Claude
+`_oauth_token_cache`'s `next_retry` and `declined` and `OAUTH_STATUS["auth_error"]`, followed
+by one `fetch_exact_usage()` when any of those had been set (they are what would have kept
+the new token from being read).
+
+**A menu item or pill click never clears a running job's cancel flag** (`ai_idle()`): while
+a download or sign-in is in progress they only open the settings window. Clearing the flag
+there would undo a Cancel the user had just pressed.
 
 `_dbg` lines on these paths carry kinds, states and exit codes only — never a URL (download
 URLs can carry signed queries), a path or a token.
@@ -1207,7 +1248,10 @@ URLs can carry signed queries), a path or a token.
 **Observed** — one Mac (arm64), 2026-11-19, once: `install_cli("codex")` downloaded 0.170.0
 into the app-private bin, hash and signature passed (`TeamIdentifier=2DC432GLL2`), and
 `codex --version` ran; `claude` and `agy`, already installed, were returned without asking a
-server; the shell files, `PATH` and `~/.local/bin` were unchanged before and after. **Not
+server; the shell files, `PATH` and `~/.local/bin` were unchanged before and after. With the
+`-R` requirement, the real `claude`, `codex` and `agy` binaries each passed for their own
+vendor and failed for another's, and an ad-hoc-signed copy of a system binary failed for all
+three. **Not
 observed:** any of the three sign-ins through this flow, an actual Claude Code or `agy`
 download, the GitHub fallback, an Intel Mac, the daily update replacing a file, and all of it
 on Windows.
@@ -1396,7 +1440,9 @@ same coordinates (Qt flips y), the same keys and the same `PWID, PHT`.
 earlier version reserved space for hidden fields and reached 732, pushing Save and the
 title bar off a 768-tall screen. Every widget is placed by hand, so adding a row means
 recomputing every widget below it. The width, 820, fits the same 1366-wide screen. The AI
-connections rows are not saved settings: they are redrawn once a second from
+connections rows sit `AI_ROW_PITCH` apart, and their hint text is wrapped by whole words —
+a line-break strategy on macOS, `SettingsDialog._wrap_words()` on Windows — because both
+toolkits otherwise break Korean in the middle of a word. The rows are not saved settings: they are redrawn once a second from
 `ai_connect_row()` while the panel is open, and Save neither reads nor writes them.
 
 The following are gone, with their TR keys: the calibration fields, the absolute-limit
