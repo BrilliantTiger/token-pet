@@ -1,4 +1,4 @@
-# 🐱 Claude Pet
+# 🐱 Token Pet
 
 [English](README.md) · [한국어](README.ko.md) · [日本語](README.ja.md) · **Español**
 
@@ -7,7 +7,7 @@ Renderizado nativo en macOS (AppKit): sin marco de ventana, sin fondo, sin estel
 
 > 🧪 v0.24 — la app de macOS está notarizada; la versión de Windows se distribuye como instalador y zip (sin firmar — ver la sección Windows).
 
-![Claude Pet](preview.png)
+![Token Pet](preview.png)
 
 ## Plataformas compatibles
 
@@ -27,7 +27,7 @@ Renderizado nativo en macOS (AppKit): sin marco de ventana, sin fondo, sin estel
 
 **No necesitas Python** — va incluido dentro de la app, que está **certificada (notarized) por Apple**, así que se abre sin avisos de Gatekeeper.
 
-1. Descarga `ClaudePet.zip` desde [**Releases**](https://github.com/BrilliantTiger/claude-pet/releases/latest) — en un **Mac Intel**, descarga `ClaudePet-universal.zip` (disponible desde v0.10)
+1. Descarga `ClaudePet.zip` desde [**Releases**](https://github.com/BrilliantTiger/token-pet/releases/latest) — en un **Mac Intel**, descarga `ClaudePet-universal.zip` (disponible desde v0.10)
 2. Descomprime → mueve `ClaudePet.app` a tu carpeta de **Aplicaciones** → doble clic
 3. macOS 12+ (Apple Silicon; Intel con el zip universal desde v0.10)
 
@@ -65,12 +65,12 @@ Cada hora tras el arranque (nunca al arrancar) la app comprueba la última versi
 
 Windows 10/11 (64 bits) tiene la misma píldora, paseos, ajustes y mascotas. Con cada versión se publican dos archivos:
 
-- **`claude-pet-win-setup.exe`** — instalador. Se instala para el usuario actual (sin permisos de administrador), añade una entrada en el menú Inicio y otra en «Aplicaciones y características» para desinstalar, y ofrece **Iniciar Claude Pet al iniciar sesión**.
+- **`claude-pet-win-setup.exe`** — instalador. Se instala para el usuario actual (sin permisos de administrador), añade una entrada en el menú Inicio y otra en «Aplicaciones y características» para desinstalar, y ofrece **Iniciar Token Pet al iniciar sesión**.
 - **`claude-pet-win.zip`** — versión portátil y de actualización. Descomprímelo donde quieras y ejecuta `ClaudePet\ClaudePet.exe`.
 
 **Sobre el aviso de SmartScreen.** La compilación para Windows aún no está firmada, así que la primera vez que ejecutes el instalador o `ClaudePet.exe` Windows muestra *«Windows protegió su PC»*. Pulsa **Más información** y luego **Ejecutar de todas formas**. En equipos con la comprobación de aplicaciones de SmartScreen desactivada aparece en su lugar el clásico *«Abrir archivo - Advertencia de seguridad»* (editor desconocido): pulsa **Ejecutar**. Con el instalador cualquiera de los dos avisos aparece una vez; con el zip portátil el diálogo clásico puede repetirse en cada inicio hasta que desmarques *Preguntar siempre antes de abrir este archivo* (o desbloquees el zip en sus Propiedades antes de extraerlo); es el aviso de que el editor es desconocido, no la detección de algo dañino. Si el navegador (Edge) bloquea la descarga por el mismo motivo, elige **Conservar** → **Conservar de todas formas**. La firma de código eliminará el aviso en una versión posterior.
 
-Inicia sesión en Claude Code o Codex en Windows primero (`claude` / `codex login`) y luego abre Claude Pet: los números de uso salen del archivo de credenciales en `%USERPROFILE%\.claude` (o `%USERPROFILE%\.codex`), y los registros de ahí solo se leen para las alertas de pico. Tus propias mascotas van en `%USERPROFILE%\.claude_pet\pets\<nombre>\` (clic derecho → Mascotas → Añadir mascota… abre esa carpeta). El icono de la bandeja queda por defecto en el desbordamiento de la barra de tareas (`^`); arrástralo fuera para verlo siempre. Clic derecho → Desinstalar por completo… borra ajustes y registros; el programa se quita desde «Aplicaciones y características».
+Inicia sesión en Claude Code o Codex en Windows primero (`claude` / `codex login`) y luego abre Token Pet: los números de uso salen del archivo de credenciales en `%USERPROFILE%\.claude` (o `%USERPROFILE%\.codex`), y los registros de ahí solo se leen para las alertas de pico. Tus propias mascotas van en `%USERPROFILE%\.claude_pet\pets\<nombre>\` (clic derecho → Mascotas → Añadir mascota… abre esa carpeta). El icono de la bandeja queda por defecto en el desbordamiento de la barra de tareas (`^`); arrástralo fuera para verlo siempre. Clic derecho → Desinstalar por completo… borra ajustes y registros; el programa se quita desde «Aplicaciones y características».
 
 ## Compilar desde el código (desarrolladores)
 

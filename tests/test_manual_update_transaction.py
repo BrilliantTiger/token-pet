@@ -40,10 +40,10 @@ REPO = Path(__file__).resolve().parents[1]
 BUILD_SCRIPT = REPO / "build_app.sh"
 APP_SOURCE = REPO / "claude_pet.py"
 REVIEWED_BUILD_APP_SHA256 = (
-    "aa8fce8de4f64635244a343fc943fe7e237db77297ead9204a2d88ff77b68fb4"
+    "f9066ec5017fc8d1f1b236012aa1500c28f03830fc8547902db7152c8e6696c6"
 )
 REVIEWED_APP_SOURCE_SHA256 = (
-    "f50120c948bcddd9d1f9ef1b015f79e900a504a9811a215b5d56a7eacaf9a5b3"
+    "bb553c1da6b9d09abbf75d41280d961d76811456b9f746f5c9c2e01e1d3bbed9"
 )
 
 

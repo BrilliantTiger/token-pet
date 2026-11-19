@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Claude Pet 빌드/설치 스크립트
+# Token Pet 빌드/설치 스크립트
 #
 #   ./build_app.sh build      # 레포 안에 ClaudePet.app 빌드만
 #   ./build_app.sh install    # 빌드 → /Applications 설치 → 재시작 (추천)
@@ -34,8 +34,8 @@ write_plist() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>ClaudePet</string>
-    <key>CFBundleDisplayName</key><string>Claude Pet</string>
+    <key>CFBundleName</key><string>Token Pet</string>
+    <key>CFBundleDisplayName</key><string>Token Pet</string>
     <key>CFBundleIdentifier</key><string>me.yeongyu.claudepet</string>
     <key>CFBundleVersion</key><string>${APP_VERSION}</string>
     <key>CFBundleShortVersionString</key><string>${APP_VERSION}</string>

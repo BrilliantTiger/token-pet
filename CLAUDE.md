@@ -31,6 +31,22 @@ window with an animated sprite and a compact one- or two-line usage summary pill
 (AppKit/Foundation), and shipped as a self-contained, Developer ID-signed and
 Apple-notarized `.app` bundle built with py2app.
 
+**The app is shown as "Token Pet"; its files are still named ClaudePet (since v1.2.1, TOK-59).**
+Every name a person reads says Token Pet — the bundle's display name, the Windows version
+resource and installer, menus, alerts and the settings title in four languages, the READMEs
+and the site. What an installed copy's updater looks for did not move, because a 1.2.0 copy
+cannot be taught new names: the release assets (`ClaudePet.zip`, `ClaudePet-universal.zip`,
+`ClaudePet.dmg`, `ClaudePet-universal.dmg`, `claude-pet-win.zip`, `claude-pet-win-setup.exe`),
+`ClaudePet.app` inside the zip and in `/Applications`, `ClaudePet\ClaudePet.exe`, the bundle
+ID `me.yeongyu.claudepet`, the Inno `AppId` and install folder, the Run value, and the
+settings, cache and keychain names. `setup.py` keeps `CFBundleName` = `ClaudePet` because
+py2app names the `.app` and its executable from it; `release.sh`'s `sign()` writes
+`CFBundleName` = `Token Pet` into the bundle and the embedded Python.framework just before
+signing. `windows/installer.iss` deletes the old "Claude Pet" shortcuts on upgrade.
+`tests/test_token_pet_rename.py` holds both halves, against rules copied from tag v1.2.0 — do
+not rename a file, asset or identifier in that list without a path old updaters can follow.
+This document still says "ClaudePet" where it means the code and the files.
+
 **`claude_pet.py` is essentially the whole app** — a single module holding config,
 i18n (en/ko/ja/es), log parsing for spike detection (Claude Code and Codex), the learned
 spike limits, OAuth/keychain token reading, the Codex usage reader, the Admin API clients

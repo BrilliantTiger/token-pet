@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Pet — Codex Pets 스타일 투명 오버레이 펫 + Claude 토큰 사용량
+Token Pet — Codex Pets 스타일 투명 오버레이 펫 + Claude 토큰 사용량
 =====================================================================
 - 창 프레임/타이틀 없음, 배경 완전 투명 (펫과 게이지만 화면에 떠 있음)
 - 스프라이트: ~/.codex/pet-runs/patch-entp-cat/frames 의 내장 고양이 프레임 사용
@@ -841,7 +841,7 @@ def _is_pet_dir(d):
 
 
 _PETS_README = """\
-Claude Pet — 펫 추가하는 법 / How to add a pet
+Token Pet — 펫 추가하는 법 / How to add a pet
 ================================================
 
 이 폴더(~/.claude_pet/pets) 안에 펫 이름으로 폴더를 하나 만들고,
@@ -960,7 +960,7 @@ def discover_pets():
 SESSION_HOURS = 5
 REFRESH_SEC = 30
 
-APP_VERSION = "1.2.0"                # CFBundleShortVersionString 과 일치해야 한다
+APP_VERSION = "1.2.1"                # CFBundleShortVersionString 과 일치해야 한다
 GITHUB_REPO = "BrilliantTiger/token-pet"  # 자동 업데이트 확인용
 UPDATE_CHECK_SEC = 3600             # 새 릴리즈 확인 주기(1시간). 시작 시엔 확인하지 않고 한 주기 뒤부터 — run_gui 참조
 _upd_cache = {"t": 0.0, "busy": False}
@@ -1102,9 +1102,9 @@ TR = {
     "term_installing_codex": "▶ Installing Codex…",
     "term_need_npm": "npm was not found — install Node.js (https://nodejs.org) first, then try again.",
     "term_login": "▶ Signing in — a browser will open, please log in.",
-    "term_done": "✅ Done. You can close this window; Claude Pet will show usage shortly.",
+    "term_done": "✅ Done. You can close this window; Token Pet will show usage shortly.",
     "menu_settings": "Settings…", "menu_toggle": "Show/hide the usage pill",
-    "menu_reset_size": "Reset size", "menu_quit": "Quit Claude Pet",
+    "menu_reset_size": "Reset size", "menu_quit": "Quit Token Pet",
     "menu_roam": "Roam the screen",
     "menu_autostart": "Start at sign-in",
     "menu_auto_recover": "Auto-refresh token",
@@ -1116,7 +1116,7 @@ TR = {
     "autostart_unavailable": "Start at sign-in (not available here)",
     "menu_update": "⬆︎ Install v{v}",
     "menu_check_update": "⬆︎ Check for updates…",
-    "upd_title": "Claude Pet update",
+    "upd_title": "Token Pet update",
     "upd_current": "You're on the latest version (v{v}).",
     "upd_failed": "Could not check for updates. Try again later.",
     "upd_install_failed": "The update could not be installed. Try again later.",
@@ -1124,15 +1124,15 @@ TR = {
     "menu_uninstall": "Uninstall completely…",
     "menu_pets": "Pet", "pet_default": "Cat 🐱",
     "pet_add": "➕ Add a pet… (open folder)",
-    "unin_title": "Uninstall Claude Pet?",
+    "unin_title": "Uninstall Token Pet?",
     "unin_body": ("This deletes the app and all of its settings:\n\n{items}\n\n"
                   "Your Claude Code login and its data (~/.claude) are NOT touched.\n"
                   "This cannot be undone."),
     "unin_ok": "Delete", "unin_cancel": "Cancel",
-    "unin_fail": "Uninstall failed. Drag Claude Pet to the Trash manually.",
+    "unin_fail": "Uninstall failed. Drag Token Pet to the Trash manually.",
     "unin_devmode": ("Running from source, not an installed app — nothing to "
                      "uninstall. Settings files were removed."),
-    "settings_title": "Claude Pet Settings", "s_data_source": "Data source",
+    "settings_title": "Token Pet Settings", "s_data_source": "Data source",
     "s_mode_sub": "Subscription", "s_mode_api": "API (Admin API cost)",
     "s_spike_sens": "Spike alert sensitivity", "s_sens_high": "High (alert on small use)",
     "s_sens_normal": "Normal", "s_sens_low": "Low (alert only on heavy use)",
@@ -1202,7 +1202,7 @@ TR = {
     "menu_login_codex": "🔑 Sign in to Codex…",
     "r_codex": "Codex (server values)", "r_spike": "Spike now",
     "r_no_server_rows": "No server values yet — sign in to Claude Code or Codex (or set an Admin API key in API mode).",
-    "r_title": "Claude Pet usage report", "r_exact": "Exact mode (server values)",
+    "r_title": "Token Pet usage report", "r_exact": "Exact mode (server values)",
     "r_reset": "reset",
     "r_last_activity": "Last activity", "r_today_cost": "Today API cost",
   },
@@ -1223,9 +1223,9 @@ TR = {
     "term_installing_codex": "▶ Codex를 설치합니다…",
     "term_need_npm": "npm 을 찾지 못했습니다 — Node.js(https://nodejs.org)를 먼저 설치한 뒤 다시 시도하세요.",
     "term_login": "▶ 로그인합니다 — 브라우저가 열리면 로그인하세요.",
-    "term_done": "✅ 완료됐습니다. 이 창은 닫아도 되며, 곧 Claude Pet에 사용량이 표시됩니다.",
+    "term_done": "✅ 완료됐습니다. 이 창은 닫아도 되며, 곧 Token Pet에 사용량이 표시됩니다.",
     "menu_settings": "설정…", "menu_toggle": "사용량 필 접기/펴기",
-    "menu_reset_size": "크기 원래대로", "menu_quit": "Claude Pet 종료",
+    "menu_reset_size": "크기 원래대로", "menu_quit": "Token Pet 종료",
     "menu_roam": "화면 돌아다니기",
     "menu_autostart": "로그인 시 자동 실행",
     "menu_auto_recover": "토큰 자동 갱신",
@@ -1238,22 +1238,22 @@ TR = {
     "menu_uninstall": "완전 삭제…",
     "menu_pets": "펫", "pet_default": "고양이 🐱",
     "pet_add": "➕ 펫 추가… (폴더 열기)",
-    "unin_title": "Claude Pet을 완전히 삭제할까요?",
+    "unin_title": "Token Pet을 완전히 삭제할까요?",
     "unin_body": ("앱과 모든 설정을 지웁니다:\n\n{items}\n\n"
                   "Claude Code 로그인과 데이터(~/.claude)는 건드리지 않습니다.\n"
                   "되돌릴 수 없습니다."),
     "unin_ok": "삭제", "unin_cancel": "취소",
-    "unin_fail": "삭제 실패. Claude Pet을 휴지통으로 직접 옮겨주세요.",
+    "unin_fail": "삭제 실패. Token Pet을 휴지통으로 직접 옮겨주세요.",
     "unin_devmode": ("설치된 앱이 아니라 소스에서 실행 중이라 지울 앱이 없습니다. "
                      "설정 파일은 삭제했습니다."),
     "menu_update": "⬆︎ 새 버전 v{v} 설치",
     "menu_check_update": "⬆︎ 업데이트 확인…",
-    "upd_title": "Claude Pet 업데이트",
+    "upd_title": "Token Pet 업데이트",
     "upd_current": "최신 버전입니다 (v{v}).",
     "upd_failed": "업데이트를 확인하지 못했습니다. 잠시 후 다시 시도하세요.",
     "upd_install_failed": "업데이트를 설치하지 못했습니다. 잠시 후 다시 시도하세요.",
     "upd_busy": "이미 업데이트를 확인하는 중입니다.",
-    "settings_title": "Claude Pet 설정", "s_data_source": "데이터 소스",
+    "settings_title": "Token Pet 설정", "s_data_source": "데이터 소스",
     "s_mode_sub": "구독 (로그인 계정)", "s_mode_api": "API (Admin API 비용)",
     "s_spike_sens": "급증 알림 민감도", "s_sens_high": "민감 (조금만 써도 경보)",
     "s_sens_normal": "보통", "s_sens_low": "둔감 (많이 써야 경보)",
@@ -1321,7 +1321,7 @@ TR = {
     "menu_login_codex": "🔑 Codex 로그인…",
     "r_codex": "Codex (서버 계산 값)", "r_spike": "지금 급증",
     "r_no_server_rows": "아직 서버 값이 없어요 — Claude Code 또는 Codex 에 로그인하세요(API 모드면 Admin API 키를 넣으세요).",
-    "r_title": "Claude Pet 사용량 리포트", "r_exact": "정확 모드 (서버 계산 값)",
+    "r_title": "Token Pet 사용량 리포트", "r_exact": "정확 모드 (서버 계산 값)",
     "r_reset": "리셋",
     "r_last_activity": "마지막 활동", "r_today_cost": "오늘 API 비용",
   },
@@ -1344,7 +1344,7 @@ TR = {
     "term_login": "▶ ログインします — ブラウザが開いたらログインしてください。",
     "term_done": "✅ 完了しました。このウィンドウは閉じて構いません。まもなく使用量が表示されます。",
     "menu_settings": "設定…", "menu_toggle": "使用量ピルの表示/非表示",
-    "menu_reset_size": "サイズを元に戻す", "menu_quit": "Claude Pet を終了",
+    "menu_reset_size": "サイズを元に戻す", "menu_quit": "Token Pet を終了",
     "menu_roam": "画面を歩き回る",
     "menu_autostart": "サインイン時に自動起動",
     "menu_auto_recover": "トークン自動更新",
@@ -1357,22 +1357,22 @@ TR = {
     "menu_uninstall": "完全に削除…",
     "menu_pets": "ペット", "pet_default": "ネコ 🐱",
     "pet_add": "➕ ペットを追加…（フォルダを開く）",
-    "unin_title": "Claude Pet を完全に削除しますか？",
+    "unin_title": "Token Pet を完全に削除しますか？",
     "unin_body": ("アプリとすべての設定を削除します:\n\n{items}\n\n"
                   "Claude Code のログインとデータ (~/.claude) には触れません。\n"
                   "元に戻せません。"),
     "unin_ok": "削除", "unin_cancel": "キャンセル",
-    "unin_fail": "削除に失敗しました。Claude Pet を手動でゴミ箱に移動してください。",
+    "unin_fail": "削除に失敗しました。Token Pet を手動でゴミ箱に移動してください。",
     "unin_devmode": ("インストール済みアプリではなくソースから実行中のため、"
                      "削除するアプリはありません。設定ファイルは削除しました。"),
     "menu_update": "⬆︎ 新バージョン v{v} をインストール",
     "menu_check_update": "⬆︎ アップデートを確認…",
-    "upd_title": "Claude Pet アップデート",
+    "upd_title": "Token Pet アップデート",
     "upd_current": "最新バージョンです (v{v})。",
     "upd_failed": "アップデートを確認できませんでした。しばらくしてからもう一度お試しください。",
     "upd_install_failed": "アップデートをインストールできませんでした。しばらくしてからもう一度お試しください。",
     "upd_busy": "すでにアップデートを確認中です。",
-    "settings_title": "Claude Pet 設定", "s_data_source": "データソース",
+    "settings_title": "Token Pet 設定", "s_data_source": "データソース",
     "s_mode_sub": "サブスク (ログイン中)", "s_mode_api": "API (Admin API コスト)",
     "s_spike_sens": "急増アラート感度", "s_sens_high": "高 (少しの使用でも警告)",
     "s_sens_normal": "普通", "s_sens_low": "低 (大量使用時のみ警告)",
@@ -1442,7 +1442,7 @@ TR = {
     "menu_login_codex": "🔑 Codex にログイン…",
     "r_codex": "Codex（サーバー値）", "r_spike": "現在の急増",
     "r_no_server_rows": "サーバー値はまだありません — Claude Code または Codex にログインしてください（API モードでは Admin API キーを設定してください）。",
-    "r_title": "Claude Pet 使用量レポート", "r_exact": "正確モード（サーバー値）",
+    "r_title": "Token Pet 使用量レポート", "r_exact": "正確モード（サーバー値）",
     "r_reset": "リセット",
     "r_last_activity": "最終アクティビティ", "r_today_cost": "本日のAPIコスト",
   },
@@ -1463,9 +1463,9 @@ TR = {
     "term_installing_codex": "▶ Instalando Codex…",
     "term_need_npm": "No se encontró npm — instala primero Node.js (https://nodejs.org) y vuelve a intentarlo.",
     "term_login": "▶ Iniciando sesión — se abrirá el navegador, inicia sesión.",
-    "term_done": "✅ Listo. Puedes cerrar esta ventana; Claude Pet mostrará el uso en breve.",
+    "term_done": "✅ Listo. Puedes cerrar esta ventana; Token Pet mostrará el uso en breve.",
     "menu_settings": "Ajustes…", "menu_toggle": "Mostrar/ocultar la píldora",
-    "menu_reset_size": "Restablecer tamaño", "menu_quit": "Salir de Claude Pet",
+    "menu_reset_size": "Restablecer tamaño", "menu_quit": "Salir de Token Pet",
     "menu_roam": "Pasear por la pantalla",
     "menu_autostart": "Abrir al iniciar sesión",
     "menu_auto_recover": "Auto-renovar token",
@@ -1478,22 +1478,22 @@ TR = {
     "menu_uninstall": "Desinstalar por completo…",
     "menu_pets": "Mascota", "pet_default": "Gato 🐱",
     "pet_add": "➕ Añadir mascota… (abrir carpeta)",
-    "unin_title": "¿Desinstalar Claude Pet?",
+    "unin_title": "¿Desinstalar Token Pet?",
     "unin_body": ("Se eliminarán la app y todos sus ajustes:\n\n{items}\n\n"
                   "Tu sesión de Claude Code y sus datos (~/.claude) no se tocan.\n"
                   "Esto no se puede deshacer."),
     "unin_ok": "Eliminar", "unin_cancel": "Cancelar",
-    "unin_fail": "Error al desinstalar. Arrastra Claude Pet a la Papelera manualmente.",
+    "unin_fail": "Error al desinstalar. Arrastra Token Pet a la Papelera manualmente.",
     "unin_devmode": ("Se está ejecutando desde el código fuente, no como app "
                      "instalada. Se eliminaron los archivos de ajustes."),
     "menu_update": "⬆︎ Instalar v{v}",
     "menu_check_update": "⬆︎ Buscar actualizaciones…",
-    "upd_title": "Actualización de Claude Pet",
+    "upd_title": "Actualización de Token Pet",
     "upd_current": "Ya tienes la última versión (v{v}).",
     "upd_failed": "No se pudo comprobar si hay actualizaciones. Inténtalo más tarde.",
     "upd_install_failed": "No se pudo instalar la actualización. Inténtalo más tarde.",
     "upd_busy": "Ya se está comprobando si hay actualizaciones.",
-    "settings_title": "Ajustes de Claude Pet", "s_data_source": "Fuente de datos",
+    "settings_title": "Ajustes de Token Pet", "s_data_source": "Fuente de datos",
     "s_mode_sub": "Suscripción", "s_mode_api": "API (coste de Admin API)",
     "s_spike_sens": "Sensibilidad de picos", "s_sens_high": "Alta (alerta con poco uso)",
     "s_sens_normal": "Normal", "s_sens_low": "Baja (alerta solo con uso alto)",
@@ -1565,7 +1565,7 @@ TR = {
     "menu_login_codex": "🔑 Iniciar sesión en Codex…",
     "r_codex": "Codex (valores del servidor)", "r_spike": "Pico ahora",
     "r_no_server_rows": "Aún no hay valores del servidor: inicia sesión en Claude Code o Codex (o pon una clave de Admin API en modo API).",
-    "r_title": "Informe de uso de Claude Pet", "r_exact": "Modo exacto (valores del servidor)",
+    "r_title": "Informe de uso de Token Pet", "r_exact": "Modo exacto (valores del servidor)",
     "r_reset": "reinicio",
     "r_last_activity": "Última actividad", "r_today_cost": "Coste de API hoy",
   },
@@ -11891,7 +11891,7 @@ def run_gui():
             interrupt = state.get("roam_interrupt")
             if interrupt is not None:
                 interrupt()
-            menu = NSMenu.alloc().initWithTitle_("ClaudePet")
+            menu = NSMenu.alloc().initWithTitle_("Token Pet")
             # NSMenu 는 기본(autoenablesItems=YES)으로 표시 직전에 항목을 다시 검증해, target 이
             # action 에 응답하면 enabled 를 YES 로 되돌린다 — 아래 setEnabled_(False) 가 덮인다.
             # 우리는 항목별로 직접 정하므로 자동 활성화를 끈다. 다른 항목은 기본값(YES) 그대로.
@@ -11971,7 +11971,7 @@ def run_gui():
             # 버전 표시 (비활성 항목)
             menu.addItem_(NSMenuItem.separatorItem())
             vitem = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                f"ClaudePet v{APP_VERSION}", None, "")
+                f"Token Pet v{APP_VERSION}", None, "")
             vitem.setEnabled_(False)
             menu.addItem_(vitem)
             # 업데이트 확인… — 지금 확인해서 새 버전이 있으면 바로 내려받아 설치·재실행(한 번에).
@@ -12995,7 +12995,7 @@ def run_gui():
                 hint_l.setLineBreakStrategy_(0xFFFF)      # NSLineBreakStrategyStandard — 한글 낱말 우선 포함
             ai_rows[p] = {"status": status_l, "button": btn, "hint": hint_l}
 
-        vl = label(f"ClaudePet v{APP_VERSION}", 20, 18, 200)
+        vl = label(f"Token Pet v{APP_VERSION}", 20, 18, 200)
         vl.setTextColor_(NSColor.secondaryLabelColor())
 
         save_btn = NSButton.alloc().initWithFrame_(

@@ -1,6 +1,6 @@
-🐱 A desktop pet that watches your Claude token usage on macOS.
+🐱 Token Pet — a desktop pet that watches your Claude Code, Codex and Gemini usage on macOS and Windows.
 
-📖 Full README: [English](https://github.com/BrilliantTiger/claude-pet/blob/main/README.md) · [한국어](https://github.com/BrilliantTiger/claude-pet/blob/main/README.ko.md) · [日本語](https://github.com/BrilliantTiger/claude-pet/blob/main/README.ja.md) · [Español](https://github.com/BrilliantTiger/claude-pet/blob/main/README.es.md)
+📖 Full README: [English](https://github.com/BrilliantTiger/token-pet/blob/main/README.md) · [한국어](https://github.com/BrilliantTiger/token-pet/blob/main/README.ko.md) · [日本語](https://github.com/BrilliantTiger/token-pet/blob/main/README.ja.md) · [Español](https://github.com/BrilliantTiger/token-pet/blob/main/README.es.md)
 
 ---
 
@@ -78,6 +78,12 @@ macOS 12+ (Apple Silicon · Intel con el zip universal) · autocontenido
      비교하세요(합성 픽스처로 — tests/test_log_estimate.py 가 그 형태입니다).
      단가·창·중복 제거를 실제로 건드리는 릴리즈에서는 CLAUDE.md 의 Danger zone 대로
      반드시 ⚠️ 다시 보정 안내를 넣으세요. -->
+
+**v1.2.1**
+
+- 앱 이름이 Token Pet으로 바뀌었습니다. 메뉴·설정·설치 화면에 새 이름이 보이고, 설정과 로그인은 그대로라 업데이트만 받으면 됩니다.
+- Gemini에 이미 로그인돼 있으면 로그인 안내 없이 바로 사용량을 표시합니다. 앱이 연 Gemini가 인증서 오류로 멈추던 문제를 고쳤습니다.
+- macOS와 Windows가 같은 1.2.1로 나옵니다. Windows에서는 시작 메뉴에 옛 이름의 바로 가기가 남지 않습니다.
 
 **v1.2.0**
 
