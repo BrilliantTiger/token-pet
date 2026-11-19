@@ -36,7 +36,8 @@ def make_fake_agy(folder, record):
             to = ">" if i == 0 else ">>"
             lines.append('if defined %s (echo %s=set%s "%s") else (echo %s=unset%s "%s")'
                          % (key, key, to, record, key, to, record))
-        lines += ["%s -sS -o NUL %s" % (CURL, URL), 'echo curl=%%ERRORLEVEL%%>> "%s"' % record, "exit /b 0"]
+        # 리다이렉션을 앞에 둔다 — `echo curl=0>> 파일` 은 cmd 가 `0>>` 를 핸들 번호로 읽는다.
+        lines += ["%s -sS -o NUL %s" % (CURL, URL), '>> "%s" echo curl=%%ERRORLEVEL%%' % record, "exit /b 0"]
         with open(path, "w", encoding="ascii", newline="\r\n") as f:
             f.write("\n".join(lines) + "\n")
         return path

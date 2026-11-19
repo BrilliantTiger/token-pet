@@ -8,7 +8,8 @@
   · 로그인 정보가 있으면 [로그인]을 보여 주지도 묻지도 않고 바로 사용량을 읽는다.
   · 읽기가 네트워크·인증서·서버 오류로 실패하면 로그인을 유도하지 않고, 다음 차례에 스스로 다시 읽는다.
   · [로그인]은 로그인 정보가 없거나 CLI·서버가 로그인을 요구했을 때만.
-  · 로그인 창은 오류로 끝난 것을 "시간 초과"라고 하지 않는다.
+  · 로그인 창은 agy 가 어떻게 끝나든 "시간 초과"라고 하지 않는다 — 창은 agy 의 종료 코드만 알고,
+    0 이 아닌 끝은 전부 "로그인하지 못했어요"다. 진짜 시간 초과는 창이 아니라 설정 줄(ai_fail_timeout)이 말한다.
 
 ── 표 ────────────────────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@
   동작    row      첫 새로고침 뒤 설정 "AI 연결" 줄(상태·버튼), 읽기를 시도했는가, 값이 바로 보이는가
           press    그 줄에서 흐름을 시작했을 때: 설치 횟수, 로그인 실행 횟수(창·프로세스), 그 뒤 값
           recover  (오류 상태) 로그인 없이 스스로 다시 읽어 값이 뜨고, 다시 실패해도 직전 값이 남는가
-  로그인 창 스크립트(Gemini 만 창을 쓴다) × 4개 언어 × agy 의 끝(성공·인증서·네트워크·서버·진짜 시간 초과)
+  로그인 창 스크립트(Gemini 만 창을 쓴다) × 4개 언어 × agy 의 끝(성공·인증서·네트워크·서버·agy 의 시간 초과)
 
 ── 대역 ──────────────────────────────────────────────────────────────────────────────
 
@@ -77,6 +78,8 @@ NETWORK_TEXT = "error: authentication failed: token refresh failed due to networ
 SERVER_TEXT = "error: Eligibility check failed: 503 Service Unavailable"
 LOGIN_TEXT = "Authentication required. Please visit the URL to log in: https://login.invalid/synthetic"
 TIMEOUT_TEXT = "error: authentication failed or timed out"
+# 1.2.0 의 창이 0 아닌 종료마다 찍던 말 — 어느 언어, 어느 끝에서도 다시 나오면 안 된다.
+OLD_TIMEOUT_WORDS = ("Time ran out", "시간이 지났", "時間切れ", "agotó el tiempo")
 
 # 가짜 CLI 본체. argv[1] 이 어느 CLI 인지, 나머지가 그 CLI 가 받은 인자다. 무엇을 할지는 behaviour.json
 # 이 정하고, 불린 것은 calls.log 에 한 줄씩 남긴다(인자와 창 여부뿐 — 환경은 적지 않는다).
@@ -472,9 +475,14 @@ def let_time_pass(provider):
 
 
 def settings_row(provider, job=None):
-    """설정 "AI 연결" 의 그 줄 — 두 UI 가 1초마다 부르는 그 식."""
-    return claude_pet.ai_connect_row(provider, bool(claude_pet.find_cli(provider)),
-                                     claude_pet.cli_logged_in(provider), job or claude_pet.new_ai_job())
+    """설정 "AI 연결" 의 그 줄 — 두 UI 가 1초마다 부르는 그 식. 줄의 세부(ai_connect_detail: 로그인됐지만
+    읽지 못함 등)는 그 함수가 있는 판에서만 넘긴다."""
+    args = (provider, bool(claude_pet.find_cli(provider)), claude_pet.cli_logged_in(provider),
+            job or claude_pet.new_ai_job())
+    detail = getattr(claude_pet, "ai_connect_detail", None)
+    if detail is None:
+        return claude_pet.ai_connect_row(*args)
+    return claude_pet.ai_connect_row(*args, detail=detail(provider))
 
 
 def reads(box, provider):
@@ -492,8 +500,10 @@ def login_runs(box, provider):
 
 
 # 첫 새로고침 뒤의 줄: 상태 → (status, button, 읽기를 시도했는가, 값이 바로 보이는가).
-# 오류 상태의 status 는 "로그인하라는 줄이 아니다" 로만 고정한다(ROW_NOT_LOGIN).
+# 오류 상태: Gemini 는 "연결됨 — 지금은 읽지 못함"(ai_unreadable, 버튼 없음)이고, Claude·Codex 는 "로그인하라는
+# 줄이 아니다" 로만 고정한다(ROW_NOT_LOGIN).
 ROW_NOT_LOGIN = object()
+GEMINI_ERROR_ROW = ("ai_unreadable", None)
 ROW = {
     "not_installed":      ("ai_not_installed", "ai_btn_install", False, False),
     "installed_no_login": ("ai_need_login", "ai_btn_login", False, False),
@@ -514,13 +524,15 @@ PRESS = {
     "logged_in_server":   (0, 0, None, False),
     "login_required":     (0, 1, "ok", True),
 }
-# 로그인 창에서 agy 가 끝난 모양 → (완료 문구가 찍히는가, 시간 초과 문구가 찍히는가, 창에 보여야 하는 agy 의 말).
+# 로그인 창에서 agy 가 끝난 모양 → (완료 문구가 찍히는가, 창에 보여야 하는 agy 의 말). 0 이 아닌 끝은 전부
+# "로그인하지 못했어요"(term_gemini_failed)이고, 옛 시간 초과 문구는 어느 끝에서도 찍히지 않는다 —
+# agy 가 스스로 "timed out" 이라고 말하고 끝났을 때도.
 WINDOW = {
-    "signin":  (True, False, LOGIN_TEXT),
-    "x509":    (False, False, X509_TEXT),
-    "network": (False, False, NETWORK_TEXT),
-    "server":  (False, False, SERVER_TEXT),
-    "timeout": (False, True, TIMEOUT_TEXT),
+    "signin":  (True, LOGIN_TEXT),
+    "x509":    (False, X509_TEXT),
+    "network": (False, NETWORK_TEXT),
+    "server":  (False, SERVER_TEXT),
+    "timeout": (False, TIMEOUT_TEXT),
 }
 
 
@@ -553,6 +565,8 @@ class StateMatrixTest(MatrixCase):
         where = "%s/%s" % (provider, state)
         if status is ROW_NOT_LOGIN:
             self.assert_no_login_offer(row, where)
+            if provider == "gemini":
+                self.assertEqual((row["status"], row["button"]), GEMINI_ERROR_ROW, where)
         else:
             self.assertEqual((row["status"], row["button"]), (status, button), where)
         self.assertEqual(bool(reads(self.box, provider)), read, "%s: 읽기 시도" % where)
@@ -584,15 +598,14 @@ class StateMatrixTest(MatrixCase):
             self.assertEqual((row["status"], row["button"]), ("ai_connected", None), "%s: 끝난 뒤의 줄" % where)
         else:
             self.assert_no_login_offer(settings_row(provider, job), where + " 끝난 뒤")
+        if result is None:
+            self.assertIsNone(job["phase"], "%s: 로그인돼 있는데 흐름이 실패로 남았다" % where)
         if provider == "gemini" and logins:
-            done, late = claude_pet.t("term_gemini_done"), claude_pet.t("term_gemini_timeout")
-            self.assertIn(done, self.box.windows[-1], where)
-            self.assertNotIn(late, self.box.windows[-1], where)
-        if result is not None:
-            # 로그인을 마친 흐름은 스스로 다시 읽게 해 둔다 — 시간을 돌리지 않고 다음 새로고침에서 값이 떠야 한다.
-            rows = refresh(provider)
-        else:
-            rows = refresh(provider)
+            self.assertIn(claude_pet.t("term_gemini_done"), self.box.windows[-1], where)
+            for word in OLD_TIMEOUT_WORDS:
+                self.assertNotIn(word, self.box.windows[-1], where)
+        # 로그인을 마친 흐름은 스스로 다시 읽게 해 둔다 — 시간을 돌리지 않고 다음 새로고침에서 값이 떠야 한다.
+        rows = refresh(provider)
         self.assertEqual(bool(rows), values, "%s: 끝난 뒤 값이 보이는가" % where)
 
     def check_recover(self, provider, state):
@@ -667,7 +680,7 @@ class LoginWindowScriptTest(MatrixCase):
     """Gemini 로그인 창의 스크립트를 가짜 agy 로 **실제로 돌려** 찍힌 글자를 본다 — 언어 × agy 의 끝."""
 
     def check(self, lang, ending):
-        done_shown, late_shown, agy_text = WINDOW[ending]
+        done_shown, agy_text = WINDOW[ending]
         claude_pet.set_lang(lang)
         self.box.install_wrapper("agy")
         self.box.behave("agy", window=ending)
@@ -679,9 +692,12 @@ class LoginWindowScriptTest(MatrixCase):
             self.assertIn(claude_pet.t(key), text, "%s: 안내 %s" % (where, key))
         self.assertIn(agy_text, text, "%s: agy 의 stderr 가 창에 보여야 한다" % where)
         self.assertNotIn('"status"', text, "%s: stdout(JSON 본문)은 창에 찍지 않는다" % where)
-        done, late = claude_pet.t("term_gemini_done"), claude_pet.t("term_gemini_timeout")
-        self.assertEqual(done in text, done_shown, "%s: 완료 문구" % where)
-        self.assertEqual(late in text, late_shown, "%s: 시간 초과 문구" % where)
+        self.assertEqual(claude_pet.t("term_gemini_done") in text, done_shown, "%s: 완료 문구" % where)
+        for word in OLD_TIMEOUT_WORDS:
+            self.assertNotIn(word, text, "%s: 시간 초과 문구" % where)
+        self.assertNotIn("term_gemini_", text, "%s: 번역되지 않은 키가 창에 찍혔다" % where)
+        failed = claude_pet.TR[lang].get("term_gemini_failed")
+        self.assertEqual(bool(failed) and failed in text, not done_shown, "%s: 실패 문구" % where)
         ran = self.box.calls("agy", window=True)
         self.assertEqual([c["args"] for c in ran], [list(claude_pet.GEMINI_AGY_ARGS)], where)
 
