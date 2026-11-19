@@ -55,6 +55,12 @@ def read_usage(provider):
 
 
 def main():
+    # 러너의 콘솔 인코딩(한국어 Windows 는 cp949)이 못 쓰는 글자로 죽지 않게 — 실제로 한 번 죽었다.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     # Windows 의 자격 증명 프로브는 "지금 도는 진입 스크립트"를 숨은 인자로 다시 띄운다 — 그게 이 파일이다.
     if cp.GEMINI_CRED_PROBE_FLAG in sys.argv[1:]:
         return cp.gemini_cred_probe_main()

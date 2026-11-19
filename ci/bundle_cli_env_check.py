@@ -66,6 +66,12 @@ def curl_rc(env):
 
 
 def main(argv):
+    # 러너의 콘솔 인코딩(한국어 Windows 는 cp949)이 못 쓰는 글자로 죽지 않게 — 실제로 한 번 죽었다.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     if len(argv) != 2:
         print(__doc__)
         return 2
