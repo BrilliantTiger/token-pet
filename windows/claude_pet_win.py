@@ -2647,6 +2647,9 @@ def main():
     # 프로브가 언제나 '모름'이 된다.
     if cp.GEMINI_CRED_PROBE_FLAG in sys.argv[1:]:
         return cp.gemini_cred_probe_main()
+    # CLI 환경 프로브(CI 가 빌드한 exe 에게 묻는다, TOK-62) — 같은 이유로 앱이 되기 전에 답하고 끝낸다.
+    if cp.CLI_ENV_PROBE_FLAG in sys.argv[1:]:
+        return cp.cli_env_probe_main(sys.argv)
     claim_windows_app_identity()              # QApplication 보다 먼저 — 창이 만들어지기 전에 묶음 ID 가 있어야 한다
     if not acquire_single_instance_mutex():   # 이미 떠 있으면 조용히 끝난다 — 설치 파일의 재시작과 [Run] 이 둘 다 띄워도 하나만 남는다
         cp._dbg("win: another instance holds the mutex; exiting")

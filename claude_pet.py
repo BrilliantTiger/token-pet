@@ -13717,9 +13717,74 @@ def print_report():
     print("─" * 60)
 
 
+# ─────────────── CLI 환경 프로브 — CI 가 **배포하는 번들**에게 묻는다 (TOK-62) ───────────────
+#
+# 1.2.0 의 Gemini 인증서 오류는 소스 실행에는 없고 번들에만 있었다: py2app 의 부트 스크립트가
+# SSL_CERT_FILE·SSL_CERT_DIR 을 없는 경로로 넣고, 그 환경이 앱이 띄우는 CLI 로 넘어갔다. 소스로만 도는
+# 테스트는 그것을 볼 수 없다. 그래서 번들 자신이 "내가 CLI 에게 넘기는 환경"을 파일로 적어 주는 숨은
+# 인자를 둔다. CI 가 빌드한 .app / exe 를 이 인자로 띄워 그 파일을 검사한다(ci/bundle_cli_env_check.py).
+# 아무것도 띄우지 않고(agy·Terminal·콘솔·브라우저), 표준출력에 아무것도 쓰지 않는다.
+CLI_ENV_PROBE_FLAG = "--cli-env-probe"
+
+
+def cli_env_probe_main(argv):
+    """`--cli-env-probe <out.json> [--agy <경로>]` → 종료 코드(0 썼다 | 2 인자·쓰기 실패).
+
+    out.json 에 적는 것:
+      environ       이 프로세스의 환경(번들 부트 스크립트가 손댄 뒤)
+      cli_env       {제공자: cli_env(제공자, 그 CLI)} — 로그인 CLI 가 받는 환경
+      agy_env       _agy_env() — 백그라운드 agy 가 받는 환경(만들 수 없으면 null)
+      login_window  --agy 를 줬을 때, start_gemini_login() 이 창에 넘기려던 것:
+                    macOS {"kind": "bash", "script": …, "env": null},
+                    Windows {"kind": "powershell", "argv": […], "env": {…}}. 창은 열지 않는다.
+      login_window_error  그것을 만들다 난 예외의 클래스 이름(없으면 null)
+    환경에는 사용자의 값이 들어 있다 — 부른 쪽이 정한 파일에만 쓰고 어디에도 찍지 않는다."""
+    try:
+        out = argv[argv.index(CLI_ENV_PROBE_FLAG) + 1]
+        agy = argv[argv.index("--agy") + 1] if "--agy" in argv else None
+    except (ValueError, IndexError):
+        return 2
+    report = {"platform": sys.platform, "frozen": bool(getattr(sys, "frozen", False)),
+              "environ": dict(os.environ), "cli_env": {}, "agy_env": None,
+              "login_window": None, "login_window_error": None}
+    for provider in CLI_PROVIDERS:
+        report["cli_env"][provider] = cli_env(provider, find_cli(provider) or _CLI_EXE[provider])
+    try:
+        report["agy_env"] = _agy_env(_gemini_edge_rules())
+    except Exception as e:
+        _dbg("cli env probe: agy env failed", type(e).__name__)
+    if agy:
+        captured = {}
+        g = globals()
+        saved = (g["_find_agy_cli"], g["_run_in_terminal"], subprocess.Popen)
+
+        def popen(args, *_a, **kw):
+            captured.update(kind="powershell", argv=[str(x) for x in args], env=kw.get("env"))
+
+        try:
+            g["_find_agy_cli"] = lambda: agy
+            g["_run_in_terminal"] = lambda cmd: captured.update(kind="bash", script=cmd, env=None)
+            if sys.platform == "win32":
+                subprocess.Popen = popen
+            start_gemini_login()
+        except Exception as e:
+            report["login_window_error"] = type(e).__name__
+        finally:
+            g["_find_agy_cli"], g["_run_in_terminal"], subprocess.Popen = saved
+        report["login_window"] = captured or None
+    try:
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(report, f)
+    except OSError:
+        return 2
+    return 0
+
+
 if __name__ == "__main__":
     apply_config(load_config())
-    if "--with-update-lock" in sys.argv:
+    if CLI_ENV_PROBE_FLAG in sys.argv:
+        sys.exit(cli_env_probe_main(sys.argv))
+    elif "--with-update-lock" in sys.argv:
         # 셸이 인앱 업데이트와 같은 객체로 직렬화하는 통로. 잠금은 파이썬이 들고
         # 셸은 그 안에서 자식으로 돈다 — 이유와 종료 상태는 함수의 docstring 에.
         sys.exit(_run_with_update_lock(sys.argv))

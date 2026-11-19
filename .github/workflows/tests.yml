@@ -11,9 +11,23 @@ name: tests
 # main 에 push 될 때도 돌린다. dev→main 머지 커밋은 main 에만 생기므로, main 이 빠져
 # 있으면 그 커밋에는 push CI 결과가 없어 CI 게이트가 머지를 막는다.
 
+# 잡이 다섯이다(TOK-62 — 1.2.0 이 CI 를 통과하고 실기기에서 바로 터진 뒤):
+#   macos / windows                 호스트 러너의 단위 테스트 + 제공자×상태 시나리오 표.
+#   macos-bundle / windows-bundle   **배포하는 번들**을 실제로 만들어(서명 없이) 그 번들에게 묻는다.
+#                                   소스로만 돌면 번들에만 있는 결함을 못 본다(py2app 의 SSL_CERT_*).
+#   real-macos / real-windows       self-hosted 실기기 — 실제로 깔린 CLI 와 실제 로그인 상태.
+#
+# 실기기 잡은 **막는 게이트다**(대표님, 2026-11-19: "막히지 않으면 뭐 어쩔건데? 어디서 검증하게?").
+# 같은 저장소의 PR, main·dev push, 태그, workflow_dispatch 에서 돌고, 실패하면 머지·게시를 막는다.
+# 러너가 내려가 있으면 잡은 대기하다 실패한다 — 그것도 막는 것이 맞다: 실기기에서 확인하지 못한 것을
+# 내보내지 않는다. 1.2.1 부터 게시는 main 의 실기기 잡 두 개가 초록일 때만 한다.
+# **포크의 PR 에서는 돌지 않는다** — 공개 저장소라, 포크의 코드가 대표님 PC 에서 돌게 된다. 포크는
+# 워크플로 파일도 고칠 수 있으므로 이 조건만으로는 부족하고, 저장소 설정(외부 기여자의 워크플로는 전부
+# 승인 필요)이 함께 막는다. 러너는 조직 러너 그룹 'token-pet' 의 두 대다(ci/SELF_HOSTED_RUNNERS.md).
 on:
   push:
     branches: ["claude/**", "dev", "main"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -89,6 +103,10 @@ jobs:
       # (TOK-59). 앱을 임포트하지 않고 소스만 읽으므로 맥과 같은 검사가 여기서도 돈다.
       - name: Run gating contract — Token Pet name and the 1.2.0 update path
         run: python -m unittest discover -s tests -v -p "test_token_pet_rename.py"
+      # 제공자 × 상태 × 동작 시나리오 표(TOK-62). 가짜 CLI 를 진짜 프로세스로 띄우고 로그인 창의
+      # PowerShell 스크립트를 실제로 돌린다 — 맥에서 sys.platform 만 바꿔서는 볼 수 없는 쪽이다.
+      - name: Run gating contract — CLI state matrix
+        run: python -m unittest discover -s tests -v -p "test_cli_state_matrix.py"
       # 포트 자신의 스위트는 **진짜 윈도우에서 통과하지 않는다** — 이 CI 가 처음
       # 드러냈다(run 35452309458):
       #   ModuleNotFoundError: No module named 'fcntl'  (test_win_autostart, test_win_update)
@@ -101,3 +119,79 @@ jobs:
       - name: Run the port's own suite (known-failing on real Windows)
         continue-on-error: true
         run: python -m unittest discover -s windows/tests -t . -v
+
+  # ── 배포하는 번들로 시험한다 ──────────────────────────────────────────────────────────
+  macos-bundle:
+    name: macOS — built .app (unsigned)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 릴리스와 같은 파이썬: python.org universal2. release.sh 는 그 자리(UPY)를 기본으로 쓰고,
+      # 배포 타깃이 macOS 12 를 넘는 인터프리터는 거절한다(check_build_python).
+      - name: Install python.org universal2 Python
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/python.pkg" https://www.python.org/ftp/python/3.13.7/python-3.13.7-macos11.pkg
+          sudo installer -pkg "$RUNNER_TEMP/python.pkg" -target /
+          /Library/Frameworks/Python.framework/Versions/Current/bin/python3 -VV
+      - name: Install build dependencies
+        run: |
+          PY=/Library/Frameworks/Python.framework/Versions/Current/bin/python3
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install py2app==0.28.10 certifi pyobjc-core pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc-framework-ServiceManagement
+      # 서명·공증 없는 빌드만이다(release.sh build). sign/notarize/publish 는 여기서 부르지 않는다.
+      - name: Build the app bundle (unsigned)
+        run: ./release.sh build
+      - name: Show py2app log on failure
+        if: failure()
+        run: tail -60 /tmp/py2app.log || true
+      # 번들 자신에게 "CLI 에 넘기는 환경"을 묻는다: SSL_CERT_FILE·SSL_CERT_DIR 이 남지 않고,
+      # 그 환경으로 curl https://www.google.com 이 성공해야 한다 — 로그인 창 스크립트 안에서도.
+      - name: Bundle hands a clean environment to the CLIs
+        run: python3 ci/bundle_cli_env_check.py dist/ClaudePet.app/Contents/MacOS/ClaudePet
+
+  windows-bundle:
+    name: Windows — built exe (unsigned)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install build dependencies
+        run: python -m pip install -r windows/requirements.txt
+      # 배포물과 같은 PyInstaller onedir 빌드(build_win.build). zip·설치 파일·서명은 만들지 않는다 —
+      # 여기서 보는 것은 실행 폴더의 exe 다.
+      - name: Build the app folder (unsigned)
+        run: python -c "import os, sys; sys.path.insert(0, 'windows'); import build_win, win_update; build_win.build(); d = os.path.join(build_win.DIST, win_update.APP_DIR_NAME); build_win.write_release_marker(d, build_win.app_version()); build_win.verify(d)"
+      - name: Bundle hands a clean environment to the CLIs
+        run: python ci/bundle_cli_env_check.py dist-win\ClaudePet\ClaudePet.exe
+
+  # ── 실기기 ───────────────────────────────────────────────────────────────────────────
+  real-macos:
+    name: Real Mac — installed CLIs, real sign-in
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' ||
+                                       startsWith(github.ref, 'refs/tags/')))
+    runs-on: [self-hosted, macOS, token-pet]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # 러너의 파이썬을 그대로 쓴다(setup-python 은 러너에 툴캐시를 깐다). 코어는 stdlib 만으로 뜬다.
+      - name: Installed CLIs and sign-in state
+        run: python3 ci/real_machine_check.py
+
+  real-windows:
+    name: Real Windows — installed CLIs, real sign-in
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' ||
+                                       startsWith(github.ref, 'refs/tags/')))
+    runs-on: [self-hosted, Windows, token-pet]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installed CLIs and sign-in state
+        run: python ci/real_machine_check.py
