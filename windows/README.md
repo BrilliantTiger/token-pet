@@ -196,7 +196,7 @@ python windows\build_win.py
   exe 의 버전 리소스다.
 
 그래서 `build_win.write_version_resource()` 가 빌드할 때마다 리소스 파일을 새로 쓰고
-(`FileDescription`=Claude Pet, `CompanyName`=Yeongyu Yang, `ProductName`=Claude Pet, `OriginalFilename`=ClaudePet.exe,
+(`FileDescription`=Token Pet, `CompanyName`=Yeongyu Yang, `ProductName`=Token Pet, `OriginalFilename`=ClaudePet.exe,
 `LegalCopyright`, `FileVersion`/`ProductVersion` 은 `claude_pet.APP_VERSION`) `--version-file` 로 넘긴다 — 손으로 만들어
 커밋해 두지 않는 이유는 그러면 버전이 그 자리에 얼어붙기 때문이다. 게이트의 `check_version_resource()` 가 zip 안의 exe 에
 그 문자열들이 UTF-16LE 로 들어 있는지 본다(리소스 디렉터리를 파싱하지는 않는다 — macOS 에서 돌리면 그 한계를 stderr 로

@@ -213,25 +213,25 @@ TR_WIN = {
     "en": {
         "upd_no_asset": "No Windows build is published for this machine ({m}) yet.",
         "upd_source": "Running from source — update with git pull instead.",
-        "upd_installing": "Installing v{v} — Claude Pet will close and reopen by itself.",
+        "upd_installing": "Installing v{v} — Token Pet will close and reopen by itself.",
         "unin_busy": "An update is in progress. Try again in a minute.",
     },
     "ko": {
         "upd_no_asset": "이 기기({m})용 Windows 빌드가 아직 없습니다.",
         "upd_source": "소스에서 실행 중입니다 — git pull 로 갱신하세요.",
-        "upd_installing": "v{v} 를 설치합니다 — Claude Pet 이 스스로 닫혔다가 다시 뜹니다.",
+        "upd_installing": "v{v} 를 설치합니다 — Token Pet 이 스스로 닫혔다가 다시 뜹니다.",
         "unin_busy": "업데이트가 진행 중입니다. 잠시 후 다시 시도하세요.",
     },
     "ja": {
         "upd_no_asset": "このPC（{m}）向けの Windows ビルドはまだ公開されていません。",
         "upd_source": "ソースから実行中です — git pull で更新してください。",
-        "upd_installing": "v{v} をインストールします — Claude Pet は自動的に閉じて再び開きます。",
+        "upd_installing": "v{v} をインストールします — Token Pet は自動的に閉じて再び開きます。",
         "unin_busy": "アップデートの実行中です。しばらくしてからもう一度お試しください。",
     },
     "es": {
         "upd_no_asset": "Aún no hay una versión de Windows publicada para este equipo ({m}).",
         "upd_source": "Se está ejecutando desde el código fuente: actualiza con git pull.",
-        "upd_installing": "Instalando v{v}: Claude Pet se cerrará y volverá a abrirse solo.",
+        "upd_installing": "Instalando v{v}: Token Pet se cerrará y volverá a abrirse solo.",
         "unin_busy": "Hay una actualización en curso. Inténtalo en un minuto.",
     },
 }
@@ -1644,7 +1644,7 @@ class PetWindow(QWidget):
         m.addAction(cp.t("menu_uninstall"), self._uninstall)
         m.addAction(cp.t("menu_quit"), QApplication.instance().quit)
         m.addSeparator()
-        v = m.addAction(f"ClaudePet v{cp.APP_VERSION}")
+        v = m.addAction(f"Token Pet v{cp.APP_VERSION}")
         v.setEnabled(False)
         m.addAction(cp.t("menu_check_update"), self._check_update)
         # 메뉴는 동기 루프라 그동안 틱이 멈춘다. 자동 이동은 막고, 닫힌 뒤 첫 틱이 '그 자리 정지' 로 처리하게 표시를 남긴다.
@@ -2459,7 +2459,7 @@ class SettingsDialog(QDialog):
         self.ai_timer.start(1000)
         self.ai_rows_refresh()
 
-        vl = label(f"ClaudePet v{cp.APP_VERSION}", 20, 18, 200)
+        vl = label(f"Token Pet v{cp.APP_VERSION}", 20, 18, 200)
         vl.setStyleSheet("color: palette(placeholder-text);")     # NSColor.secondaryLabelColor
         save_btn = QPushButton(t("s_save"), self)
         save_btn.setGeometry(420 - 110, self.PHT - 12 - 30, 90, 30)
@@ -2610,7 +2610,7 @@ def make_tray(app, win):
         return None
     # 아이콘은 macOS 앱 아이콘(release/icon.icns)에서 만든 같은 그림(windows/claudepet.ico) — 사용자 요구: 아이콘도 동일.
     tray = QSystemTrayIcon(app_icon(), app)
-    tray.setToolTip(f"ClaudePet v{cp.APP_VERSION}")
+    tray.setToolTip(f"Token Pet v{cp.APP_VERSION}")
     m = QMenu()
     m.addAction(cp.t("menu_toggle"), win._toggle_panel)
     m.addAction(cp.t("menu_quit"), app.quit)
@@ -2656,7 +2656,7 @@ def main():
     # 지난 거래의 옆 폴더 정리는 1분 뒤 — 방금 portable 교체로 떴다면 헬퍼가 아직 옛 폴더를 지우는 중일 수 있다(확인 ≤ 23초).
     QTimer.singleShot(60_000, clean_update_leftovers)
     app.setQuitOnLastWindowClosed(False)
-    app.setApplicationName("Claude Pet")
+    app.setApplicationName("Token Pet")
     app.setWindowIcon(app_icon())             # 설정 창·알림 창의 제목줄·작업표시줄 아이콘도 같은 그림
     cfg = cp.load_config()
     cp.apply_config(cfg)

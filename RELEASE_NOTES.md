@@ -1,6 +1,6 @@
-🐱 A desktop pet that watches your Claude token usage on macOS.
+🐱 Token Pet — a desktop pet that watches your Claude Code, Codex and Gemini usage on macOS and Windows.
 
-📖 Full README: [English](https://github.com/BrilliantTiger/claude-pet/blob/main/README.md) · [한국어](https://github.com/BrilliantTiger/claude-pet/blob/main/README.ko.md) · [日本語](https://github.com/BrilliantTiger/claude-pet/blob/main/README.ja.md) · [Español](https://github.com/BrilliantTiger/claude-pet/blob/main/README.es.md)
+📖 Full README: [English](https://github.com/BrilliantTiger/token-pet/blob/main/README.md) · [한국어](https://github.com/BrilliantTiger/token-pet/blob/main/README.ko.md) · [日本語](https://github.com/BrilliantTiger/token-pet/blob/main/README.ja.md) · [Español](https://github.com/BrilliantTiger/token-pet/blob/main/README.es.md)
 
 ---
 

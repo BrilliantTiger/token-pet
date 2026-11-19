@@ -22,8 +22,11 @@ setup(
             #   빠지면 소스 실행은 멀쩡하고 번들에서만 마크가 사라진다(fonts 가 겪은 실패).
             "resources": ["frames", ".claude_pet", "fonts", "logos"],
             "plist": {
+                # py2app 은 이 값으로 dist/<이름>.app 과 실행 파일 이름을 짓는다 — 1.2.0 업데이터가 zip 안에서
+                # 찾는 것이 ClaudePet.app 이라 바꾸지 않는다. 사람에게 보이는 이름은 아래 DisplayName 과,
+                # release.sh 의 sign() 이 서명 직전에 적는 CFBundleName(Token Pet)이다.
                 "CFBundleName": "ClaudePet",
-                "CFBundleDisplayName": "Claude Pet",
+                "CFBundleDisplayName": "Token Pet",
                 "CFBundleIdentifier": "me.yeongyu.claudepet",
                 "CFBundleVersion": APP_VERSION,
                 "CFBundleShortVersionString": APP_VERSION,

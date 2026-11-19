@@ -1,4 +1,4 @@
-# 🐱 Claude Pet
+# 🐱 Token Pet
 
 [English](README.md) · [한국어](README.ko.md) · **日本語** · [Español](README.es.md)
 
@@ -7,7 +7,7 @@ macOS ネイティブ（AppKit）描画 — ウィンドウ枠・背景・残像
 
 > 🧪 v0.24 — macOS 版は公証済み、Windows 版はインストーラーと zip で提供します（未署名 — 下の Windows 節を参照）。
 
-![Claude Pet](preview.png)
+![Token Pet](preview.png)
 
 ## 対応環境
 
@@ -27,7 +27,7 @@ macOS ネイティブ（AppKit）描画 — ウィンドウ枠・背景・残像
 
 **Python 不要** — アプリに同梱されており、**Apple の公証（notarize）済み**なので Gatekeeper の警告なしで開けます。
 
-1. [**Releases**](https://github.com/BrilliantTiger/claude-pet/releases/latest) から `ClaudePet.zip` をダウンロード — **Intel Mac** の場合は `ClaudePet-universal.zip` を選んでください（v0.10 から提供）
+1. [**Releases**](https://github.com/BrilliantTiger/token-pet/releases/latest) から `ClaudePet.zip` をダウンロード — **Intel Mac** の場合は `ClaudePet-universal.zip` を選んでください（v0.10 から提供）
 2. 展開 → `ClaudePet.app` を **アプリケーション** フォルダへ移動 → ダブルクリック
 3. macOS 12+（Apple Silicon; Intel は v0.10 から universal zip で対応）
 
@@ -65,12 +65,12 @@ macOS ネイティブ（AppKit）描画 — ウィンドウ枠・背景・残像
 
 Windows 10/11（64 ビット）でも同じピル・散歩・設定・ペットが使えます。リリースごとに 2 つのファイルを公開します。
 
-- **`claude-pet-win-setup.exe`** — インストーラー。現在のユーザーにインストールし（管理者権限不要）、スタートメニューと「アプリと機能」のアンインストール項目を作り、**サインイン時に Claude Pet を起動**するオプションがあります。
+- **`claude-pet-win-setup.exe`** — インストーラー。現在のユーザーにインストールし（管理者権限不要）、スタートメニューと「アプリと機能」のアンインストール項目を作り、**サインイン時に Token Pet を起動**するオプションがあります。
 - **`claude-pet-win.zip`** — ポータブル／更新用。任意の場所に展開して `ClaudePet\ClaudePet.exe` を実行します。
 
 **SmartScreen の警告について。** Windows 版はまだコード署名がないため、インストーラーや `ClaudePet.exe` を初めて実行すると *「Windows によって PC が保護されました」* が表示されます。**詳細情報** → **実行** の順にクリックしてください。SmartScreen のアプリ確認がオフの PC では代わりに「ファイルを開く - セキュリティの警告」（発行元不明）が出るので、**実行** を押します。インストーラーならどちらも一度だけですが、ポータブル zip では「このファイルを開く前に常に警告する」を外す（または展開前に zip のプロパティでブロックを解除する）まで起動のたびに出ることがあり、発行元が不明であるという通知であって、有害なものを検出したという意味ではありません。ブラウザ（Edge）が同じ理由でダウンロードを止めた場合は **保持** → **そのまま保持** を選びます。コード署名が入るリリースからこの警告は出なくなります。
 
-先に Windows で Claude Code または Codex にサインイン（`claude` / `codex login`）してから Claude Pet を起動してください。使用量の数値は `%USERPROFILE%\.claude`（または `%USERPROFILE%\.codex`）の資格情報ファイルで取得し、その下のログは急増アラートにだけ読みます。自分のペットは `%USERPROFILE%\.claude_pet\pets\<名前>\` に入れます（右クリック → ペット → ペットを追加… でそのフォルダが開きます）。トレイアイコンは Windows の既定でタスクバーのオーバーフロー（`^`）内にあるので、引き出しておくと常に見えます。右クリック → 完全に削除… は設定とログを消し、プログラム本体は「アプリと機能」のアンインストールで削除します。
+先に Windows で Claude Code または Codex にサインイン（`claude` / `codex login`）してから Token Pet を起動してください。使用量の数値は `%USERPROFILE%\.claude`（または `%USERPROFILE%\.codex`）の資格情報ファイルで取得し、その下のログは急増アラートにだけ読みます。自分のペットは `%USERPROFILE%\.claude_pet\pets\<名前>\` に入れます（右クリック → ペット → ペットを追加… でそのフォルダが開きます）。トレイアイコンは Windows の既定でタスクバーのオーバーフロー（`^`）内にあるので、引き出しておくと常に見えます。右クリック → 完全に削除… は設定とログを消し、プログラム本体は「アプリと機能」のアンインストールで削除します。
 
 ## ソースからビルド（開発者向け）
 

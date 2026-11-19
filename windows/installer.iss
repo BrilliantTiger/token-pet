@@ -1,12 +1,12 @@
-; Claude Pet — Windows 설치 파일 (Inno Setup 6). build_win.py 가 /DMyAppVersion=… /O<출력 폴더> 로 컴파일한다.
+; Token Pet — Windows 설치 파일 (Inno Setup 6). build_win.py 가 /DMyAppVersion=… /O<출력 폴더> 로 컴파일한다.
 ; 설치는 사용자별(%LOCALAPPDATA%\Programs\ClaudePet, 관리자 권한 불필요). 서명은 build_win.py 의 CLAUDE_PET_WIN_SIGN 이 맡는다
 ; (기본 off → 첫 실행 때 SmartScreen "추가 정보 → 실행"). 앱 안의 업데이트는 이 설치 파일을 /SILENT 로 다시 돌린다 (windows/README.md).
 #ifndef MyAppVersion
   #define MyAppVersion "0.0"
 #endif
-#define MyAppName "Claude Pet"
+#define MyAppName "Token Pet"
 #define MyAppPublisher "Yeongyu Yang"
-#define MyAppURL "https://claude-pet.yeongyu.me/"
+#define MyAppURL "https://token-pet.yeongyu.me/"
 #define MyAppExeName "ClaudePet.exe"
 
 [Setup]
@@ -46,6 +46,13 @@ korean.StartupTask=Windows 로그인 시 {#MyAppName} 자동 실행
 [Tasks]
 Name: "startup"; Description: "{cm:StartupTask}"; Flags: checkedonce
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
+
+[InstallDelete]
+; 이름이 Claude Pet 에서 Token Pet 으로 바뀌었다(TOK-59). 바로 가기 파일 이름은 앱 이름에서 나오므로, 옛 설치본 위에
+; 올리면 시작 메뉴에 "Claude Pet" 과 "Token Pet" 이 나란히 남는다 — 옛 이름의 바로 가기만 지운다. 바뀐 것은 보이는 이름뿐이다:
+; AppId·설치 폴더·ClaudePet.exe·Run 값 이름은 그대로라 1.2.0 의 앱 안 업데이트가 같은 설치본을 그대로 올린다.
+Type: files; Name: "{autoprograms}\Claude Pet.lnk"
+Type: files; Name: "{autodesktop}\Claude Pet.lnk"
 
 [Files]
 ; build_win.py 가 만든 onedir 폴더 통째로 (ClaudePet.exe + _internal\)

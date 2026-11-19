@@ -263,15 +263,19 @@ sign() {
   xattr -cr "$app" 2>/dev/null || true
 
   # 키체인/TCC 프롬프트가 'Python' 대신 앱 이름으로 뜨게 — 실제 호출 주체가
-  # 번들 Python.framework라, 그 표시 이름(CFBundleName)을 ClaudePet으로 바꾼다.
+  # 번들 Python.framework라, 그 표시 이름(CFBundleName)을 Token Pet 으로 바꾼다.
   # (서명 전 unsigned 앱에서만 수정 가능 → sign()의 코드서명 직전에 실행.
   #  plist가 바뀌므로 아래에서 프레임워크를 다시 서명해야 sealed resource가 맞음)
+  # 번들 자신의 CFBundleName 도 여기서 Token Pet 으로 적는다. setup.py 에서는 못 바꾼다 —
+  # py2app 이 그 값으로 .app 과 실행 파일 이름을 짓는데, 1.2.0 업데이터가 zip 안에서 찾는
+  # 것이 ClaudePet.app 이다(TOK-59). 파일 이름·번들 ID 는 그대로, 보이는 이름만 바뀐다.
   local ip
   while IFS= read -r ip; do
-    /usr/libexec/PlistBuddy -c 'Set :CFBundleName ClaudePet' "$ip" 2>/dev/null \
-      || /usr/libexec/PlistBuddy -c 'Add :CFBundleName string ClaudePet' "$ip" 2>/dev/null
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName 'Token Pet'" "$ip" 2>/dev/null \
+      || /usr/libexec/PlistBuddy -c "Add :CFBundleName string 'Token Pet'" "$ip" 2>/dev/null
   done < <(find "$app/Contents/Frameworks/Python.framework" \
-             -path "*/Resources/Info.plist" -type f 2>/dev/null)
+             -path "*/Resources/Info.plist" -type f 2>/dev/null; \
+           print -r -- "$app/Contents/Info.plist")
 
   # while 은 파이프라인의 서브셸에서 돈다 — 거기서 return 해도 이 함수는 안
   # 멈춘다. 그래서 서브셸을 exit 1 로 끝내고, 파이프라인의 상태를 여기서 본다.
@@ -432,7 +436,7 @@ one_dmg() {
     fi
   fi
   if [ $rc -eq 0 ]; then
-    if ! hdiutil create -volname "ClaudePet" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null; then
+    if ! hdiutil create -volname "Token Pet" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null; then
       echo "❌ dmg 생성 실패 (hdiutil create) → $dmg"; rc=1
     fi
   fi
@@ -602,7 +606,7 @@ publish() {
     gh release edit "$TAG" --notes-file "$NOTES_TMP"   # 노트도 고정본으로 갱신(현재 버전만)
     echo "🚀 기존 릴리즈에 업로드: $TAG ← ${files[*]}"
   else
-    gh release create "$TAG" "${files[@]}" --title "ClaudePet $TAG" --notes-file "$NOTES_TMP"
+    gh release create "$TAG" "${files[@]}" --title "Token Pet $TAG" --notes-file "$NOTES_TMP"
     echo "🚀 새 릴리즈 생성: $TAG ← ${files[*]}"
   fi
   rm -f "$NOTES_TMP"

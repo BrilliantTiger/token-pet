@@ -55,13 +55,13 @@ RELEASE_VERIFIER = REPO / "verify_release_artifact.py"
 APP_SOURCE = REPO / "claude_pet.py"
 FUNCTION = "verify_upload_artifact"
 REVIEWED_RELEASE_SHA256 = (
-    "034b639df6b97cf70414b2d29f00bf29eb353b62c19bf94aec4add77bca6d2dd"
+    "28b033b3a962e320b24a0186345173f9f8437d14d95a3ccf7ae0b2b5def05860"
 )
 REVIEWED_VERIFIER_SHA256 = (
     "b501c667b6d5e6d8e8cb7d572a8d2b77b40388f3ed6e20997d35eeb5fbbc4965"
 )
 REVIEWED_APP_SOURCE_SHA256 = (
-    "f50120c948bcddd9d1f9ef1b015f79e900a504a9811a215b5d56a7eacaf9a5b3"
+    "0afdf6460ea09b9498da0b5b30714be652a649036e93f214d21ecd1be25e7ede"
 )
 
 

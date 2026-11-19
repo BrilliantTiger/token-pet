@@ -1118,9 +1118,9 @@ class InAppInnoUninstallOrderTests(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 FIXED_STRINGS = {
-    "FileDescription": "Claude Pet",
+    "FileDescription": "Token Pet",
     "CompanyName": "Yeongyu Yang",
-    "ProductName": "Claude Pet",
+    "ProductName": "Token Pet",
     "OriginalFilename": "ClaudePet.exe",
 }
 STUB_VERSION = "9.87"          # deliberately unlike any real APP_VERSION

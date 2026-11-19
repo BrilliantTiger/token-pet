@@ -1,4 +1,4 @@
-# 🐱 Claude Pet
+# 🐱 Token Pet
 
 [English](README.md) · **한국어** · [日本語](README.ja.md) · [Español](README.es.md)
 
@@ -7,7 +7,7 @@ macOS 네이티브(AppKit) 렌더링 — 창 프레임/배경/잔상 없음.
 
 > 🧪 v0.24 — macOS 앱은 공증됐고, Windows 판은 설치 파일과 zip으로 제공돼요(서명 없음 — 아래 Windows 절 참고).
 
-![Claude Pet](preview.png)
+![Token Pet](preview.png)
 
 ## 지원 사양
 
@@ -27,7 +27,7 @@ macOS 네이티브(AppKit) 렌더링 — 창 프레임/배경/잔상 없음.
 
 **Python 설치 불필요** — 앱에 내장돼 있고 **Apple 공증**되어 Gatekeeper 경고 없이 바로 열립니다.
 
-1. [**Releases**](https://github.com/BrilliantTiger/claude-pet/releases/latest)에서 `ClaudePet.zip` 다운로드 — **Intel Mac**은 `ClaudePet-universal.zip`을 받으세요 (v0.10부터 제공)
+1. [**Releases**](https://github.com/BrilliantTiger/token-pet/releases/latest)에서 `ClaudePet.zip` 다운로드 — **Intel Mac**은 `ClaudePet-universal.zip`을 받으세요 (v0.10부터 제공)
 2. 압축 해제 → `ClaudePet.app`을 **응용 프로그램** 폴더로 이동 → 더블클릭
 3. macOS 12+ (Apple Silicon; Intel은 v0.10부터 universal zip 사용)
 
@@ -65,12 +65,12 @@ macOS 네이티브(AppKit) 렌더링 — 창 프레임/배경/잔상 없음.
 
 Windows 10/11(64비트)에서도 같은 필·산책·설정·펫을 씁니다. 릴리즈마다 두 파일이 올라갑니다.
 
-- **`claude-pet-win-setup.exe`** — 설치 파일. 현재 사용자 계정에 설치하고(관리자 권한 불필요) 시작 메뉴와 "앱 및 기능" 제거 항목을 만들며, **로그인 시 Claude Pet 자동 실행** 옵션을 제공합니다.
+- **`claude-pet-win-setup.exe`** — 설치 파일. 현재 사용자 계정에 설치하고(관리자 권한 불필요) 시작 메뉴와 "앱 및 기능" 제거 항목을 만들며, **로그인 시 Token Pet 자동 실행** 옵션을 제공합니다.
 - **`claude-pet-win.zip`** — 무설치·갱신용. 아무 곳에나 풀고 `ClaudePet\ClaudePet.exe`를 실행하면 됩니다.
 
 **SmartScreen 경고에 대해.** Windows 판은 아직 코드 서명이 없어서, 설치 파일이나 `ClaudePet.exe`를 처음 실행하면 *"Windows의 PC 보호"* 창이 뜹니다. **추가 정보**를 누른 뒤 **실행**을 누르세요. SmartScreen의 앱 검사가 꺼진 PC에서는 대신 *"파일 열기 - 보안 경고"*(알 수 없는 게시자) 창이 뜨는데, **실행**을 누르면 됩니다. 설치 파일은 어느 쪽이든 한 번만 묻고, 무설치 zip은 *이 파일을 열기 전에 항상 확인*을 끄기(또는 zip 속성에서 차단 해제 후 풀기) 전까지 실행할 때마다 물을 수 있으며, 게시자를 알 수 없다는 안내이지 유해한 것을 발견했다는 뜻이 아닙니다. 브라우저(Edge)가 다운로드를 같은 이유로 막으면 **유지** → **그래도 유지**를 고르세요. 코드 서명이 들어가는 릴리즈부터는 이 경고가 사라집니다.
 
-먼저 Windows에서 Claude Code 또는 Codex에 로그인(`claude` / `codex login`)한 뒤 Claude Pet을 실행하세요. 사용량 숫자는 `%USERPROFILE%\.claude`(또는 `%USERPROFILE%\.codex`)의 자격 파일로 받고, 그 아래 로그는 급증 알림에만 읽습니다. 내 펫은 `%USERPROFILE%\.claude_pet\pets\<이름>\`에 넣습니다(우클릭 → 펫 → 펫 추가…가 그 폴더를 엽니다). 트레이 아이콘은 Windows 기본값 때문에 작업표시줄 오버플로(`^`) 안에 있으니 꺼내 두면 항상 보입니다. 우클릭 → 완전 삭제…는 설정·로그를 지우고, 프로그램 자체는 "앱 및 기능"의 제거 항목으로 지웁니다.
+먼저 Windows에서 Claude Code 또는 Codex에 로그인(`claude` / `codex login`)한 뒤 Token Pet을 실행하세요. 사용량 숫자는 `%USERPROFILE%\.claude`(또는 `%USERPROFILE%\.codex`)의 자격 파일로 받고, 그 아래 로그는 급증 알림에만 읽습니다. 내 펫은 `%USERPROFILE%\.claude_pet\pets\<이름>\`에 넣습니다(우클릭 → 펫 → 펫 추가…가 그 폴더를 엽니다). 트레이 아이콘은 Windows 기본값 때문에 작업표시줄 오버플로(`^`) 안에 있으니 꺼내 두면 항상 보입니다. 우클릭 → 완전 삭제…는 설정·로그를 지우고, 프로그램 자체는 "앱 및 기능"의 제거 항목으로 지웁니다.
 
 ## 직접 빌드 (개발자용)
 

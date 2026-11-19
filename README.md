@@ -1,4 +1,4 @@
-# 🐱 Claude Pet
+# 🐱 Token Pet
 
 **English** · [한국어](README.ko.md) · [日本語](README.ja.md) · [Español](README.es.md)
 
@@ -7,7 +7,7 @@ Rendered natively on macOS (AppKit) — no window frame, no background, no ghost
 
 > 🧪 v0.24 — the macOS app is notarized; the Windows build ships as an installer and a zip (unsigned — see the Windows section).
 
-![Claude Pet](preview.png)
+![Token Pet](preview.png)
 
 ## Supported platforms
 
@@ -27,7 +27,7 @@ Rendered natively on macOS (AppKit) — no window frame, no background, no ghost
 
 **No Python needed** — it's bundled inside the app, which is **notarized by Apple**, so it opens with no Gatekeeper warning.
 
-1. Download `ClaudePet.zip` from [**Releases**](https://github.com/BrilliantTiger/claude-pet/releases/latest) — on an **Intel Mac**, grab `ClaudePet-universal.zip` instead (available from v0.10)
+1. Download `ClaudePet.zip` from [**Releases**](https://github.com/BrilliantTiger/token-pet/releases/latest) — on an **Intel Mac**, grab `ClaudePet-universal.zip` instead (available from v0.10)
 2. Unzip → move `ClaudePet.app` to your **Applications** folder → double-click
 3. macOS 12+ (Apple Silicon; Intel from v0.10 via the universal zip)
 
@@ -65,12 +65,12 @@ Every hour after launch (never at launch) the app checks the latest GitHub relea
 
 Windows 10/11 (64-bit) gets the same pill, roaming, settings and pets. Two files are published with every release:
 
-- **`claude-pet-win-setup.exe`** — installer. Installs for the current user (no admin rights), adds a Start Menu entry and an "Apps & features" uninstall entry, and offers **Start Claude Pet when I sign in**.
+- **`claude-pet-win-setup.exe`** — installer. Installs for the current user (no admin rights), adds a Start Menu entry and an "Apps & features" uninstall entry, and offers **Start Token Pet when I sign in**.
 - **`claude-pet-win.zip`** — portable/update build. Unzip anywhere and run `ClaudePet\ClaudePet.exe`.
 
 **About the SmartScreen warning.** The Windows build is not code-signed yet, so the first time you run the installer or `ClaudePet.exe`, Windows shows *"Windows protected your PC"*. Click **More info**, then **Run anyway**. On PCs where SmartScreen's app checking is off you get the classic *"Open File - Security Warning"* (Unknown publisher) instead — click **Run**. With the installer either prompt appears once; with the portable zip the classic dialog may return on every launch until you untick *Always ask before opening this file* (or Unblock the zip in its Properties before extracting); it is Windows' notice that the publisher is unknown, not a detection of anything harmful. If your browser or Edge flags the download the same way, choose **Keep** → **Keep anyway**. Code signing will remove the warning in a later release.
 
-Sign in to Claude Code or Codex on Windows first (`claude` / `codex login`), then launch Claude Pet: the usage numbers come from the credential file under `%USERPROFILE%\.claude` (or `%USERPROFILE%\.codex`), and the logs there are read only for spike alerts. Your own pets go in `%USERPROFILE%\.claude_pet\pets\<name>\` (right-click → Pets → Add a pet… opens it). The tray icon sits in the taskbar overflow (`^`) by default; drag it out to keep it visible. Right-click → Uninstall completely… removes the settings and logs; the installer's uninstaller (Apps & features) removes the program.
+Sign in to Claude Code or Codex on Windows first (`claude` / `codex login`), then launch Token Pet: the usage numbers come from the credential file under `%USERPROFILE%\.claude` (or `%USERPROFILE%\.codex`), and the logs there are read only for spike alerts. Your own pets go in `%USERPROFILE%\.claude_pet\pets\<name>\` (right-click → Pets → Add a pet… opens it). The tray icon sits in the taskbar overflow (`^`) by default; drag it out to keep it visible. Right-click → Uninstall completely… removes the settings and logs; the installer's uninstaller (Apps & features) removes the program.
 
 ## Build from source (developers)
 
