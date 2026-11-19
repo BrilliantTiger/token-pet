@@ -1121,6 +1121,8 @@ class PetWindow(QWidget):
         # Gemini 는 agy(프로세스)에게 묻는다 — 자기 스레드에서 받아 state 에 직접 넣는다. agy 가 느려도
         # Claude·Codex 값을 붙들지 않게, 그리고 Gemini 를 숨기면 아무것도 띄우지 않게(그 함수가 맡는다).
         cp.start_gemini_refresh(self.state)
+        # 앱이 깐 CLI 의 하루 한 번 갱신(macOS 판 refresh_ 와 같다) — 확인할 차례가 아니면 아무것도 하지 않는다.
+        cp.start_app_cli_updates()
 
         def work():
             values = {}
@@ -1817,9 +1819,13 @@ class PetWindow(QWidget):
         """설치·로그인이 끝났다(워커 스레드) — GUI 스레드의 tick 이 보고 바로 다시 받는다."""
         self.state["ai_refresh"] = True
 
+    def ai_idle(self, provider):
+        """그 제공자의 설치·로그인이 돌고 있지 않은가 (macOS 판 ai_idle). 도는 중에는 취소 깃발을 지우지 않는다."""
+        return self.ai_jobs[provider].get("phase") not in ("download", "verify", "login")
+
     def ai_connect_click(self, provider):
         """설정 "AI 연결" 줄의 버튼 — 돌고 있으면 [취소], 아니면 [설치]/[로그인]/[다시 시도]."""
-        if self.ai_jobs[provider].get("phase") in ("download", "verify", "login"):
+        if not self.ai_idle(provider):
             self.ai_cancel[provider].set()
             return
         self.ai_cancel[provider].clear()
@@ -1828,35 +1834,40 @@ class PetWindow(QWidget):
 
     # 우클릭의 다섯 항목 — 같은 흐름을 시작하고, 진행 상황과 [취소]가 보이게 설정 창을 연다.
     def _install_claude(self):
-        self.ai_cancel["claude"].clear()
-        cp.start_ai_connect("claude", self.ai_jobs["claude"], cancel=self.ai_cancel["claude"].is_set,
-                            done=self._ai_done)
+        if self.ai_idle("claude"):
+            self.ai_cancel["claude"].clear()
+            cp.start_ai_connect("claude", self.ai_jobs["claude"], cancel=self.ai_cancel["claude"].is_set,
+                                done=self._ai_done)
         self._open_settings()
 
     def _login_claude(self):
-        self.ai_cancel["claude"].clear()
-        cp.start_ai_connect("claude", self.ai_jobs["claude"], cancel=self.ai_cancel["claude"].is_set,
-                            done=self._ai_done)
+        if self.ai_idle("claude"):
+            self.ai_cancel["claude"].clear()
+            cp.start_ai_connect("claude", self.ai_jobs["claude"], cancel=self.ai_cancel["claude"].is_set,
+                                done=self._ai_done)
         self._open_settings()
 
     def _install_codex(self):
-        self.ai_cancel["codex"].clear()
-        cp.start_ai_connect("codex", self.ai_jobs["codex"], cancel=self.ai_cancel["codex"].is_set,
-                            done=self._ai_done)
+        if self.ai_idle("codex"):
+            self.ai_cancel["codex"].clear()
+            cp.start_ai_connect("codex", self.ai_jobs["codex"], cancel=self.ai_cancel["codex"].is_set,
+                                done=self._ai_done)
         self._open_settings()
 
     def _login_codex(self):
-        self.ai_cancel["codex"].clear()
-        cp.start_ai_connect("codex", self.ai_jobs["codex"], cancel=self.ai_cancel["codex"].is_set,
-                            done=self._ai_done)
+        if self.ai_idle("codex"):
+            self.ai_cancel["codex"].clear()
+            cp.start_ai_connect("codex", self.ai_jobs["codex"], cancel=self.ai_cancel["codex"].is_set,
+                                done=self._ai_done)
         self._open_settings()
 
     def _login_gemini(self):
         """코어가 새 콘솔 창에서 agy 를 연다(start_gemini_login). 맨 위에 할 일 세 줄이 찍히고, 설정 창의
         Gemini 줄이 같은 안내를 보여 준다. 끝나면 자격 증명의 지문 변화로 안다."""
-        self.ai_cancel["gemini"].clear()
-        cp.start_ai_connect("gemini", self.ai_jobs["gemini"], cancel=self.ai_cancel["gemini"].is_set,
-                            done=self._ai_done)
+        if self.ai_idle("gemini"):
+            self.ai_cancel["gemini"].clear()
+            cp.start_ai_connect("gemini", self.ai_jobs["gemini"], cancel=self.ai_cancel["gemini"].is_set,
+                                done=self._ai_done)
         self._open_settings()
 
     # ── 완전 삭제 (macOS 판 uninstallApp_ / do_uninstall 과 같은 순서: 거절할 수 있는 단계가 먼저) ──
@@ -2430,7 +2441,7 @@ class SettingsDialog(QDialog):
         head.setStyleSheet("font-weight: bold;")
         ai_rows = {}
         for n, p in enumerate(cp.CLI_PROVIDERS):
-            top = self.PHT - 78 - n * 124
+            top = self.PHT - 78 - n * cp.AI_ROW_PITCH
             name = label(cp.AI_PROVIDER_NAMES[p], ax, top, 230)
             name.setStyleSheet("font-weight: bold;")
             status_l = label("", ax, top - 24, 240)
@@ -2438,7 +2449,7 @@ class SettingsDialog(QDialog):
             btn.setGeometry(self.PWID - 130, self.PHT - (top - 16) - 30, 110, 30)
             btn.clicked.connect(lambda _=False, prov=p: win.ai_connect_click(prov))
             hint_l = label("", ax, top - 76, 360, 46)
-            hint_l.setWordWrap(True)
+            hint_l.setWordWrap(False)              # 줄은 ai_rows_refresh 가 낱말 단위로 직접 끊는다
             hint_l.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             hint_l.setStyleSheet("color: palette(placeholder-text);")
             ai_rows[p] = {"status": status_l, "button": btn, "hint": hint_l}
@@ -2466,13 +2477,30 @@ class SettingsDialog(QDialog):
         a = scr.availableGeometry()
         self.move(a.center().x() - self.PWID // 2, a.center().y() - self.PHT // 2)
 
+    @staticmethod
+    def _wrap_words(text, lbl):
+        """text 를 lbl 의 폭에 맞춰 **낱말 단위로** 줄바꿈한다. Qt 의 자동 줄바꿈은 한글을 글자 단위로 끊어
+        "받습니/다" 처럼 갈린다 (macOS 판은 줄바꿈 전략으로 같은 결과를 낸다)."""
+        fm, width = lbl.fontMetrics(), lbl.width()
+        lines, cur = [], ""
+        for word in str(text).split(" "):
+            trial = (cur + " " + word) if cur else word
+            if cur and fm.horizontalAdvance(trial) > width:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = trial
+        if cur:
+            lines.append(cur)
+        return "\n".join(lines)
+
     def ai_rows_refresh(self):
         """"AI 연결" 세 줄을 지금 상태로 고친다 (macOS 판 ai_rows_refresh)."""
         for p, w in self.ai_rows.items():
             row = cp.ai_connect_row(p, bool(cp.find_cli(p)), cp.cli_logged_in(p), self.win.ai_jobs[p])
             status, button, hint = cp.ai_connect_text(row)
             w["status"].setText(status)
-            w["hint"].setText(hint)
+            w["hint"].setText(self._wrap_words(hint, w["hint"]))
             w["button"].setVisible(button is not None)
             if button is not None:
                 w["button"].setText(button)

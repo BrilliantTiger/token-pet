@@ -1157,7 +1157,7 @@ TR = {
     "codex_token_expired": "Codex token expired — run codex once to restore usage",
     "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5h",
     "gemini_5h": "5h", "menu_gemini_login": "🔑 Sign in to Gemini (agy)…",
-    "s_sec_gemini": "Gemini (agy)", "s_gauge_gemini": "Gemini",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
     "s_gauge_limits": "5h · Weekly", "s_gauge_group": "Claude·GPT",
     # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
     "ai_sec": "AI connections",
@@ -1179,6 +1179,8 @@ TR = {
     "term_gemini_step1": "① Pick your account and sign in in the browser.",
     "term_gemini_step2": "② Copy the code the browser shows.",
     "term_gemini_step3": "③ Paste it into this window and press Enter.",
+    "term_gemini_done": "✅ Done — you can close this window.",
+    "term_gemini_timeout": "⏱ Time ran out — press [Sign in] in Settings again.",
     "ai_fail_unsupported": "This computer is not supported",
     "ai_fail_manifest": "The download server gave an unexpected answer",
     "ai_fail_network": "Could not reach the download server",
@@ -1269,7 +1271,7 @@ TR = {
     "codex_token_expired": "Codex 토큰 만료 — codex 한번 실행하면 사용량 복구",
     "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5시간",
     "gemini_5h": "5시간", "menu_gemini_login": "🔑 Gemini 로그인(agy)…",
-    "s_sec_gemini": "Gemini (agy)", "s_gauge_gemini": "Gemini",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
     "s_gauge_limits": "5시간·주간", "s_gauge_group": "Claude·GPT",
     # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
     "ai_sec": "AI 연결",
@@ -1291,6 +1293,8 @@ TR = {
     "term_gemini_step1": "① 브라우저에서 계정을 고르고 로그인하세요.",
     "term_gemini_step2": "② 브라우저에 나온 코드를 복사하세요.",
     "term_gemini_step3": "③ 이 창에 붙여 넣고 Enter 를 누르세요.",
+    "term_gemini_done": "✅ 완료 — 창을 닫아도 됩니다.",
+    "term_gemini_timeout": "⏱ 시간이 지났어요 — 설정에서 [로그인]을 다시 누르세요.",
     "ai_fail_unsupported": "이 컴퓨터는 지원하지 않습니다",
     "ai_fail_manifest": "받는 서버의 답이 예상과 다릅니다",
     "ai_fail_network": "받는 서버에 연결하지 못했습니다",
@@ -1383,7 +1387,7 @@ TR = {
     "codex_token_expired": "Codex トークン期限切れ — codex を一度実行すると使用量が復帰",
     "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5時間",
     "gemini_5h": "5時間", "menu_gemini_login": "🔑 Gemini にログイン(agy)…",
-    "s_sec_gemini": "Gemini (agy)", "s_gauge_gemini": "Gemini",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
     "s_gauge_limits": "5時間・週間", "s_gauge_group": "Claude·GPT",
     # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
     "ai_sec": "AI 接続",
@@ -1405,6 +1409,8 @@ TR = {
     "term_gemini_step1": "① ブラウザでアカウントを選んでログインしてください。",
     "term_gemini_step2": "② ブラウザに表示されたコードをコピーしてください。",
     "term_gemini_step3": "③ このウィンドウに貼り付けて Enter を押してください。",
+    "term_gemini_done": "✅ 完了 — このウィンドウは閉じて構いません。",
+    "term_gemini_timeout": "⏱ 時間切れです — 設定で［ログイン］をもう一度押してください。",
     "ai_fail_unsupported": "このコンピューターには対応していません",
     "ai_fail_manifest": "ダウンロードサーバーの応答が想定と違います",
     "ai_fail_network": "ダウンロードサーバーに接続できません",
@@ -1499,7 +1505,7 @@ TR = {
     "codex_token_expired": "Token de Codex expirado — ejecuta codex una vez para restaurar el uso",
     "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5h",
     "gemini_5h": "5h", "menu_gemini_login": "🔑 Iniciar sesión en Gemini (agy)…",
-    "s_sec_gemini": "Gemini (agy)", "s_gauge_gemini": "Gemini",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
     "s_gauge_limits": "5h · Semanal", "s_gauge_group": "Claude·GPT",
     # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
     "ai_sec": "Conexiones de IA",
@@ -1521,6 +1527,8 @@ TR = {
     "term_gemini_step1": "① Elige tu cuenta e inicia sesión en el navegador.",
     "term_gemini_step2": "② Copia el código que muestra el navegador.",
     "term_gemini_step3": "③ Pégalo en esta ventana y pulsa Enter.",
+    "term_gemini_done": "✅ Listo: ya puedes cerrar esta ventana.",
+    "term_gemini_timeout": "⏱ Se agotó el tiempo: pulsa [Iniciar sesión] de nuevo en Ajustes.",
     "ai_fail_unsupported": "Este equipo no es compatible",
     "ai_fail_manifest": "El servidor de descarga respondió algo inesperado",
     "ai_fail_network": "No se pudo conectar con el servidor de descarga",
@@ -3999,7 +4007,52 @@ def _win_kill_tree(pid):
                      "/F", "/T", "/PID", str(pid)], timeout=30)
 
 
-def _run_refresh_job(argv, label, stem, timeout):
+def _job_wait(alive, timeout, cancel=None, fine=False):
+    """떼어 낸 job 이 끝나기를 기다린다 → "exit"(스스로 끝남) | "timeout" | "cancelled".
+
+    alive() 는 프로세스를 띄워 묻는 비싼 확인이다(launchctl list / tasklist). 복구 스폰은 예전대로 2초마다
+    묻는다. fine 이면(사용자가 지켜보는 로그인) cancel() 을 0.1초마다, alive() 를 1초마다 본다 — [취소]가
+    2초 잠이 끝나기를 기다리지 않게. 기한에 닿으면 마지막으로 한 번 더 물어, 막 끝난 job 을 시간 초과로
+    적지 않는다."""
+    deadline = time.time() + timeout
+    if not fine:
+        while time.time() < deadline:
+            time.sleep(2.0)
+            if not alive():
+                return "exit"
+        return "timeout"
+    next_alive = time.time() + 1.0
+    while True:
+        if cancel is not None and cancel():
+            return "cancelled"
+        now = time.time()
+        if now >= deadline:
+            return "timeout" if alive() else "exit"
+        if now >= next_alive:
+            next_alive = now + 1.0
+            if not alive():
+                return "exit"
+        time.sleep(0.1)
+
+
+def _win_app_claude_cmdline(argv, out):
+    """Windows: 앱이 깐 claude 를 띄울 명령줄 — 그 CLI 의 자체 업데이터를 끄는 두 변수를 먼저 `set` 한다.
+    앱이 깐 claude 가 아니면 None(예전 명령줄을 그대로 쓴다).
+
+    WMI 가 만든 프로세스는 우리 환경을 물려받지 않는다. 그래서 cmd.exe 한 겹 안에서 변수를 정하고 같은
+    줄에서 CLI 를 띄운다: `cmd.exe /d /s /c "set "A=1" && set "B=1" && <CLI …> > out 2>&1"`. `/s` 는 맨 앞과
+    맨 뒤 따옴표만 벗기고 나머지를 그대로 읽는다. **진짜 Windows 에서 돌려 보지 않았다.**"""
+    argv = [str(a) for a in argv]
+    inner = argv[2:] if len(argv) > 2 and argv[1].lower() == "/c" else argv
+    extra = cli_env("claude", inner[0] if inner else "", base_env={})
+    if not extra:
+        return None
+    sets = " && ".join('set "%s=%s"' % (k, v) for k, v in sorted(extra.items()))
+    body = "%s && %s > %s 2>&1" % (sets, subprocess.list2cmdline(inner), subprocess.list2cmdline([out]))
+    return '%s /d /s /c "%s"' % (subprocess.list2cmdline([_windows_cmd_exe()]), body)
+
+
+def _run_refresh_job(argv, label, stem, timeout, cancel=None, outcome=None):
     """argv 를 떼어 낸 job 으로 **한 번** 돌리고 끝날 때까지(최대 timeout) 기다렸다가
     출력을 돌려준다. argv 는 *_spawn_argv 가 준, job 이 실행할 명령이다.
 
@@ -4028,6 +4081,9 @@ def _run_refresh_job(argv, label, stem, timeout):
     설치판) — `cmd.exe /c` 한 겹이 그것까지 받아 내도록 넣었지만 그 기계는 네이티브 claude.exe
     였다.
     """
+    # cancel/outcome 은 사용자가 지켜보는 로그인만 넘긴다: 취소를 바로 보고, 어떻게 끝났는지
+    # (outcome["ended"] = "exit" | "timeout" | "cancelled")를 돌려준다. 복구 스폰은 넘기지 않는다.
+    fine = cancel is not None or outcome is not None
     if sys.platform != "darwin":
         out, err = _recovery_io_paths(stem)
         cwd = recovery_cli_cwd()
@@ -4042,16 +4098,15 @@ def _run_refresh_job(argv, label, stem, timeout):
                 pass
         # 출력은 cmd 의 리디렉션으로 받는다. list2cmdline 이 공백 있는 경로만 인용하고
         # `>` 와 `2>&1` 은 그대로 두므로 cmd 가 연산자로 읽는다.
-        cmdline = subprocess.list2cmdline(list(argv) + [">", out, "2>&1"])
+        cmdline = (_win_app_claude_cmdline(argv, out)
+                   or subprocess.list2cmdline(list(argv) + [">", out, "2>&1"]))
         pid = _win_wmi_create(cmdline, cwd=cwd)
         if pid is None:
             return None
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            time.sleep(2.0)
-            if not _win_pid_alive(pid):
-                break
-        else:
+        ended = _job_wait(lambda: _win_pid_alive(pid), timeout, cancel, fine=fine)
+        if outcome is not None:
+            outcome["ended"] = ended
+        if ended != "exit":
             _win_kill_tree(pid)
         return _drain_job_output(stem)
     out, err = _recovery_io_paths(stem)
@@ -4093,12 +4148,10 @@ def _run_refresh_job(argv, label, stem, timeout):
         _launchctl_bootout(label)
         _drop_plist()
         return None
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(2.0)
-        if not _launchctl_job_alive(label):
-            break
-    # 제한을 넘겼든 제때 끝났든 여기서 내린다. bootout 은 아직 돌고 있는 job 을 끝낸다 —
+    ended = _job_wait(lambda: _launchctl_job_alive(label), timeout, cancel, fine=fine)
+    if outcome is not None:
+        outcome["ended"] = ended
+    # 제한을 넘겼든 제때 끝났든(취소됐든) 여기서 내린다. bootout 은 아직 돌고 있는 job 을 끝낸다 —
     # 붙어 있는 자식이 다음 시도를 영원히 막는 상태를 만들지 않는다.
     _launchctl_bootout(label)
     _drop_plist()
@@ -5122,31 +5175,45 @@ def compute_gemini_onboard_state(runtime=None):
 
 
 def start_gemini_login():
-    """Gemini 로그인 — **보이는 창**에서 `agy` 를 연다(사용자가 직접 로그인한다). 대표님 결정 2026-11-19.
+    """Gemini 로그인 — **보이는 창**에서 agy 를 연다(사용자가 직접 로그인한다). 대표님 결정 2026-11-19.
 
     agy 는 브라우저에서 로그인한 뒤 화면에 나온 코드를 **진짜 터미널에 붙여 넣어야** 끝난다(파이프로 띄운
     agy 는 그 코드를 받지 못한다 — Windows 실측). 그래서 창을 띄워 두고 맨 위에 할 일 세 줄을 먼저 찍는다
-    (앱 언어로): ① 브라우저에서 로그인 ② 코드를 복사 ③ 이 창에 붙여 넣고 Enter. 창은 닫지 않는다.
+    (앱 언어로): ① 브라우저에서 로그인 ② 코드를 복사 ③ 이 창에 붙여 넣고 Enter.
 
-    `agy -p /usage` 가 아니다(그건 한 번 묻고 끝난다). 가짜 open/rundll32(_agy_env)도 쓰지 않는다 —
-    로그인에서는 브라우저가 열려야 한다. macOS 는 Terminal, Windows 는 새 콘솔 창(PowerShell)이다.
-    로그인이 끝나면 agy 가 키체인(자격 증명)을 다시 쓰고, 기다리는 쪽(_run_gemini_login)과 다음 조회가
-    그 지문 변화를 본다."""
+    창에서 도는 것은 `agy -p /usage --output-format json` 이다(v8-G1). 인자 없는 `agy`(TUI)는 대체 화면으로
+    바뀌어 그 세 줄을 가린다. 이 명령은 화면을 바꾸지 않고, 로그인이 없으면 브라우저를 열고 코드를 받는다.
+    **stdout(JSON 본문)만 버린다** — stderr(로그인 안내·붙여 넣기 프롬프트)는 창에 보여야 한다. 끝나면 agy
+    의 종료 코드로 한 줄을 찍는다: 0 이면 "완료", 아니면 "시간이 지났어요". 창은 닫지 않는다.
+
+    SSH_* 는 지우고(있으면 agy 가 토큰을 파일에 둔다) AGY_CLI_DISABLE_AUTO_UPDATE=1 을 준다. 가짜
+    open/rundll32(_agy_env)는 쓰지 않는다 — 로그인에서는 브라우저가 열려야 한다. macOS 는 Terminal, Windows
+    는 새 콘솔 창(PowerShell)이다. 앱의 성공 판정은 종료 코드가 아니라 로그인 지문의 변화다
+    (_run_gemini_login) — 이 창의 프로세스는 앱의 자식이 아니다."""
     binp = _find_agy_cli()
     if not binp:
         return
     steps = [t("term_gemini_step1"), t("term_gemini_step2"), t("term_gemini_step3")]
+    done, late = t("term_gemini_done"), t("term_gemini_timeout")
+    args = list(GEMINI_AGY_ARGS)
     if _gemini_edge_rules()["menu_login_retries"]:
         request_gemini_refresh()
     if sys.platform == "win32":
         ps = lambda x: "'" + str(x).replace("'", "''") + "'"
-        script = "; ".join(["Write-Host " + ps(x) for x in steps] + ["Write-Host ''", "& " + ps(binp)])
+        script = "; ".join(
+            ["Write-Host " + ps(x) for x in steps] + ["Write-Host ''"]
+            + ["& " + " ".join(ps(x) for x in [binp] + args) + " | Out-Null",
+               "if ($LASTEXITCODE -eq 0) { Write-Host %s } else { Write-Host %s }" % (ps(done), ps(late))])
         subprocess.Popen([_windows_powershell_exe(), "-NoProfile", "-NoExit", "-Command", script],
                          creationflags=0x00000010,                 # CREATE_NEW_CONSOLE — 보이는 창
                          cwd=gemini_cli_cwd(), env=cli_env("gemini", binp))
         return
-    q = lambda x: json.dumps(x, ensure_ascii=False)
-    cmd = "".join("echo %s\n" % q(x) for x in steps) + "echo\n" + q(binp) + "\n"
+    import shlex
+    q = shlex.quote
+    cmd = "".join("echo %s\n" % q(x) for x in steps) + "echo\n"
+    cmd += "unset SSH_CLIENT SSH_TTY SSH_CONNECTION\nexport AGY_CLI_DISABLE_AUTO_UPDATE=1\n"
+    cmd += " ".join(q(x) for x in [binp] + args) + " > /dev/null\n"
+    cmd += "if [ $? -eq 0 ]; then echo %s; else echo %s; fi\n" % (q(done), q(late))
     _run_in_terminal(cmd)
 
 
@@ -5248,9 +5315,14 @@ def _gemini_fake_rundll_dir():
     target = os.path.join(folder, "rundll32.exe")
     try:
         want = _file_sha256(source)
+        if _is_reparse_point(folder) or _is_reparse_point(app_dir):
+            _dbg("gemini: fake-open folder is a reparse point")
+            return None                           # 정션 — 다른 곳으로 이어진 폴더는 쓰지 않는다
         if os.path.islink(folder) or (os.path.lexists(folder) and not os.path.isdir(folder)):
             os.unlink(folder)
         os.makedirs(folder, exist_ok=True)
+        if _is_reparse_point(folder):
+            return None
         for name in os.listdir(folder):
             if name.lower() == "rundll32.exe":
                 continue
@@ -5637,6 +5709,7 @@ def start_gemini_refresh(state, runtime=None):
 #   6. 로그(_dbg)에는 종류·상태·종료 코드만 — 주소(서명된 쿼리가 붙는다)·경로·토큰은 남기지 않는다.
 
 CLI_PROVIDERS = ("claude", "codex", "gemini")
+AI_ROW_PITCH = 100          # 설정 "AI 연결" 한 줄의 높이(pt) — 이름·상태·안내(세 줄까지)가 들어가는 최소에 가깝게
 AI_PROVIDER_NAMES = {"claude": "Claude Code", "codex": "Codex (ChatGPT)", "gemini": "Gemini (Antigravity)"}
 _CLI_EXE = {"claude": "claude", "codex": "codex", "gemini": "agy"}
 CLI_APP_BIN_MACOS = "~/Library/Application Support/me.yeongyu.claudepet"   # 이 아래 bin/
@@ -5863,6 +5936,14 @@ def _cli_open(url):
     return urllib.request.urlopen(req, timeout=CLI_HTTP_TIMEOUT)
 
 
+def _is_reparse_point(path):
+    """Windows: path 가 재해석 지점(정션·심볼릭 링크)인가 — app_cli_ok 와 같은 기준. 없으면 False."""
+    try:
+        return bool(getattr(os.lstat(path), "st_file_attributes", 0) & 0x400)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def _cli_staging_dir():
     """앱 bin 안의 staging/ — 둘 다 0700 으로 만들어 돌려준다. 받는 파일과 최종 자리가 같은 볼륨이다."""
     bin_dir = app_cli_bin_dir()
@@ -5873,6 +5954,8 @@ def _cli_staging_dir():
             raise OSError("not a directory")
         if sys.platform != "win32":
             os.chmod(folder, 0o700)
+        elif _is_reparse_point(folder):
+            raise OSError("reparse point")        # 정션 — 다른 곳으로 이어진 폴더에 실행 파일을 쓰지 않는다
     return staging
 
 
@@ -6040,6 +6123,13 @@ _WIN_AUTHENTICODE_PS = (
     "if ($s.SignerCertificate) { [Console]::Out.WriteLine($s.SignerCertificate.Subject) }")
 
 
+def cli_signing_requirement(team):
+    """macOS 코드 서명 요구 문자열 — Apple 사슬의 Developer ID Application 인증서이고 그 OU 가 team."""
+    return ('=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists '
+            'and certificate leaf[field.1.2.840.113635.100.6.1.13] exists '
+            'and certificate leaf[subject.OU] = "%s"' % team)
+
+
 def cli_signature_ok(provider, path):
     """받은 실행 파일의 코드 서명이 그 제공사의 것인가. 확인할 수 없으면 False(설치하지 않는다).
 
@@ -6051,7 +6141,10 @@ def cli_signature_ok(provider, path):
             team = CLI_TEAM_IDS.get(provider)
             if not team:
                 return False
-            r = subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(path)],
+            # 요구(-R)가 없으면 ad-hoc 서명도 통과하고, TeamIdentifier 줄은 ad-hoc 서명에도 써 넣을 수 있다.
+            # Apple 이 발급한 Developer ID 사슬 + leaf 의 OU 가 그 제공사의 팀일 것을 **검증에** 건다.
+            r = subprocess.run(["/usr/bin/codesign", "--verify", "--strict",
+                                "-R", cli_signing_requirement(team), str(path)],
                                capture_output=True, text=True, timeout=CLI_SIGN_TIMEOUT)
             if r.returncode != 0:
                 return False
@@ -6062,7 +6155,10 @@ def cli_signature_ok(provider, path):
             found = re.findall(r"^TeamIdentifier=(.*)$", (r.stderr or "") + "\n" + (r.stdout or ""), re.M)
             return len(found) == 1 and found[0].strip() == team
         if sys.platform == "win32":
-            env = dict(os.environ, CLAUDEPET_SIGN_PATH=str(path))
+            # PSModulePath 는 지운다(어느 철자든): 앱이 PowerShell 7 에서 떴으면 그 값이 7 의 모듈 폴더를
+            # 가리켜 powershell.exe(5.1)가 Get-AuthenticodeSignature 의 모듈을 읽지 못한다(실기기 2026-11-19).
+            env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+            env["CLAUDEPET_SIGN_PATH"] = str(path)
             r = subprocess.run([_windows_powershell_exe(), "-NoProfile", "-NonInteractive", "-Command",
                                 _WIN_AUTHENTICODE_PS],
                                capture_output=True, text=True, timeout=CLI_SIGN_TIMEOUT, env=env,
@@ -6150,7 +6246,9 @@ def _install_app_cli(provider, info, opener, progress, cancel):
             raise CliInstallError("cancelled")
         final = app_cli_path(provider)
         try:
-            if os.path.islink(final) or os.path.isdir(final):
+            if os.path.islink(final) or os.path.isdir(final) or \
+                    (sys.platform == "win32" and (_is_reparse_point(final)
+                                                  or _is_reparse_point(os.path.dirname(final)))):
                 raise CliInstallError("locked")
             os.replace(binary, final)         # 같은 볼륨(staging → bin) — 반쪽 파일이 보이지 않는다
         except PermissionError:
@@ -6255,13 +6353,15 @@ def start_app_cli_updates():
 # ── 로그인 ──
 
 def cli_login_argv(provider, path):
-    """그 CLI 의 공식 로그인 명령. Gemini 는 보이는 창에서 `agy` 만 띄운다(start_gemini_login) —
-    agy 는 브라우저가 보여 준 코드를 진짜 터미널에 붙여 넣어야 로그인이 끝난다(Windows 실측 2026-11-19)."""
+    """그 CLI 의 공식 로그인 명령. Gemini 는 보이는 창에서 `agy -p /usage --output-format json` 을 띄운다
+    (start_gemini_login) — 로그인이 없으면 그 명령이 브라우저를 열고, 브라우저가 보여 준 코드를 진짜
+    터미널에 붙여 넣어야 끝난다(Windows 실측 2026-11-19). 인자 없는 `agy`(TUI)는 대체 화면으로 바뀌어
+    창 맨 위의 안내를 가린다."""
     if provider == "claude":
         return login_spawn_argv(path)
     if provider == "codex":
         return [path, "login"]
-    return [path]
+    return [path] + list(GEMINI_AGY_ARGS)
 
 
 def cli_env(provider, path, base_env=None):
@@ -6289,7 +6389,8 @@ def cli_env(provider, path, base_env=None):
 
 
 def cli_logged_in(provider):
-    """그 제공자에 로그인돼 있는가 — 창이 뜰 수 없는 확인만.
+    """그 제공자에 로그인돼 있는가 = **지금 사용량을 읽을 수 있는가** — 창이 뜰 수 없는 확인만.
+    로그인 정보가 남아 있어도 서버가 거절한 상태(auth_error)면 아니다: 그때는 [로그인] 이 떠야 한다.
 
     claude: claude_token_present. codex: auth.json 의 토큰. gemini: 마지막 조회가 성공했고 로그인 요구가
     없을 때 — agy 는 로그아웃해도 키체인 항목을 남기므로 항목이 있다는 것만으로는 알 수 없다."""
@@ -6297,7 +6398,8 @@ def cli_logged_in(provider):
         if provider == "claude":
             return bool(claude_token_present()) and not OAUTH_STATUS.get("auth_error")
         if provider == "codex":
-            return bool(read_codex_token(codex_auth_path()))
+            # 토큰 파일이 있어도 서버가 거절했으면(만료) 연결된 것이 아니다 — 사용량을 읽을 수 없다.
+            return bool(read_codex_token(codex_auth_path())) and not CODEX_STATUS.get("auth_error")
         if provider == "gemini":
             return bool(_gemini_cache.get("ok_t") is not None and not GEMINI_STATUS.get("auth_error"))
     except Exception as e:
@@ -6341,7 +6443,7 @@ def _cli_kill_tree(proc):
 def _run_codex_login(path, cancel):
     """`codex login` 을 터미널 없이 띄워 끝까지 지켜본다. 브라우저는 codex 가 연다."""
     if cli_logged_in("codex"):
-        return "already"          # 그 명령은 시작하자마자 기존 토큰을 지운다 — 실행 직전에 다시 본다
+        return "already"          # 그 명령은 시작하자마자 기존 토큰을 지운다 — **유효한** 로그인만 지킨다
     try:
         how = ({"creationflags": _spawn_no_window_flags()} if sys.platform == "win32"
                else {"start_new_session": True})
@@ -6375,7 +6477,8 @@ def _run_codex_login(path, cancel):
     _dbg("cli login: codex rc", rc)
     if rc != 0:
         return "denied"
-    return "ok" if cli_logged_in("codex") else "failed"
+    # 여기서는 토큰만 본다 — 직전의 거절 표시(auth_error)는 run_ai_connect 가 성공 뒤에 지운다.
+    return "ok" if read_codex_token(codex_auth_path()) else "failed"
 
 
 def _claude_login_marker():
@@ -6400,18 +6503,24 @@ def _claude_login_marker():
     return (present, mdat, sig)
 
 
-def _run_claude_login(path):
-    """Claude 는 기존의 떼어 낸 job 경로로 — CLI 가 우리 자식이 아니다(_run_refresh_job)."""
+def _run_claude_login(path, cancel=None):
+    """Claude 는 기존의 떼어 낸 job 경로로 — CLI 가 우리 자식이 아니다(_run_refresh_job).
+    [취소]는 바로 먹는다: 대기 루프가 cancel 을 보고 job 을 내린다("cancelled"). 기한을 넘기면 "timeout"."""
     if cli_logged_in("claude"):
         return "already"
     before = _claude_login_marker()
+    outcome = {}
     out = _run_refresh_job(login_spawn_argv(path), LOGIN_JOB_LABEL, "login",
-                           CLI_LOGIN_TIMEOUT_SEC["claude"])
+                           CLI_LOGIN_TIMEOUT_SEC["claude"], cancel=cancel, outcome=outcome)
+    if outcome.get("ended") == "cancelled":
+        return "cancelled"
     if claude_token_present():
         return "ok"
     after = _claude_login_marker()
     if after != before and (after[0] or after[2]):
         return "ok"               # 키체인 사용자: 토큰은 아직 읽지 않았지만 CLI 가 항목을 다시 썼다
+    if outcome.get("ended") == "timeout":
+        return "timeout"
     _dbg("cli login: claude left no token; spawned", out is not None)
     return "failed"
 
@@ -6452,7 +6561,7 @@ def run_cli_login(provider, cancel=None):
         if not path:
             return "not_installed"
         if provider == "claude":
-            return _run_claude_login(path)
+            return _run_claude_login(path, cancel)
         if provider == "codex":
             return _run_codex_login(path, cancel)
         if provider == "gemini":
@@ -6545,7 +6654,30 @@ def run_ai_connect(provider, job, cancel=None):
             _codex_cache["t"] = 0.0
             _gemini_cache["auth_failed_marker"] = None
             request_gemini_refresh()
-            return finish(res)
+            stale_claude = False
+            if res == "ok":
+                # 방금 로그인했다 — 직전 실패가 남긴 표시를 지워 줄이 바로 "연결됨"이 되고 바로 읽게 한다.
+                if provider == "gemini":
+                    _gemini_cache["t"] = 0
+                    _gemini_cache["ok_t"] = time.time()
+                    GEMINI_STATUS["auth_error"] = False
+                elif provider == "codex":
+                    CODEX_STATUS["auth_error"] = False
+                elif provider == "claude":
+                    stale_claude = bool(_oauth_token_cache.get("next_retry") or _oauth_token_cache.get("declined")
+                                        or OAUTH_STATUS.get("auth_error"))
+                    _oauth_token_cache["next_retry"] = 0
+                    _oauth_token_cache["declined"] = False
+                    OAUTH_STATUS["auth_error"] = False
+            out = finish(res)
+            if stale_claude:
+                # 직전 401 의 쿨다운·거절 표시가 새 토큰 읽기를 막고 있었다 — 여기서 한 번 읽어 푼다.
+                # (막힌 것이 없었으면 다음 새로고침이 읽는다. 호출자가 끝나자마자 새로고침을 건다.)
+                try:
+                    fetch_exact_usage()
+                except Exception as e:
+                    _dbg("ai connect: read after login failed", type(e).__name__)
+            return out
         if res == "cancelled":
             return finish(res)
         return finish(res, res if res in _AI_FAIL_REASONS else "failed")
@@ -12397,9 +12529,14 @@ def run_gui():
         except Exception as e:
             _dbg("ai connect: refresh not requested", type(e).__name__)
 
+    def ai_idle(provider):
+        """그 제공자의 설치·로그인이 돌고 있지 않은가. 도는 중에는 취소 깃발을 지우지 않는다 — 방금 누른
+        [취소]가 지워져 받기·로그인이 계속된다."""
+        return ai_jobs[provider].get("phase") not in ("download", "verify", "login")
+
     def ai_connect_click(provider):
         """"AI 연결" 줄의 버튼 — 돌고 있으면 [취소], 아니면 [설치]/[로그인]/[다시 시도]."""
-        if ai_jobs[provider].get("phase") in ("download", "verify", "login"):
+        if not ai_idle(provider):
             ai_cancel[provider].set()
             return
         ai_cancel[provider].clear()
@@ -12578,7 +12715,7 @@ def run_gui():
         head.setFont_(NSFont.boldSystemFontOfSize_(13))
         ai_rows = {}
         for n, p in enumerate(CLI_PROVIDERS):
-            top = PHT - 78 - n * 124
+            top = PHT - 78 - n * AI_ROW_PITCH
             name = label(AI_PROVIDER_NAMES[p], ax, top, 230)
             name.setFont_(NSFont.boldSystemFontOfSize_(12))
             status_l = label("", ax, top - 24, 240)
@@ -12592,6 +12729,9 @@ def run_gui():
             hint_l.setFont_(NSFont.systemFontOfSize_(11))
             hint_l.setTextColor_(NSColor.secondaryLabelColor())
             hint_l.cell().setWraps_(True)
+            # 한글을 낱말 단위로 끊는다(기본은 글자 단위라 "받습니/다" 처럼 갈린다). macOS 11 이상.
+            if hint_l.respondsToSelector_("setLineBreakStrategy:"):
+                hint_l.setLineBreakStrategy_(0xFFFF)      # NSLineBreakStrategyStandard — 한글 낱말 우선 포함
             ai_rows[p] = {"status": status_l, "button": btn, "hint": hint_l}
 
         vl = label(f"ClaudePet v{APP_VERSION}", 20, 18, 200)
@@ -12794,30 +12934,35 @@ def run_gui():
         # 설치·로그인 다섯 항목은 Terminal 을 열지 않는다(계약 v7-I1) — 설정의 "AI 연결"과 같은 흐름을
         # 시작하고, 진행 상황과 [취소]가 보이게 설정 창을 연다.
         def installClaude_(self, sender):
-            ai_cancel["claude"].clear()
-            start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set, done=ai_done)
+            if ai_idle("claude"):
+                ai_cancel["claude"].clear()
+                start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set, done=ai_done)
             open_settings()
 
         def loginClaude_(self, sender):
-            ai_cancel["claude"].clear()
-            start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set, done=ai_done)
+            if ai_idle("claude"):
+                ai_cancel["claude"].clear()
+                start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set, done=ai_done)
             open_settings()
 
         def installCodex_(self, sender):
-            ai_cancel["codex"].clear()
-            start_ai_connect("codex", ai_jobs["codex"], cancel=ai_cancel["codex"].is_set, done=ai_done)
+            if ai_idle("codex"):
+                ai_cancel["codex"].clear()
+                start_ai_connect("codex", ai_jobs["codex"], cancel=ai_cancel["codex"].is_set, done=ai_done)
             open_settings()
 
         def loginCodex_(self, sender):
-            ai_cancel["codex"].clear()
-            start_ai_connect("codex", ai_jobs["codex"], cancel=ai_cancel["codex"].is_set, done=ai_done)
+            if ai_idle("codex"):
+                ai_cancel["codex"].clear()
+                start_ai_connect("codex", ai_jobs["codex"], cancel=ai_cancel["codex"].is_set, done=ai_done)
             open_settings()
 
         def loginGemini_(self, sender):
             # 보이는 창에서 agy 가 뜬다(run_cli_login → start_gemini_login). 설정 창의 Gemini 줄이 할 일을
             # 안내하고, 로그인이 끝나면 지문 변화로 알아챈다.
-            ai_cancel["gemini"].clear()
-            start_ai_connect("gemini", ai_jobs["gemini"], cancel=ai_cancel["gemini"].is_set, done=ai_done)
+            if ai_idle("gemini"):
+                ai_cancel["gemini"].clear()
+                start_ai_connect("gemini", ai_jobs["gemini"], cancel=ai_cancel["gemini"].is_set, done=ai_done)
             open_settings()
 
         def aiConnect_(self, sender):
@@ -12978,9 +13123,10 @@ def run_gui():
             if act == "recover" and _recovery_step(force=True) != "onboard_install":
                 return
             if act in ("recover", "install", "login"):
-                ai_cancel["claude"].clear()
-                start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set,
-                                 done=ai_done)
+                if ai_idle("claude"):
+                    ai_cancel["claude"].clear()
+                    start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set,
+                                     done=ai_done)
                 handler.performSelectorOnMainThread_withObject_waitUntilDone_("openSettings:", None, False)
         except Exception as e:
             _dbg("summary click: failed", act, type(e).__name__)
