@@ -4171,9 +4171,10 @@ class PublishedV112NotesContractTests(unittest.TestCase):
         bumped, or bumped to something the heading does not say."""
         # Re-scoped on publication: headed 1.1.2, the second section, directly below the
         # staged one (the "APP_VERSION is the heading" check moved to StagedV120NotesFormatTests).
+        # Re-scoped again for v1.2.1: v1.2.0 was published above it, so it is the third.
         headings = [h for h, _ in _changelog_sections(self.text)]
-        self.assertEqual(headings[1:2], ["1.1.2"],
-                         f"v1.1.2 must be the newest published section; got {headings[:3]!r}")
+        self.assertEqual(headings[2:3], ["1.1.2"],
+                         f"v1.1.2 must sit directly below v1.2.0; got {headings[:3]!r}")
 
     def test_v112_the_quoted_status_is_the_loading_line_the_fix_covers(self):
         """The one quote, "조회 중…", must be ``TR["ko"]["loading"]`` exactly — the global

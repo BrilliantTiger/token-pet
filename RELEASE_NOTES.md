@@ -79,6 +79,12 @@ macOS 12+ (Apple Silicon · Intel con el zip universal) · autocontenido
      단가·창·중복 제거를 실제로 건드리는 릴리즈에서는 CLAUDE.md 의 Danger zone 대로
      반드시 ⚠️ 다시 보정 안내를 넣으세요. -->
 
+**v1.2.1**
+
+- 앱 이름이 Token Pet으로 바뀌었습니다. 메뉴·설정·설치 화면에 새 이름이 보이고, 설정과 로그인은 그대로라 업데이트만 받으면 됩니다.
+- Gemini에 이미 로그인돼 있으면 로그인 안내 없이 바로 사용량을 표시합니다. 앱이 연 Gemini가 인증서 오류로 멈추던 문제를 고쳤습니다.
+- macOS와 Windows가 같은 1.2.1로 나옵니다. Windows에서는 시작 메뉴에 옛 이름의 바로 가기가 남지 않습니다.
+
 **v1.2.0**
 
 - 설정 창 "AI 연결"에서 Claude Code·Codex·Gemini CLI를 [설치] 한 번으로 받고 로그인 창까지 이어집니다. 공식 서버에서 받아 서명을 확인한 뒤 앱 전용 폴더에 두고 PATH는 바꾸지 않습니다.
