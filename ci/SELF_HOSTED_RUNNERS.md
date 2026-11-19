@@ -37,6 +37,10 @@ gh api -X PUT repos/BrilliantTiger/token-pet/actions/permissions/fork-pr-contrib
 
 서비스(데몬·Windows 서비스)로 돌리지 않는다 — 사용자의 키체인·자격 증명 관리자·CLI 로그인을 볼 수 없다.
 
+macOS 러너는 **화면에 로그인한 사용자의 세션**에서 떠야 한다(`svc.sh install` 이 만드는 LaunchAgent). SSH 나
+원격 셸에서 `./run.sh` 로 띄우면 로그인 키체인이 잠겨 있어 Claude Code·Gemini 의 로그인 정보를 읽지 못하고,
+실기기 잡은 `login keychain locked: True` 를 찍고 실패한다(첫 등록 때 실제로 그랬다).
+
 ## 언제 도는가
 
 같은 저장소의 PR, `main`·`dev` push, `v*` 태그, `workflow_dispatch`. 포크의 PR 에서는 돌지 않는다.

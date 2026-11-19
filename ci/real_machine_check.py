@@ -54,6 +54,26 @@ def read_usage(provider):
     return len(rows or ()), status.get("last_error"), bool(status.get("auth_error"))
 
 
+def why_no_rows(provider):
+    """값이 없을 때 그 까닭을 앱의 상태에서 읽어 한 줄로 — error=None 인 채 값이 없는 칸을 남기지 않는다.
+    참/거짓과 종류만 적는다."""
+    if provider == "claude":
+        if not cp._oauth_token_cache.get("tok"):
+            return "no token could be read (file: %s, keychain locked: %s) — no request was sent" % (
+                bool(cp._token_from_file()), cp.keychain_locked())
+        return "request sent; last error: %s" % cp.OAUTH_STATUS.get("last_error")
+    if provider == "codex":
+        if cp._codex_cache.get("ok_t") is not None:
+            return "the server answered, but with no usable usage window"
+        return "last error: %s" % cp.CODEX_STATUS.get("last_error")
+    c = cp._gemini_cache
+    if c.get("login") is None:
+        return "sign-in state unknown — agy was not run (keychain locked: %s)" % cp.keychain_locked()
+    if c.get("login") is False:
+        return "no sign-in marker — agy was not run"
+    return "agy was run; last error: %s" % cp.GEMINI_STATUS.get("last_error")
+
+
 def main():
     # 러너의 콘솔 인코딩(한국어 Windows 는 cp949)이 못 쓰는 글자로 죽지 않게 — 실제로 한 번 죽었다.
     for stream in (sys.stdout, sys.stderr):
@@ -84,11 +104,27 @@ def main():
 
     failures = []
     verified = 0
+    # 잠긴 키체인에서는 Claude·Gemini 의 로그인 정보를 읽을 수 없다 — 앱도 그때는 묻지 않고 기다린다.
+    # 러너가 로그인한 화면 세션 밖에서(SSH 등) 돌면 이렇게 된다. 검증할 수 없는 것이므로 분명히 실패시킨다.
+    locked = cp.keychain_locked() if sys.platform == "darwin" else False
+    if sys.platform == "darwin":
+        print("login keychain locked: %s" % locked)
+    print("python %d.%d, PATH entries: %d, HOME set: %s"
+          % (sys.version_info[0], sys.version_info[1], len(os.environ.get("PATH", "").split(os.pathsep)),
+             bool(os.environ.get("HOME") or os.environ.get("USERPROFILE"))))
+    if locked is True:
+        failures.append("the login keychain is locked in the runner's session — Claude Code and Gemini cannot be "
+                        "verified. Run the runner as the signed-in user's LaunchAgent (ci/SELF_HOSTED_RUNNERS.md)")
     for p in PROVIDERS:
+        if locked is True and p in ("claude", "gemini"):
+            print("%-7s not checked — keychain locked" % p)
+            continue
         installed = bool(cp.find_cli(p))
         # 앱의 새로고침과 같은 순서: 먼저 읽는다. 키체인에 로그인 정보를 둔 Claude 사용자는 읽고 난 뒤에야
         # "로그인 정보 있음"이 된다(claude_token_present 는 창이 뜰 수 있는 키체인 API 를 타지 않는다).
         count, err, asked = read_usage(p) if installed else (0, None, False)
+        if installed and count == 0:
+            print("%-7s no rows: %s" % (p, why_no_rows(p)))
         present = signin_present(p) if installed else False
         if not installed or present is not True:
             row = cp.ai_connect_row(p, installed, cp.cli_logged_in(p), cp.new_ai_job())
@@ -108,8 +144,13 @@ def main():
             if row["button"] != "ai_btn_login":
                 failures.append("%s: sign-in was rejected, but the row does not offer [Sign in]" % p)
             continue
-        if count == 0:
-            failures.append("%s: signed in, but no usage value was read (error: %s)" % (p, err))
+        if count == 0 and err is None and p == "codex":
+            # 서버가 정상으로 답했는데 쓸 사용량 창이 없다(한도 창이 없는 계정) — 보여 줄 값이 없는 것이지
+            # 읽지 못한 것이 아니다. 실패로도, 확인한 것으로도 세지 않는다.
+            print("codex   the server answered without usage windows — nothing to show, not counted")
+            verified -= 1
+        elif count == 0:
+            failures.append("%s: signed in, but no usage value was read — %s" % (p, why_no_rows(p)))
         if row["button"] in ("ai_btn_login", "ai_btn_install") or row["status"] in ("ai_need_login", "ai_not_installed"):
             failures.append("%s: signed in, but the row says %s / %s" % (p, row["status"], row["button"]))
         before = len(opened)
