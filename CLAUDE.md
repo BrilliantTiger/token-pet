@@ -67,6 +67,9 @@ invites the reader to reason from it.
 | `tests/test_seeding_identity.py` | Identity-bound cleanup gates for bundled-pet seeding. Both roots are passed explicitly and live under a realpath temp directory; `USER_PET_HOME` and the process `HOME` are never consulted. |
 | `tests/test_v020_boundaries.py` | Upgrade-boundary verification for v0.20. Fail-closed: it refuses to run unless launched with the allow-list environment its header specifies. |
 | `tests/test_autostart.py` | Gating tests for the "Start at sign-in" menu item: the status table, the toggle's truth table, the `do_uninstall()` ordering, the TR keys, and the menu wiring (by AST, no GUI). Every service is a fake; `sys.modules["ServiceManagement"]` is a tripwire for the duration of the module. |
+| `tests/test_cli_install_login.py` | Gates for installing and signing in to the three CLIs from the app: release lookup, staged download and hash, single-entry extraction, signature check, the app-private bin, the daily update, each provider's sign-in, the "AI connections" rows, and the macOS wiring (by AST). Every server, archive and CLI is a stand-in under a temp directory; nothing is downloaded or run for real. |
+| `tests/test_gemini_windows.py` | The Windows side of Gemini reading, run on macOS by switching `sys.platform` and on real Windows in CI: where `agy.exe` is looked for, the credential probe's answer format, the `rundll32.exe` stand-in, `taskkill`. |
+| `windows/tests/test_win_ai_connect.py`, `windows/tests/test_win_gemini.py` | The port's wiring for the two above, by AST (PySide6 is not needed to run them). |
 | `verify_pet_payload.py` | Build gate: checks that the bundled `.claude_pet` payload actually landed in an artifact and matches the repo source byte for byte. It reads the expected file list out of `claude_pet.py`'s `BUNDLED_PET_README` / `BUNDLED_PET_IDS` / `BUNDLED_PET_FILES` via AST rather than importing it, so adding a pet cannot leave a hardcoded count checking the wrong number. Called by `release.sh` (`build`, and per-artifact before upload) and by `build_app.sh`. |
 | `verify_release_artifact.py` | Release gate: inspects the zip/dmg **that will be uploaded**, not a build directory. `scan` checks archive safety before any byte is extracted, `app` checks that the bundle's `Contents/Resources/claude_pet.py` is byte-identical to this checkout's and then hands the bundle to the updater's own preflight, `assets` checks the upload list against the updater's asset-name table. The code-hash check is the one the updater cannot do — it has no original to compare against, and a signature says *who built it*, never *what is inside*: a stale bundle re-signed today passes every other check. It **calls** `claude_pet`'s `_zip_members_are_safe` and `validate_update_app` rather than reimplementing them — which is why its diagnostics carry an `[update]` prefix. |
 | `build_app.sh` | Fast local build: assembles `ClaudePet.app` from `claude_pet.py` + `frames/` + `.claude_pet/`. **It does sign** — `sign_app` uses the Developer ID when one is present, ad-hoc otherwise. `build` / `install` / `update` subcommands; anything else prints usage and exits 1. |
@@ -840,9 +843,10 @@ Every number on the pill comes from a server, per provider and per data source:
   (`codex_home_exists()`: `$CODEX_HOME`, else `~/.codex`) exists (→ install) —
   `compute_codex_onboard_state()` puts **Install Codex…** / **Sign in to Codex…**
   (`menu_install_codex` / `menu_login_codex`) at the top of the right-click menu, under the
-  Claude Code item: on macOS `start_codex_install()` / `start_codex_login()` open Terminal
-  with `npm install -g @openai/codex` / `codex login`, on Windows `_install_codex` /
-  `_login_codex` open a new PowerShell console like `_install_claude` / `_login_claude`.
+  Claude Code item. Both start the in-app flow (`start_ai_connect("codex", …)`) on both
+  platforms — the official binary is downloaded and verified, then `codex login` runs
+  without a terminal; see [Installing and signing in](#installing-and-signing-in-to-the-three-clis-from-the-app).
+  Nothing runs `npm install` any more.
   With neither a CLI nor a Codex home nothing is offered, so a user who has never used
   Codex sees no Codex item at all.
 - **Codex, API cost** (`codex_mode = "api"`) — `fetch_codex_cost_today()` /
@@ -856,7 +860,7 @@ Every number on the pill comes from a server, per provider and per data source:
   Anthropic and OpenAI cost APIs bucket by UTC day; a local-midnight start would cut a
   bucket in half.
 
-- **Gemini, Antigravity sign-in** (macOS only) — `fetch_gemini_usage()`, which runs the
+- **Gemini, Antigravity sign-in** (macOS and Windows) — `fetch_gemini_usage()`, which runs the
   Antigravity CLI as `agy -p /usage --output-format json` (`GEMINI_AGY_ARGS`) and shows the
   percentages it returns. There is no HTTP client, no API-key mode and no token of ours: the
   CLI holds the sign-in. See [Gemini usage](#gemini-usage-runs-agy--p-usage-and-never-a-signed-out-agy).
@@ -953,14 +957,14 @@ wall of permission dialogs. Leave it off.
 
 ### Token auto-recovery runs the CLI detached, in a private folder, once per attempt
 
-Token auto-recovery (`recovery_tick` → `run_token_refresh`, both platforms) and, on macOS
-only, the pill's login click (`start_claude_login_background`) run the `claude` CLI by
-default, and **both go through `_run_refresh_job`, which never makes the CLI our child**.
-Recovery is the Windows port's only use of `_run_refresh_job`. The other ways the CLI runs:
-the opt-in `_fetch_cli_usage()` above (both platforms, same environment variable), and
-user-visible console paths — on macOS the Terminal paths `start_claude_login` /
-`start_claude_install`, on Windows the context-menu items `_login_claude` / `_install_claude`
-in `windows/claude_pet_win.py`, which run it in a new PowerShell console.
+Token auto-recovery (`recovery_tick` → `run_token_refresh`) and the Claude sign-in of the
+in-app flow (`run_cli_login("claude")`, reached from the settings row, the menu items and the
+pill's login click) run the `claude` CLI by default, on both platforms, and **both go through
+`_run_refresh_job`, which never makes the CLI our child**. The only other way the CLI runs is
+the opt-in `_fetch_cli_usage()` above. The Terminal functions `start_claude_login` /
+`start_claude_install` / `start_codex_login` / `start_codex_install` still exist in the core
+but no menu item, pill click or settings button reaches them, and the Windows port's console
+helper is gone.
 `recovery_spawn_argv` / `login_spawn_argv` return only the program the job runs — on macOS its
 `argv[0]` is the CLI itself, which is fine: detachment is a property of `_run_refresh_job`,
 not of an argv's shape.
@@ -1010,7 +1014,7 @@ Three changes to refuse:
   0/2.
 - Not observed: a private-folder run that actually refreshes the token (it cannot be forced),
   other CLI versions, other Windows versions or default terminals, and the login shape through
-  `_run_refresh_job` (macOS only — the Windows port never takes it). The full record is in
+  `_run_refresh_job` on Windows (the port takes it since v1.2.0; nobody has run it there). The full record is in
   `_win_wmi_create` and the comment block above `REFRESH_MARGIN_SEC`.
 
 **To see what a process touches without prompting anyone:** a `sandbox-exec` deny on a path
@@ -1020,8 +1024,8 @@ lines.
 
 ### Gemini usage runs `agy -p /usage`, and never a signed-out `agy`
 
-Gemini (since v1.2.0, macOS only — `fetch_gemini_usage()` returns at once on any other
-platform, and the Windows port does not call it) is read by running the Antigravity CLI:
+Gemini (since v1.2.0, macOS and Windows — `fetch_gemini_usage()` returns at once on any other
+platform) is read by running the Antigravity CLI:
 `agy -p /usage --output-format json`, no shell, in the private folder `gemini_cli_cwd()`,
 under `GEMINI_AGY_TIMEOUT`. `parse_agy_usage()` turns the answer into rows of the usual shape
 `(label, pct_used, reset_dt, None)`: row 0 is `"gemini"` (the most-used Gemini bucket), then
@@ -1047,8 +1051,8 @@ was measured:
   marker is `(item present, the item's "mdat" line, (file exists, mtime))`. No item and no file
   → zero runs, no line, and, when `agy` is installed, the right-click menu offers
   `menu_gemini_login`
-  (`compute_gemini_onboard_state()` → `start_gemini_login()`, which opens Terminal with plain
-  `agy`). A locked keychain is not asked; with no earlier answer nothing is run at all.
+  (`compute_gemini_onboard_state()`; the item starts the in-app flow, which opens a visible
+  window running plain `agy` — see [Installing and signing in](#installing-and-signing-in-to-the-three-clis-from-the-app)). A locked keychain is not asked; with no earlier answer nothing is run at all.
   `agy` not installed → `not_installed`, decided before `security` is called.
 - **The fingerprint stops it and restarts it.** A keychain item can exist and still be dead
   (signed out with the item left behind, an expired refresh token). When a run asks for a
@@ -1079,10 +1083,138 @@ out was off-limits; it rests on the Antigravity side's isolated run), other agy 
 the bundled app's shorter `PATH`. `ANTIGRAVITY_APP_DATA_DIR` is not consulted — the CLI does
 not use it for the token file.
 
+**On Windows the same rules hold with different primitives.** None of this has run on a real
+Windows machine; it is gated by `tests/test_gemini_windows.py` only.
+
+- **Where `agy.exe` is looked for** (`_find_agy_cli()`): `PATH`, then
+  `%LOCALAPPDATA%\agy\bin\agy.exe`, then `%USERPROFILE%\.local\bin\agy.exe`, then the
+  app-private bin.
+- **The sign-in marker is a Credential Manager entry**, target `gemini:antigravity`
+  (`GEMINI_CRED_TARGET`), read by a **child of ourselves**: the app re-runs its own
+  executable with `--gemini-cred-probe` (`_gemini_cred_probe()` → `gemini_cred_probe_main()`,
+  dispatched first thing in the port's `main()`). The child calls `CredReadW`, zeroes the
+  blob, frees it, and prints only `1 <LastWritten>` or `0`; the parent treats any other
+  answer as unknown (`parse_gemini_cred_probe()`). The secret never reaches the parent
+  process. `CredEnumerateW` and `cmdkey` are not used.
+- **The browser is blocked by a stand-in `rundll32.exe`** — the Windows `agy` opens a URL
+  through `rundll32`. `_gemini_fake_rundll_dir()` keeps
+  `%LOCALAPPDATA%\me.yeongyu.claudepet\fake-open\rundll32.exe` as a copy of this machine's
+  own `System32\systray.exe` (a signed system binary that does nothing with those arguments),
+  checks its size and SHA-256 against the original before every run, and puts that folder
+  first on the child's `PATH`. `NoDefaultCurrentDirectoryInExePath=1` is set as well.
+- **The tree is ended with `System32\taskkill.exe /PID <pid> /T /F`** (`_agy_kill_group()`),
+  only while `agy` is still alive — a dead pid may already belong to another process — and
+  the child is started with `CREATE_NO_WINDOW`.
+- `AGY_CLI_DISABLE_AUTO_UPDATE=1` is set on both platforms, and `request_gemini_refresh()` is
+  the click signal the port calls (the port must not name macOS keychain functions).
+
 **[NEVER]** read the keychain item's secret (`-w`, `-g`) or the fallback file's contents, run
 `/logout`, or run the real `agy`, `security` or `/usr/bin/open` from a test.
 `tests/test_gemini_usage.py`, `tests/test_gemini_agy_cadence.py` and `tests/test_gemini_pill.py`
 use an emulated child and a `security` stand-in.
+
+### Installing and signing in to the three CLIs from the app
+
+Since v1.2.0 the settings window has an **AI connections** column (`ai_sec`) with one row per
+provider — Claude Code, Codex, Gemini — each a status and at most one button. The button
+installs the provider's official CLI when it is missing and then carries on into that CLI's
+own sign-in. The five right-click items (`installClaude_`, `loginClaude_`, `installCodex_`,
+`loginCodex_`, `loginGemini_`; `_install_claude` … `_login_gemini` in the port) and the pill's
+login/install click start the same flow and open the settings window, because that is where
+progress and Cancel are shown. No path opens Terminal or a console to run an install script.
+
+The pieces, all in the core: `ai_connect_row()` (pure — status key, button key, percent,
+hint) → `start_ai_connect()` (daemon thread) → `run_ai_connect()` → `install_cli()` then
+`run_cli_login()`. Each provider has one job dict (`new_ai_job()`) the UI reads once a second.
+
+**It runs only because the user pressed something.** Nothing on the refresh, recovery or
+Gemini-read paths reaches `run_ai_connect`, `install_cli`, `run_cli_login` or
+`cli_stage_download` — a sign-in window that reopens by itself is the failure this rules
+out. A failed attempt stops with a reason and a "Try again" button; it is never retried
+automatically. The one thing that runs unasked is the daily update below.
+
+**Installing** (`install_cli()` → `(True, path)` or `(False, kind)`, never an exception):
+
+- **A CLI the user already has is used and nothing is downloaded.** `find_cli()` — and
+  `_find_claude_cli()` / `_find_codex_cli()` / `_find_agy_cli()`, which give the same answer —
+  look in the user's places first and in the app-private bin **last**, and there only when
+  `app_cli_ok()` holds (a regular file, not a link, owned by the user).
+- **Only the vendor's own server**, never a copy shipped in the app: Claude Code from
+  `downloads.claude.ai/claude-code-releases` (`latest` → `{version}/manifest.json`, SHA-256),
+  Codex from `releases.openai.com/codex/channels/latest` (GitHub's `releases/latest` only when
+  that does not answer; SHA-256 from the asset's `digest`), `agy` from its auto-updater
+  manifest (SHA-512). `cli_release_info()` refuses an unsupported platform before asking any
+  server, and refuses a manifest whose version, URL or digest is not the expected shape.
+- **Staged, hashed, one entry, signature, then swapped in.** `cli_stage_download()` streams
+  into `bin/staging/` (0700, random name, `O_EXCL`) while hashing; `cli_extract_one()` takes
+  exactly the one expected regular-file entry out of an archive (never `extractall`);
+  `cli_signature_ok()` checks the code signature on the staged file — macOS
+  `/usr/bin/codesign --verify --strict` plus the vendor's `TeamIdentifier` (`CLI_TEAM_IDS`),
+  Windows Authenticode `Valid` plus the certificate's `O` (`CLI_AUTHENTICODE_ORGS`,
+  `authenticode_ok()`); only then one `os.replace` into the bin. The hash comes from the same
+  server as the file, so the signature is the check that survives a compromised server — do
+  not drop it because the hash "already passed". Any failure empties staging and leaves the
+  previous file. TLS verification is the app's ordinary certifi opener and is never relaxed.
+- **The app-private bin**: `~/Library/Application Support/me.yeongyu.claudepet/bin/` (0700,
+  files 0755) on macOS, `%LOCALAPPDATA%\me.yeongyu.claudepet\bin\` on Windows
+  (`app_cli_bin_dir()`, which does not create it when merely asked).
+- **The user's `PATH`, shell files and registry are never touched**, and the official install
+  scripts (`install.sh`, `install.ps1`) and `claude install` are never run — those are what
+  edit shell configuration and `~/.local/bin`. So a CLI the app installed is not on the user's
+  `PATH`; that is intended.
+- **Daily update, app-installed CLIs only.** `install_cli()` writes a small meta file
+  (version, time checked). `start_app_cli_updates()`, called from the refresh timer, does
+  nothing unless `app_cli_update_due()` — the app installed it, the user has no copy of their
+  own, and `CLI_UPDATE_SEC` (a day) has passed. `update_app_cli()` downloads only when the
+  version differs, by the same staged-and-verified route, and quietly skips a cycle when the
+  file cannot be replaced (Windows, CLI running). An app-installed `claude` gets
+  `DISABLE_AUTOUPDATER=1` / `DISABLE_INSTALLATION_CHECKS=1` (`cli_env()`), on macOS only — the
+  Windows spawn goes through WMI, which carries no environment.
+- **Uninstall removes it.** `UNINSTALL_PATHS` holds the macOS app folder; on Windows the
+  port's uninstall already deletes `%LOCALAPPDATA%\me.yeongyu.claudepet`. The user's own CLIs
+  and each CLI's sign-in data (`~/.claude`, `~/.codex`, `~/.gemini`) are left alone.
+
+**Signing in** (`run_cli_login()` → `ok` / `already` / `denied` / `timeout` / `cancelled` /
+`failed` / `not_installed`). The CLI does the sign-in; the app makes, reads and stores no
+token.
+
+- **Claude Code** — `claude auth login --claudeai` (`login_spawn_argv()`) through
+  `_run_refresh_job`, up to `LOGIN_TIMEOUT_SEC` (300 s). Not started when a token is already
+  present. Success is a token the app can see, or — for a keychain user, whose token cannot
+  be read without a prompt — a changed keychain `mdat` or credentials-file signature.
+- **Codex** — `codex login` as our child with no terminal, in the private folder, up to
+  `CLI_LOGIN_TIMEOUT_SEC["codex"]`. **It is not started when `auth.json` already holds a
+  token**: that command discards the existing sign-in as it starts, so "sign in again" on a
+  signed-in user would sign them out if they then closed the browser. This guard is also why
+  a connected row has no button. Success is exit 0 **and** a token in `auth.json`. On cancel
+  or timeout the app first asks the CLI's local callback server to stop
+  (`CODEX_LOGIN_CANCEL_URL`, two seconds at most) and then ends the process tree.
+- **Gemini** — a **visible window** running plain `agy` (`start_gemini_login()`: Terminal on
+  macOS, a new console on Windows). `agy` finishes its sign-in only when the code the browser
+  shows is pasted into a real terminal; a piped child never receives it (measured on Windows,
+  2026-11-19). The window opens with three lines in the app's language
+  (`term_gemini_step1`–`3`: sign in in the browser, copy the code, paste it here and press
+  Enter), and the settings row shows `ai_login_paste` with the same guidance. **The app does
+  not close that window, kill that process, or handle the code.** Success is the sign-in
+  fingerprint *changing* (`_gemini_login_marker()`), never the process exiting. After
+  `GEMINI_LOGIN_HINT_SEC` the row merely turns into "Try again"; a sign-in finished later is
+  still picked up by the ordinary read. The fake `open` / `rundll32` and the `SSH_*` trick
+  are not used here — the browser has to open.
+
+`_dbg` lines on these paths carry kinds, states and exit codes only — never a URL (download
+URLs can carry signed queries), a path or a token.
+
+**Observed** — one Mac (arm64), 2026-11-19, once: `install_cli("codex")` downloaded 0.170.0
+into the app-private bin, hash and signature passed (`TeamIdentifier=2DC432GLL2`), and
+`codex --version` ran; `claude` and `agy`, already installed, were returned without asking a
+server; the shell files, `PATH` and `~/.local/bin` were unchanged before and after. **Not
+observed:** any of the three sign-ins through this flow, an actual Claude Code or `agy`
+download, the GitHub fallback, an Intel Mac, the daily update replacing a file, and all of it
+on Windows.
+
+**[NEVER]** download from a real server, run a real CLI, or write to the real app-private bin
+from a test. `tests/test_cli_install_login.py` passes `http_get=` / `opener=` stand-ins and
+keeps everything under a temp directory.
 
 ### Timing: what recomputes when
 
@@ -1246,20 +1378,26 @@ govern:
   limit and so never spikes. That is the intended failure mode — no alert beats a wrong
   alert — and it must not be "fixed" by putting a default limit back.
 
-**2. The settings panel is a fixed-height view with hand-placed coordinates.** It has two
+**2. The settings panel is a fixed-size view with hand-placed coordinates.** It is 820 × 652
+(`PWID, PHT`). The left 420 holds the provider sections; the right 400 is the **AI
+connections** column (see [Installing and signing in](#installing-and-signing-in-to-the-three-clis-from-the-app)),
+placed beside rather than below because the height budget is spent. The left column has two
 provider sections of the same shape — `s_sec_claude` and `s_sec_codex`, each with
 `s_show_in_pill` (`show_claude` / `show_codex`), a data-source popup (`mode` /
 `codex_mode`), gauge checkboxes (`claude_gauges` over `CLAUDE_GAUGES` in a 2 × 2 grid,
 `codex_gauges` over `CODEX_GAUGES`), the Admin key (`admin_key` / `openai_admin_key`) and
-the monthly budget (`api_budget` / `codex_budget`). Spike sensitivity and the greeting come
-next, then Save and the version label. The Windows `SettingsDialog` copies the same
-coordinates (Qt flips y), the same keys and the same `PHT`.
+the monthly budget (`api_budget` / `codex_budget`) — then a Gemini section with the show
+toggle and its gauges only (`show_gemini`, `gemini_gauges`). Spike sensitivity and the
+greeting come next, then Save and the version label. The Windows `SettingsDialog` copies the
+same coordinates (Qt flips y), the same keys and the same `PWID, PHT`.
 
-**The content height is 568 and must stay ≤ 656.** The minimum supported screen is
+**The content height is 652 and must stay ≤ 656.** The minimum supported screen is
 1366×768, which leaves roughly 673 points once the menu bar and Dock are removed. An
 earlier version reserved space for hidden fields and reached 732, pushing Save and the
 title bar off a 768-tall screen. Every widget is placed by hand, so adding a row means
-recomputing every widget below it.
+recomputing every widget below it. The width, 820, fits the same 1366-wide screen. The AI
+connections rows are not saved settings: they are redrawn once a second from
+`ai_connect_row()` while the panel is open, and Save neither reads nor writes them.
 
 The following are gone, with their TR keys: the calibration fields, the absolute-limit
 fields, the advanced-limits window (`open_advanced_limits()` and Windows
