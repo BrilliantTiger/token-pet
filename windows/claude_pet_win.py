@@ -95,7 +95,6 @@ BTN_LINE = "#2E2E33"
 # SF Mono 는 Windows 에 배포할 수 없으므로 있으면 쓰고, 없으면 자간이 가장 비슷한 순서로 고른다.
 # 두 플랫폼에 같은 글꼴을 번들하면 여기 한 줄만 바꾼다 (QFontDatabase.addApplicationFont 뒤 그 이름을 앞에).
 MONO_FAMILIES = ("SF Mono", "Cascadia Mono", "Consolas")
-CLAUDE_INSTALL_URL_WIN = "https://claude.ai/install.ps1"   # macOS 판 install.sh 의 Windows 판
 UNINSTALL_PATHS_WIN = (cp.CONFIG_PATH, cp.CONFIG_PATH + ".lock", os.path.expanduser("~/claudepet_debug.log"))
 SPI_GETCLIENTAREAANIMATION = 0x1042
 
@@ -407,14 +406,7 @@ def find_codex_cli():
     확장자 없는 파일은 Windows 에서 실행할 수 없으므로 .cmd/.exe 를 먼저 찾고, 앱이 그 폴더가
     PATH 에 들어가기 전에 시작됐을 수 있어 그 폴더를 직접도 본다. 그 밖은 코어의 탐색에 맡긴다.
     """
-    cands = [shutil.which("codex.cmd"), shutil.which("codex.exe")]
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        cands.append(os.path.join(appdata, "npm", "codex.cmd"))
-    for p in cands:
-        if p and os.path.isfile(p):
-            return p
-    return cp._find_codex_cli()
+    return cp._find_codex_cli()      # .cmd/.exe 와 %APPDATA%\\npm 은 코어의 Windows 갈래가 본다
 
 
 def popen_detached(argv, inherit=None, cwd=None):
@@ -502,6 +494,9 @@ class PetWindow(QWidget):
         self._pending = None
         self._installer = None       # inno: 띄운 setup.exe 의 Popen — 앱을 닫지 않고 끝나면 _reap_installer 가 installing 을 지운다
         self.ui = {}                 # 설정 창 위젯 — macOS 판 ui 딕셔너리와 같은 키
+        # AI 연결: 제공자마다 진행 상태 하나, 취소 Event 하나 (macOS 판 ai_jobs / ai_cancel)
+        self.ai_jobs = {p: cp.new_ai_job() for p in cp.CLI_PROVIDERS}
+        self.ai_cancel = {p: threading.Event() for p in cp.CLI_PROVIDERS}
         self._logo_cache = {}        # 제공자 → 틴트까지 끝낸 QImage(또는 None). 필은 20 Hz 로 다시 그려진다
         self.tray = None             # make_tray 가 채운다 — 비모달 알림(notify) 의 출구
         self._closing = False        # closeEvent 재진입 방지 (Restart Manager 의 WM_CLOSE → 종료)
@@ -1053,6 +1048,8 @@ class PetWindow(QWidget):
         st = self.state
         now = time.monotonic()
         dirty = self._apply_pending()
+        if st.pop("ai_refresh", False):            # 설치·로그인이 끝났다 — 기다리지 않고 다시 받는다
+            self.refresh()
         if st.pop("relayout", False):              # paint 밖에서 크기를 바꾼다 (paint 중 resize 는 재진입 위험)
             self._relayout()
             dirty = True
@@ -1813,66 +1810,54 @@ class PetWindow(QWidget):
             pass
         os.startfile(cp.USER_PETS_DIR)
 
-    def _run_in_console(self, lines):
-        """새 PowerShell 창에서 실행 — macOS 판 _run_in_terminal(Terminal.app) 의 Windows 판."""
-        script = "; ".join(lines)
-        subprocess.Popen(["powershell", "-NoExit", "-Command", script],
-                         creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    # ── AI 연결: 세 CLI 의 설치·로그인 (계약 v7-I, macOS 판 ai_connect_click 과 같은 흐름) ──
+    # 콘솔 창에서 설치 스크립트(install.ps1·npm)를 돌리던 길은 없어졌다. 코어가 공식 실행 파일을 받아
+    # 해시·서명을 확인하고 앱 전용 폴더에 둔 뒤, 그 CLI 의 공식 로그인을 띄운다. 스레드는 코어가 연다.
+    def _ai_done(self, _result):
+        """설치·로그인이 끝났다(워커 스레드) — GUI 스레드의 tick 이 보고 바로 다시 받는다."""
+        self.state["ai_refresh"] = True
 
-    @staticmethod
-    def _ps_echo(s):
-        return "Write-Host '" + str(s).replace("'", "''") + "'"
+    def ai_connect_click(self, provider):
+        """설정 "AI 연결" 줄의 버튼 — 돌고 있으면 [취소], 아니면 [설치]/[로그인]/[다시 시도]."""
+        if self.ai_jobs[provider].get("phase") in ("download", "verify", "login"):
+            self.ai_cancel[provider].set()
+            return
+        self.ai_cancel[provider].clear()
+        cp.start_ai_connect(provider, self.ai_jobs[provider], cancel=self.ai_cancel[provider].is_set,
+                            done=self._ai_done)
 
+    # 우클릭의 다섯 항목 — 같은 흐름을 시작하고, 진행 상황과 [취소]가 보이게 설정 창을 연다.
     def _install_claude(self):
-        """Claude Code 설치 → 이어서 로그인까지 새 콘솔에서 (macOS 판 start_claude_install)."""
-        self._run_in_console([self._ps_echo(cp.t("term_installing")),
-                              f"irm {CLAUDE_INSTALL_URL_WIN} | iex",
-                              "Write-Host ''", self._ps_echo(cp.t("term_login")),
-                              '& "$env:USERPROFILE\\.local\\bin\\claude.exe" auth login',
-                              "Write-Host ''", self._ps_echo(cp.t("term_done"))])
+        self.ai_cancel["claude"].clear()
+        cp.start_ai_connect("claude", self.ai_jobs["claude"], cancel=self.ai_cancel["claude"].is_set,
+                            done=self._ai_done)
+        self._open_settings()
 
     def _login_claude(self):
-        binp = (shutil.which("claude") or shutil.which("claude.exe")
-                or os.path.expanduser("~/.local/bin/claude.exe"))
-        self._run_in_console([self._ps_echo(cp.t("term_login")),
-                              "& '" + binp.replace("'", "''") + "' auth login",
-                              "Write-Host ''", self._ps_echo(cp.t("term_done"))])
+        self.ai_cancel["claude"].clear()
+        cp.start_ai_connect("claude", self.ai_jobs["claude"], cancel=self.ai_cancel["claude"].is_set,
+                            done=self._ai_done)
+        self._open_settings()
 
     def _install_codex(self):
-        """Codex 설치(npm) → 이어서 로그인까지 새 콘솔에서 (macOS 판 start_codex_install).
-
-        npm 과 codex 는 cmd 로 부른다: PowerShell 에서 이름만 쓰면 npm.ps1/codex.ps1 이 먼저 잡히고,
-        Windows 클라이언트의 기본 실행 정책(Restricted)이 그 스크립트를 막는다. 설치 직후에는 이
-        콘솔의 PATH 에 npm 전역 폴더가 없을 수 있어 앞에 붙인다.
-        """
-        need = self._ps_echo(cp.t("term_need_npm"))
-        self._run_in_console([self._ps_echo(cp.t("term_installing_codex")),
-                              "if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { "
-                              + need + " }",
-                              'cmd /c "npm install -g @openai/codex"',
-                              "Write-Host ''", self._ps_echo(cp.t("term_login")),
-                              '$env:Path = "$env:APPDATA\\npm;" + $env:Path',
-                              'cmd /c "codex login"',
-                              "Write-Host ''", self._ps_echo(cp.t("term_done"))])
+        self.ai_cancel["codex"].clear()
+        cp.start_ai_connect("codex", self.ai_jobs["codex"], cancel=self.ai_cancel["codex"].is_set,
+                            done=self._ai_done)
+        self._open_settings()
 
     def _login_codex(self):
-        """설치돼 있으나 로그인만 필요한 경우 (macOS 판 start_codex_login). 찾은 CLI 의 폴더를 PATH 앞에."""
-        binp = find_codex_cli()
-        lines = [self._ps_echo(cp.t("term_login"))]
-        if binp:
-            lines.append("$env:Path = '" + os.path.dirname(binp).replace("'", "''") + ";' + $env:Path")
-        lines += ['cmd /c "codex login"', "Write-Host ''", self._ps_echo(cp.t("term_done"))]
-        self._run_in_console(lines)
+        self.ai_cancel["codex"].clear()
+        cp.start_ai_connect("codex", self.ai_jobs["codex"], cancel=self.ai_cancel["codex"].is_set,
+                            done=self._ai_done)
+        self._open_settings()
 
     def _login_gemini(self):
-        """우클릭 "Gemini 로그인(agy)" — 새 콘솔에서 agy 를 연다(macOS 판 start_gemini_login).
-        사용자가 고른 로그인이라 브라우저가 열려야 한다: 백그라운드 조회의 가짜 rundll32 는 쓰지 않는다.
-        로그인이 끝나면 agy 가 자격 증명을 다시 쓰고, 다음 확인이 그 지문 변화를 보고 스스로 다시 읽는다."""
-        binp = cp._find_agy_cli()
-        if not binp:
-            return
-        self._run_in_console([self._ps_echo(cp.t("term_login")),
-                              "& '" + binp.replace("'", "''") + "'"])
+        """코어가 새 콘솔 창에서 agy 를 연다(start_gemini_login). 맨 위에 할 일 세 줄이 찍히고, 설정 창의
+        Gemini 줄이 같은 안내를 보여 준다. 끝나면 자격 증명의 지문 변화로 안다."""
+        self.ai_cancel["gemini"].clear()
+        cp.start_ai_connect("gemini", self.ai_jobs["gemini"], cancel=self.ai_cancel["gemini"].is_set,
+                            done=self._ai_done)
+        self._open_settings()
 
     # ── 완전 삭제 (macOS 판 uninstallApp_ / do_uninstall 과 같은 순서: 거절할 수 있는 단계가 먼저) ──
     def _uninstall(self):
@@ -2220,6 +2205,7 @@ class PetWindow(QWidget):
             p.hide()
             p.deleteLater()
         self.ui["panel"] = None        # 다음에 열 때 새 언어로 재구성
+        self.ui["ai_rows"] = None
 
     def closeEvent(self, e):
         """창 닫기 요청(WM_CLOSE) 은 곧 앱 종료다. 트레이의 보이기/숨기기는 setVisible 이라 여기를 거치지 않는다.
@@ -2302,14 +2288,14 @@ class PetWindow(QWidget):
 
 
 class SettingsDialog(QDialog):
-    """macOS 판 open_settings 의 NSPanel(420×652) 을 같은 좌표로 옮긴 것.
+    """macOS 판 open_settings 의 NSPanel(820×652) 을 같은 좌표로 옮긴 것(오른쪽 400 이 "AI 연결" 칸).
 
     AppKit 은 y 가 아래에서 위로, Qt 는 위에서 아래로 커지므로 위젯의 위쪽 = PHT − y − h 로 뒤집는다.
     라벨·입력·팝업·체크·버튼의 x/폭/높이와 y 간격은 macOS 판과 같다. 펫·언어, Claude Code 구역,
     Codex 구역(같은 모양), Gemini 구역(표시 + 게이지 셋), 공통(급증 민감도·인사), 저장·버전 순서이고 높이 예산 ≤ 656 도 그대로다
     (CLAUDE.md Danger zone). 보정·한도·고급 창은 2026-10-05 에 없어졌다.
     """
-    PWID, PHT = 420, 652
+    PWID, PHT = 820, 652
 
     def __init__(self, win):
         super().__init__(None, Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
@@ -2438,10 +2424,34 @@ class SettingsDialog(QDialog):
         y -= 32
         greet = check(t("s_greet"), 20, y, 380, R.get("greet"))
 
+        # ── AI 연결 (오른쪽 칸, macOS 판과 같은 좌표) — 글자와 버튼은 cp.ai_connect_row 가 정한다 ──
+        ax = 440
+        head = label(t("ai_sec"), ax, self.PHT - 40, 300)
+        head.setStyleSheet("font-weight: bold;")
+        ai_rows = {}
+        for n, p in enumerate(cp.CLI_PROVIDERS):
+            top = self.PHT - 78 - n * 124
+            name = label(cp.AI_PROVIDER_NAMES[p], ax, top, 230)
+            name.setStyleSheet("font-weight: bold;")
+            status_l = label("", ax, top - 24, 240)
+            btn = QPushButton("", self)
+            btn.setGeometry(self.PWID - 130, self.PHT - (top - 16) - 30, 110, 30)
+            btn.clicked.connect(lambda _=False, prov=p: win.ai_connect_click(prov))
+            hint_l = label("", ax, top - 76, 360, 46)
+            hint_l.setWordWrap(True)
+            hint_l.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            hint_l.setStyleSheet("color: palette(placeholder-text);")
+            ai_rows[p] = {"status": status_l, "button": btn, "hint": hint_l}
+        self.ai_rows = ai_rows
+        self.ai_timer = QTimer(self)                 # 받는 중 n%·로그인 안내를 1초마다 고친다
+        self.ai_timer.timeout.connect(self.ai_rows_refresh)
+        self.ai_timer.start(1000)
+        self.ai_rows_refresh()
+
         vl = label(f"ClaudePet v{cp.APP_VERSION}", 20, 18, 200)
         vl.setStyleSheet("color: palette(placeholder-text);")     # NSColor.secondaryLabelColor
         save_btn = QPushButton(t("s_save"), self)
-        save_btn.setGeometry(self.PWID - 110, self.PHT - 12 - 30, 90, 30)
+        save_btn.setGeometry(420 - 110, self.PHT - 12 - 30, 90, 30)
         save_btn.clicked.connect(win.save_settings)
 
         win.ui.update({"panel": self, "mode": mode, "sens": sens, "greet": greet,
@@ -2450,10 +2460,22 @@ class SettingsDialog(QDialog):
                        "show_codex": show_codex, "codex_mode": codex_mode, "codex_g": codex_g,
                        "okey": f_okey, "cbud": f_cbud,
                        "show_gemini": show_gemini, "gemini_g": gemini_g,
+                       "ai_rows": ai_rows,
                        "pet": pet_pop, "pet_ids": pet_ids})
         scr = win.screen() or QApplication.primaryScreen()        # macOS panel.center()
         a = scr.availableGeometry()
         self.move(a.center().x() - self.PWID // 2, a.center().y() - self.PHT // 2)
+
+    def ai_rows_refresh(self):
+        """"AI 연결" 세 줄을 지금 상태로 고친다 (macOS 판 ai_rows_refresh)."""
+        for p, w in self.ai_rows.items():
+            row = cp.ai_connect_row(p, bool(cp.find_cli(p)), cp.cli_logged_in(p), self.win.ai_jobs[p])
+            status, button, hint = cp.ai_connect_text(row)
+            w["status"].setText(status)
+            w["hint"].setText(hint)
+            w["button"].setVisible(button is not None)
+            if button is not None:
+                w["button"].setText(button)
 
     def closeEvent(self, e):
         # X 로 닫힐 때 (macOS 판 windowWillClose_ → close_main_panel)
