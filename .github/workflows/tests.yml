@@ -7,10 +7,13 @@ name: tests
 #
 # macOS 와 Windows 를 **둘 다** 돌린다. 이 저장소의 원칙은 맥에서 되는 것은 윈도우에서도
 # 똑같이 돼야 한다는 것이고, 그 원칙은 테스트 커버리지에도 적용된다.
+#
+# main 에 push 될 때도 돌린다. dev→main 머지 커밋은 main 에만 생기므로, main 이 빠져
+# 있으면 그 커밋에는 push CI 결과가 없어 CI 게이트가 머지를 막는다.
 
 on:
   push:
-    branches: ["claude/**", "dev"]
+    branches: ["claude/**", "dev", "main"]
   pull_request:
   workflow_dispatch:
 
