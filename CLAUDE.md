@@ -1607,11 +1607,13 @@ in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
 
 1. **Bump `APP_VERSION`** in `claude_pet.py`. It must match `CFBundleShortVersionString`.
    The in-app updater compares this against the latest GitHub release tag of
-   `GITHUB_REPO` (`BrilliantTiger/claude-pet`), so a mismatch either suppresses a real update or
+   `GITHUB_REPO` (`BrilliantTiger/token-pet`), so a mismatch either suppresses a real update or
    offers a phantom one. This is the commit that makes a change a *release commit* under
    [AGENTS.md §6](AGENTS.md#release-steps-are-separately-authorized).
    The repository moved from `uygnoey/claude-pet` to the `BrilliantTiger` organization on
-   2026-10-11; the old address 301-redirects, so copies built with the old constant still reach it.
+   2026-10-11, and was renamed from `claude-pet` to `token-pet` on 2026-11-12. Both old addresses
+   301-redirect, so copies built with an old constant still reach it — but the constant itself
+   names the current repository and does not lean on that redirect.
 2. **Add a section to the top of the changelog in `RELEASE_NOTES.md`**, in Korean.
    `release.sh` uses this file as the release body — which is why it is a maintained file
    rather than generated from git history.
