@@ -2322,6 +2322,15 @@ def allow_keychain_prompt():
     같은 누름이 Gemini(agy) 사용량도 바로 다시 받게 한다(_gemini_cache["click"]) — 키체인과는
     상관없다: Gemini 는 agy 에게 묻고, 앱은 agy 의 키체인 항목을 읽지 않는다."""
     _keychain_prompt_until[0] = time.time() + KEYCHAIN_PROMPT_WINDOW_SEC
+    request_gemini_refresh()
+
+
+def request_gemini_refresh():
+    """사용자가 직접 눌렀다 — Gemini(agy) 사용량을 다음 새로고침에서 바로 다시 받게 한다.
+
+    깃발만 올린다(_gemini_cache 의 click·click_check). 마지막 실행에서 GEMINI_CLICK_MIN_SEC(60초)이
+    지나지 않았으면 그때까지 기다리고, 한 번의 누름은 한 번의 실행에만 쓰인다(fetch_gemini_usage).
+    키체인과 무관하다 — Windows 포트는 allow_keychain_prompt 대신 이것을 부른다."""
     _gemini_cache["click"] = True
     _gemini_cache["click_check"] = True
 
@@ -4514,6 +4523,13 @@ GEMINI_SECURITY_TIMEOUT = 5    # 존재 확인(security) 한 번의 상한(초)
 GEMINI_KEYCHAIN_SERVICE = "gemini"          # agy 의 키체인 항목 — 있는지만 본다
 GEMINI_KEYCHAIN_ACCOUNT = "antigravity"
 GEMINI_FALLBACK_NAME = "antigravity-oauth-token"   # agy 의 파일 폴백 저장소(존재·mtime 만 본다)
+# Windows(계약 v7-W): agy 는 토큰을 자격 증명 관리자의 일반 자격 증명 "gemini:antigravity" 에 둔다
+# (go-keyring 의 service + ":" + user). 앱 본체는 그 항목을 읽지 않는다 — 앱 자신을 숨은 인자로 다시
+# 띄운 짧은 자식(gemini_cred_probe_main)이 있는지와 LastWritten 만 알려 준다.
+GEMINI_CRED_TARGET = "gemini:antigravity"
+GEMINI_CRED_PROBE_FLAG = "--gemini-cred-probe"
+GEMINI_APP_DIRNAME = "me.yeongyu.claudepet"        # %LOCALAPPDATA% 아래의 앱 전용 폴더
+GEMINI_FAKE_OPEN_DIRNAME = "fake-open"             # 그 안의, 아무것도 하지 않는 rundll32.exe 의 폴더
 # 일시 실패 때 직전 행을 보여 주는 한도 — 마지막 성공에서 이만큼 지나면 옛 값을 내린다.
 GEMINI_KEEP_SEC = 1800
 # agy 가 뜰 폴더의 이름(개인 임시 폴더 아래). 비어 있는 전용 폴더다.
@@ -4696,12 +4712,35 @@ def _gemini_edge_rules():
             "no_agy_status": "not_installed", "no_color": True}
 
 
+def _win_home():
+    """Windows 의 사용자 홈 — %USERPROFILE%, 없으면 expanduser."""
+    return os.environ.get("USERPROFILE") or os.path.expanduser("~")
+
+
+def _win_local_appdata():
+    """%LOCALAPPDATA%, 없으면 홈 아래의 AppData\\Local."""
+    return os.environ.get("LOCALAPPDATA") or os.path.join(_win_home(), "AppData", "Local")
+
+
+def _win_app_dir():
+    """앱 전용 폴더 %LOCALAPPDATA%\\me.yeongyu.claudepet (만들지는 않는다)."""
+    return os.path.join(_win_local_appdata(), GEMINI_APP_DIRNAME)
+
+
 def _find_agy_cli():
     """agy 실행 파일의 경로, 없으면 None. PATH 에서 찾고, 없으면 실행 가능한 ~/.local/bin/agy —
     Finder 가 띄운 앱의 PATH 는 짧아서 사용자의 셸이 찾는 자리를 못 볼 수 있다."""
     found = shutil.which("agy")
     if found:
         return found
+    if sys.platform == "win32":
+        # 계약 v7-W1: 공식 설치 위치 → ~/.local/bin → 앱 전용 bin(마지막 — 사용자가 깐 것이 먼저다).
+        for path in (os.path.join(_win_local_appdata(), "agy", "bin", "agy.exe"),
+                     os.path.join(_win_home(), ".local", "bin", "agy.exe"),
+                     os.path.join(_win_app_dir(), "bin", "agy.exe")):
+            if os.path.isfile(path):
+                return path
+        return None
     local = os.path.join(os.path.expanduser("~"), ".local", "bin", "agy")
     if os.path.isfile(local) and os.access(local, os.X_OK):
         return local
@@ -4721,7 +4760,7 @@ def gemini_cli_cwd():
         except FileExistsError:
             pass
         st = os.lstat(path)
-        if stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid():
+        if stat.S_ISDIR(st.st_mode) and (sys.platform == "win32" or st.st_uid == os.getuid()):
             return path
     except OSError:
         pass
@@ -4747,7 +4786,10 @@ def _gemini_item_mdat():
 
     `-w`·`-g` 없는 find-generic-password 다 — 비밀값을 열지 않으므로 창이 뜨지 않는다. 종료 0 = 있음,
     44 = 없음, 그 밖(시간 초과·실행 실패 포함)은 모름. 출력에서 꺼내는 것은 "mdat" 줄의 시각뿐이고,
-    출력 자체는 어디에도 남기지 않는다."""
+    출력 자체는 어디에도 남기지 않는다. Windows 에서는 자격 증명 관리자 프로브(_gemini_cred_probe)가
+    같은 모양으로 답한다 — 지문은 LastWritten."""
+    if sys.platform == "win32":
+        return _gemini_cred_probe()
     try:
         r = subprocess.run(["security", "find-generic-password", "-s", GEMINI_KEYCHAIN_SERVICE,
                             "-a", GEMINI_KEYCHAIN_ACCOUNT],
@@ -4767,8 +4809,127 @@ def _gemini_item_mdat():
 def _gemini_fallback_paths(rules):
     """agy 의 파일 폴백 저장소(키체인을 못 쓰는 환경)가 있을 자리들 — 늘 홈 아래 한 곳이다
     (agy CLI 는 ANTIGRAVITY_APP_DATA_DIR 를 토큰 파일 위치로 쓰지 않는다)."""
-    return [os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-cli",
-                         GEMINI_FALLBACK_NAME)]
+    home = _win_home() if sys.platform == "win32" else os.path.expanduser("~")
+    return [os.path.join(home, ".gemini", "antigravity-cli", GEMINI_FALLBACK_NAME)]
+
+
+# ── Windows: 자격 증명 관리자 프로브 ──
+#
+# Win32 에는 비밀값을 복호화하지 않고 메타데이터만 주는 호출이 없다(CredReadW 는 blob 까지 한 덩어리로
+# 돌려준다). 그래서 **앱 본체는 부르지 않는다**: 앱 자신을 숨은 인자로 다시 띄운 짧은 자식이 한 건만
+# 읽고, blob 을 파이썬 객체로 만들지 않은 채 지우고(RtlZeroMemory) 놓은(CredFree) 뒤 표준출력에
+# `1 <LastWritten>` 또는 `0` 만 쓴다. 목록을 훑는 호출과 명령줄 도구는 쓰지 않는다 — 앞의 것은 다른
+# 자격 증명의 비밀값까지 메모리에 올리고, 뒤의 것은 종료 코드가 언제나 0 이고 수정 시각을 주지 않는다.
+
+def parse_gemini_cred_probe(text):
+    """프로브 자식의 표준출력 → (True, LastWritten 정수) | (False, None) | (None, None)(모름).
+
+    뜻이 있는 모양은 `1 <음이 아닌 정수>` 와 `0` 둘뿐이다(앞뒤 공백·줄바꿈 허용). 순수, 예외 없음."""
+    try:
+        if isinstance(text, (bytes, bytearray)):
+            text = bytes(text).decode("ascii")
+        if not isinstance(text, str):
+            return None, None
+        body = text.strip()
+        if body == "0":
+            return False, None
+        parts = body.split(" ")
+        if (len(parts) == 2 and parts[0] == "1" and parts[1].isascii() and parts[1].isdigit()
+                and len(parts[1]) <= 20):
+            return True, int(parts[1])
+    except Exception:
+        pass
+    return None, None
+
+
+def _gemini_cred_last_written():
+    """자격 증명 관리자에서 GEMINI_CRED_TARGET 한 건을 읽어 (True, LastWritten) | (False, None) |
+    (None, None). 자식 프로세스에서만 부른다. blob 은 파이썬 객체로 만들지 않는다 — 주소와 길이만 받아
+    그 자리에서 0 으로 덮고 놓는다."""
+    import ctypes
+    from ctypes import wintypes
+
+    class CREDENTIALW(ctypes.Structure):
+        _fields_ = [("Flags", wintypes.DWORD), ("Type", wintypes.DWORD),
+                    ("TargetName", ctypes.c_void_p), ("Comment", ctypes.c_void_p),
+                    ("LastWrittenLow", wintypes.DWORD), ("LastWrittenHigh", wintypes.DWORD),
+                    ("CredentialBlobSize", wintypes.DWORD), ("CredentialBlob", ctypes.c_void_p),
+                    ("Persist", wintypes.DWORD), ("AttributeCount", wintypes.DWORD),
+                    ("Attributes", ctypes.c_void_p), ("TargetAlias", ctypes.c_void_p),
+                    ("UserName", ctypes.c_void_p)]
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    read = advapi.CredReadW
+    read.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                     ctypes.POINTER(ctypes.POINTER(CREDENTIALW))]
+    read.restype = wintypes.BOOL
+    free = advapi.CredFree
+    free.argtypes = [ctypes.c_void_p]
+    free.restype = None
+    wipe = kernel.RtlZeroMemory
+    wipe.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+    wipe.restype = None
+    pcred = ctypes.POINTER(CREDENTIALW)()
+    if not read(GEMINI_CRED_TARGET, 1, 0, ctypes.byref(pcred)):      # 1 = CRED_TYPE_GENERIC
+        if ctypes.get_last_error() == 1168:                          # ERROR_NOT_FOUND — 이것만 '없음'
+            return False, None
+        return None, None
+    try:
+        cred = pcred.contents
+        stamp = (int(cred.LastWrittenHigh) << 32) | int(cred.LastWrittenLow)
+        if cred.CredentialBlob and cred.CredentialBlobSize:
+            wipe(cred.CredentialBlob, cred.CredentialBlobSize)
+        return True, stamp
+    finally:
+        free(pcred)
+
+
+def gemini_cred_probe_main():
+    """자식 쪽 본체(앱을 GEMINI_CRED_PROBE_FLAG 로 다시 띄웠을 때) → 종료 코드.
+
+    표준출력에 `1 <LastWritten>` 또는 `0` 만 쓴다. 모르는 결과면 아무것도 쓰지 않는다(부모는 '모름').
+    창 없는 빌드의 자식은 파이썬의 표준출력 객체가 없을 수 있어 파일 기술자 1 에 직접 쓴다."""
+    try:
+        present, stamp = _gemini_cred_last_written()
+    except Exception:
+        return 2
+    if present is True:
+        line = "1 %d\n" % stamp
+    elif present is False:
+        line = "0\n"
+    else:
+        return 2
+    try:
+        os.write(1, line.encode("ascii"))
+    except OSError:
+        return 2
+    return 0
+
+
+def _gemini_probe_argv():
+    """프로브 자식의 argv — 앱 자신 + 숨은 인자. 배포판에서는 exe 하나, 소스 실행에서는 인터프리터와
+    지금 도는 진입 스크립트(Windows 포트의 것 — 코어를 직접 실행할 수는 없다)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, GEMINI_CRED_PROBE_FLAG]
+    script = getattr(sys.modules.get("__main__"), "__file__", None) or __file__
+    return [sys.executable, os.path.abspath(script), GEMINI_CRED_PROBE_FLAG]
+
+
+def _gemini_cred_probe():
+    """부모 쪽: 프로브 자식을 한 번 띄워 (있음 True | 없음 False | 모름 None, LastWritten 또는 None).
+    창 없이(CREATE_NO_WINDOW), 짧은 상한 안에. 답이 두 모양 밖이면(죽음·멈춤·뜻 모를 줄) 모름."""
+    try:
+        r = subprocess.run(_gemini_probe_argv(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, timeout=GEMINI_SECURITY_TIMEOUT,
+                           cwd=gemini_cli_cwd(), creationflags=_spawn_no_window_flags())
+    except Exception as e:
+        _dbg("gemini login: probe did not answer", type(e).__name__)
+        return None, None
+    if r.returncode != 0:
+        _dbg("gemini login: probe rc", r.returncode)
+        return None, None
+    return parse_gemini_cred_probe(r.stdout)
 
 
 def _gemini_login_marker(rules):
@@ -4811,7 +4972,7 @@ def compute_gemini_onboard_state(runtime=None):
 
     Gemini 를 보이게 했고, agy 가 설치돼 있고, 로그인이 안 돼 있을 때(GEMINI_STATUS["auth_error"] —
     항목이 없거나 agy 가 로그인을 요구했다)만 "login". agy 가 없으면 눌러도 열 것이 없으니 내지 않는다."""
-    if sys.platform != "darwin":
+    if sys.platform not in ("darwin", "win32"):
         return None
     if not provider_shown(RUNTIME if runtime is None else runtime, "gemini"):
         return None
@@ -4906,6 +5067,76 @@ def _gemini_fake_open_dir():
     return folder
 
 
+def _file_sha256(path):
+    """파일의 (크기, SHA-256 16진수) — 청크로 읽는다."""
+    h = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1 << 16)
+            if not chunk:
+                break
+            h.update(chunk)
+            size += len(chunk)
+    return size, h.hexdigest()
+
+
+def _gemini_fake_rundll_dir():
+    """Windows: 아무것도 하지 않는 `rundll32.exe` 하나만 든 앱 전용 폴더의 경로, 만들 수 없으면 None.
+
+    Windows 의 agy 는 `rundll32 url.dll,FileProtocolHandler <주소>` 로 브라우저를 연다 — 절대 경로가
+    아니라 이름으로. 백그라운드 실행의 PATH 맨 앞에 이 폴더를 두면 그 이름이 여기서 끝난다. 파일은
+    **이 기기의 지금 System32\\systray.exe 의 사본**이다(GUI 서브시스템, 인자를 무시하고 창 없이 0 으로
+    끝난다 — agy 협의 5 의 Windows 11 실측). 배치 파일(.cmd/.bat)은 쓰지 않는다: cmd.exe 가 로그인 주소의
+    `&` 를 명령으로 읽는다.
+
+    **부를 때마다** 그 systray.exe 와 크기·SHA-256 을 대조해 다르면 다시 복사한다(고정 해시 상수는 두지
+    않는다 — Windows 업데이트가 systray.exe 를 바꾼다). 폴더에 다른 것이 있으면 치운다(PATHEXT 에서
+    .com 은 .exe 보다 먼저 잡힌다). systray.exe 가 없으면 None — 브라우저를 막지 못한 채로는 띄우지 않는다."""
+    source = _windows_system32("systray.exe")
+    app_dir = _win_app_dir()
+    folder = os.path.join(app_dir, GEMINI_FAKE_OPEN_DIRNAME)
+    target = os.path.join(folder, "rundll32.exe")
+    try:
+        want = _file_sha256(source)
+        if os.path.islink(folder) or (os.path.lexists(folder) and not os.path.isdir(folder)):
+            os.unlink(folder)
+        os.makedirs(folder, exist_ok=True)
+        for name in os.listdir(folder):
+            if name.lower() == "rundll32.exe":
+                continue
+            extra = os.path.join(folder, name)
+            if os.path.isdir(extra) and not os.path.islink(extra):
+                shutil.rmtree(extra)
+            else:
+                os.unlink(extra)
+        ok = False
+        if os.path.lexists(target):
+            if stat.S_ISREG(os.lstat(target).st_mode):
+                ok = _file_sha256(target) == want
+            if not ok:
+                os.unlink(target)
+        if not ok:
+            # 폴더 밖(앱 전용 폴더)에 써 두고 옮긴다 — 폴더 안에는 언제나 rundll32.exe 하나뿐이다.
+            fd, staged = tempfile.mkstemp(prefix="rundll32-", suffix=".tmp", dir=app_dir)
+            try:
+                with os.fdopen(fd, "wb") as out, open(source, "rb") as src:
+                    shutil.copyfileobj(src, out, 1 << 16)
+                os.replace(staged, target)
+            except BaseException:
+                try:
+                    os.unlink(staged)
+                except OSError:
+                    pass
+                raise
+            if not (stat.S_ISREG(os.lstat(target).st_mode) and _file_sha256(target) == want):
+                return None
+    except OSError as e:
+        _dbg("gemini fetch: fake rundll32 not made", type(e).__name__)
+        return None
+    return folder
+
+
 def _agy_env(rules):
     """백그라운드 agy 의 환경(os.environ 의 **사본** — 앱 자신의 환경은 바꾸지 않는다), 만들 수 없으면 None.
 
@@ -4914,16 +5145,26 @@ def _agy_env(rules):
       · PATH 맨 앞에 아무것도 하지 않는 `open` 의 폴더(_gemini_fake_open_dir) — 로그인이 필요해진 agy 가
         브라우저를 열지 못한다. 나머지 PATH 는 원래 순서 그대로.
       · NO_COLOR=1 — stderr 의 로그인 문구에 색 코드가 섞이지 않게.
+      · AGY_CLI_DISABLE_AUTO_UPDATE=1 — 조회용 실행이 agy 의 자동 업데이터를 띄우지 않게. 로그인 요구나
+        시간 초과로 트리를 끊을 때 업데이터가 실행 파일을 바꾸는 도중에 죽는 일을 막는다(계약 v7-W4).
+      · Windows: 가짜 open 대신 아무것도 하지 않는 rundll32.exe 의 폴더(_gemini_fake_rundll_dir), 그리고
+        NoDefaultCurrentDirectoryInExePath=1 — 작업 폴더의 같은 이름이 먼저 잡히지 않게.
     가짜 open 을 만들지 못하면 None — 브라우저를 막지 못한 채로는 띄우지 않는다."""
-    folder = _gemini_fake_open_dir()
+    win = sys.platform == "win32"
+    folder = _gemini_fake_rundll_dir() if win else _gemini_fake_open_dir()
     if folder is None:
         return None
     env = dict(os.environ)
-    for key in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION"):
+    for key in [k for k in env if k.upper() in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION")]:
         env.pop(key, None)
-    env["PATH"] = folder + os.pathsep + env.get("PATH", os.defpath)
+    path_key = "PATH"
+    if win:
+        path_key = next((k for k in env if k.upper() == "PATH"), "PATH")
+        env["NoDefaultCurrentDirectoryInExePath"] = "1"
+    env[path_key] = folder + os.pathsep + env.get(path_key, os.defpath)
     if rules["no_color"]:
         env["NO_COLOR"] = "1"
+    env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "1"
     return env
 
 
@@ -4945,7 +5186,20 @@ def _agy_drain(stream, chunks):
 
 def _agy_kill_group(proc):
     """agy 와 그것이 띄운 것들을 한꺼번에 끝낸다. agy 는 자기 세션의 리더로 떴으므로(start_new_session)
-    그룹 id 가 pid 와 같다."""
+    그룹 id 가 pid 와 같다. Windows 에는 프로세스 그룹 신호가 없다 — **agy 가 살아 있을 때**
+    System32 의 taskkill /PID <pid> /T /F 로 트리를 끝낸다(죽은 pid 로는 자식을 못 찾는다, 계약 v7-W5).
+    이미 끝난 agy 에는 아무것도 하지 않는다."""
+    if sys.platform == "win32":
+        if proc.poll() is not None:
+            return
+        try:
+            subprocess.run([_windows_system32("taskkill.exe"), "/PID", str(proc.pid), "/T", "/F"],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=15,
+                           creationflags=_spawn_no_window_flags())
+        except Exception as e:
+            _dbg("gemini fetch: taskkill failed", type(e).__name__)
+        return
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except OSError:
@@ -4962,7 +5216,13 @@ def _agy_reap(proc):
             proc.wait(timeout=5)
             return
         except subprocess.TimeoutExpired:
-            _agy_kill_group(proc)
+            if sys.platform == "win32":
+                try:
+                    proc.kill()               # taskkill 이 못 끝냈다 — 적어도 agy 자신은 끝낸다
+                except OSError:
+                    pass
+            else:
+                _agy_kill_group(proc)
         except Exception as e:
             _dbg("gemini fetch: reap failed", type(e).__name__)
             return
@@ -4980,9 +5240,13 @@ def _agy_exec(agy, rules):
     if env is None:
         return None
     try:
+        if sys.platform == "win32":
+            how = {"creationflags": _spawn_no_window_flags()}      # 콘솔 창 없이
+        else:
+            how = {"start_new_session": True}
         proc = subprocess.Popen([agy] + list(GEMINI_AGY_ARGS), stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                cwd=gemini_cli_cwd(), env=env, start_new_session=True)
+                                cwd=gemini_cli_cwd(), env=env, **how)
     except Exception as e:
         _dbg("gemini fetch: agy did not run", type(e).__name__)
         return None
@@ -5057,7 +5321,7 @@ def _run_agy_usage(agy, rules):
 
 
 def fetch_gemini_usage():
-    """Gemini(agy) 사용량 행 [(label, pct, reset_dt, None)], 읽을 게 없으면 None. macOS 에서만.
+    """Gemini(agy) 사용량 행 [(label, pct, reset_dt, None)], 읽을 게 없으면 None. macOS 와 Windows 에서.
 
     새로고침(30초)마다 불리지만 프로세스는 드물게 띄운다. 차례:
 
@@ -5078,7 +5342,7 @@ def fetch_gemini_usage():
        실패다: 직전에 성공한 행이 있고 마지막 성공에서 GEMINI_KEEP_SEC 이 지나지 않았으면 리셋 지난
        레인만 빼고 그 행을 돌려준다.
     """
-    if sys.platform != "darwin":
+    if sys.platform not in ("darwin", "win32"):
         return None
     rules = _gemini_edge_rules()
     c = _gemini_cache

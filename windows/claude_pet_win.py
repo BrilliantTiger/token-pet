@@ -466,6 +466,10 @@ class PetWindow(QWidget):
                       # Codex API 모드의 오늘·이달 비용과 마지막 조회 실패 종류(키 거부/일시 실패).
                       "codex_cost": None, "codex_cost_month": None,
                       "codex_api_error": False, "codex_api_stale": False,
+                      # gemini: Gemini(agy) 사용량 행 또는 None — cp.start_gemini_refresh 가 자기 스레드에서
+                      # 채운다. gemini_onboard: None|'login'(cp.compute_gemini_onboard_state) — 우클릭
+                      # 메뉴가 읽는다(macOS 판과 같은 두 키).
+                      "gemini": None, "gemini_onboard": None,
                       # 요약 필 레이아웃. summary_lines_n 은 어댑터가 남기고 pill_band() 가 읽는다
                       # (높이가 줄 수를 따라가게 하는 유일한 경로). pill_w 는 _apply_pill_width 가
                       # 기록하고 geom() 이 읽는다 — 폭이 내용을 따라가게 하는 유일한 경로.
@@ -483,6 +487,13 @@ class PetWindow(QWidget):
             self.state.get("codex_cost"), self.state.get("codex_cost_month"),
             bool(self.state.get("codex_api_error")), bool(self.state.get("codex_api_stale")),
             auth_error=bool(cp.CODEX_STATUS.get("auth_error")))
+        # Gemini 구간 훅 — Codex 의 짝(macOS 판 state["gemini_summary"] 와 같은 모양). 급증 감지가
+        # 없으므로 provider_spiking 을 넘기지 않는다. 행이 없으면 구간도 없다 — 로그인 안 됨은 필이
+        # 아니라 우클릭 메뉴(state["gemini_onboard"])가 알린다.
+        self.state["gemini_summary"] = lambda: cp.gemini_summary_segment(
+            cp.RUNTIME, self.state.get("gemini"),
+            auth_error=bool(cp.GEMINI_STATUS.get("auth_error")),
+            last_error=cp.GEMINI_STATUS.get("last_error"), buckets=cp.GEMINI_BUCKETS)
         self.sticky = {"on": False}
         self._down = None
         self._moved = False
@@ -703,6 +714,7 @@ class PetWindow(QWidget):
         R = cp.RUNTIME
         show_claude = cp.provider_shown(R, "claude")
         show_codex = cp.provider_shown(R, "codex")
+        show_gemini = cp.provider_shown(R, "gemini")
         key = (R["mode"], cp.L["lang"], st.get("onboard"), id(stats), id(oauth),
                st["cost"], st["cost_month"], R.get("api_budget"),
                bool(cp.OAUTH_STATUS.get("auth_error")), bool(st.get("api_error")),
@@ -713,6 +725,8 @@ class PetWindow(QWidget):
                st.get("codex_cost"), st.get("codex_cost_month"),
                bool(st.get("codex_api_error")), bool(st.get("codex_api_stale")),
                bool(cp.CODEX_STATUS.get("auth_error")),
+               id(st.get("gemini")), show_gemini, tuple(R.get("gemini_gauges") or ()),
+               bool(cp.GEMINI_STATUS.get("auth_error")), cp.GEMINI_STATUS.get("last_error"),
                int(time.time() / 5))
         memo = getattr(self, "_summary_memo", None)
         if memo and memo[0] == key:
@@ -746,7 +760,9 @@ class PetWindow(QWidget):
         # 0% 도, 빈 '조회 중' 줄도 지어내지 않는다.
         codex_hook = st.get("codex_summary")
         codex_seg = codex_hook() if codex_hook else None
-        # Codex 만 쓰는 사용자에게 "Claude Code 미설치/로그인 필요"를 계속 들이밀지 않는다 —
+        gemini_hook = st.get("gemini_summary")
+        gemini_seg = gemini_hook() if gemini_hook else None
+        # Codex(또는 Gemini)만 쓰는 사용자에게 "Claude Code 미설치/로그인 필요"를 계속 들이밀지 않는다 —
         # Codex 행이 실제로 뜬다면(= 그 제공자를 켜서 쓰고 있다는 뜻) 온보딩 안내는 그 사람에게
         # 할 일이 없는 문구다. 토큰 만료·조회 중 같은 다른 status 는 그대로 둔다 — 저건
         # "Claude Code 를 쓰다가 지금 문제"라는 뜻이라 Codex 유무와 무관하게 알려야 한다.
@@ -754,7 +770,8 @@ class PetWindow(QWidget):
         claude_onboarding_suppressed = (
             segment is not None
             and segment[0] == "status" and segment[1] in ("onb_install", "onb_login")
-            and bool(codex_seg) and codex_seg[0] != "status"
+            and ((bool(codex_seg) and codex_seg[0] != "status")
+                 or (bool(gemini_seg) and gemini_seg[0] != "status"))
         )
         # 지금 떠 있는 상태 키 — 필 클릭의 뜻을 고를 때 쓴다. 상태 문구가 아니면 None 이라
         # 숫자가 떠 있는 필의 클릭은 아무 뜻도 갖지 않는다. 위에서 억눌러 화면에 보이지 않는
@@ -782,13 +799,15 @@ class PetWindow(QWidget):
         # 같은 순간이다. (두 조회가 나중에 서로 독립이 되면 제공자별 신호가 필요해진다.)
         fetched = isinstance(st.get("stats"), dict)
         kinds = {}
-        for pid, seg in (("claude", segment), ("codex", codex_seg)):
+        for pid, seg in (("claude", segment), ("codex", codex_seg), ("gemini", gemini_seg)):
             if not seg:
                 continue                    # 꺼졌거나 보일 게 없는 제공자 — 블록이 없다
             # Codex 의 API 모드 상태(codex_need_admin_key 등)는 그 제공자의 할 일이라 Codex
             # 블록으로 보인다. 그 밖의 Codex 상태(조회 중 등)는 블록을 만들지 않는다.
-            codex_own = pid == "codex" and seg[0] == "status" and str(seg[1]).startswith("codex_")
-            if seg[0] != "status" or codex_own:
+            # Gemini 는 지금 상태 구간을 내지 않지만(cp.gemini_summary_segment) 낸다면 같은 규칙이다.
+            own_status = (pid in ("codex", "gemini") and seg[0] == "status"
+                          and str(seg[1]).startswith(pid + "_"))
+            if seg[0] != "status" or own_status:
                 kinds[pid] = ("ready", seg)
             elif not fetched and seg[1] in ("loading", "scanning"):
                 # '받는중'은 **일반 대기 상태(loading/scanning)일 때만**이다. api_key_rejected·온보딩·
@@ -801,7 +820,7 @@ class PetWindow(QWidget):
         if not kinds:
             # 보일 제공자가 없다. 둘 다 꺼 두었으면 그렇다고 말하고(설정으로 가는 클릭),
             # 켜 둔 쪽이 아직 아무것도 못 냈으면 기다리는 중이다.
-            key_ = "no_providers" if not (show_claude or show_codex) else (
+            key_ = "no_providers" if not (show_claude or show_codex or show_gemini) else (
                 "scanning" if fetched else "loading")
             groups = [(None, [("status", key_)])]
             if key_ == "no_providers":
@@ -811,7 +830,7 @@ class PetWindow(QWidget):
             groups = [(None, [("status", "loading")])]
         else:
             groups = []
-            for pid in ("claude", "codex"):
+            for pid in ("claude", "codex", "gemini"):
                 kind, seg = kinds.get(pid, ("absent", None))
                 if kind in ("ready", "loading"):
                     groups.append((pid, [seg]))
@@ -1003,7 +1022,8 @@ class PetWindow(QWidget):
         # 서버 %가 기준이다(Claude·Codex 중 보이는 쪽). 서버 행이 없으면 idle — 로그에서
         # 기분을 만들지 않는다(macOS 판 current_mood 와 같다).
         # 제공자별로 따로 넘긴다 — 각자 자기 게이지 선택으로 걸러진다(cp.mood_for).
-        return cp.mood_for(None, st["oauth"], codex_rows=st.get("codex"))
+        return cp.mood_for(None, st["oauth"], codex_rows=st.get("codex"),
+                           gemini_rows=st.get("gemini"))
 
     def _apply_pending(self):
         """새로고침 워커가 남긴 결과를 메인 스레드(tick)에서 반영한다 — 워커는 위젯·상태를 직접 만지지 않는다."""
@@ -1101,6 +1121,9 @@ class PetWindow(QWidget):
         with self._refresh_lock:
             self._refresh_gen += 1
             gen = self._refresh_gen
+        # Gemini 는 agy(프로세스)에게 묻는다 — 자기 스레드에서 받아 state 에 직접 넣는다. agy 가 느려도
+        # Claude·Codex 값을 붙들지 않게, 그리고 Gemini 를 숨기면 아무것도 띄우지 않게(그 함수가 맡는다).
+        cp.start_gemini_refresh(self.state)
 
         def work():
             values = {}
@@ -1519,6 +1542,9 @@ class PetWindow(QWidget):
         if e.button() == Qt.LeftButton:
             self.set_override("jumping")
             cp._oauth_cache["t"] = 0.0
+            # 사용자가 직접 눌렀다 — Gemini 도 60초 하한만 지키고 agy 에게 바로 다시 묻는다
+            # (macOS 판 더블클릭이 올리는 것과 같은 깃발. 키체인 함수는 이 포트에서 부르지 않는다).
+            cp.request_gemini_refresh()
             self.refresh()
 
     def _clamp_to_screen(self):
@@ -1557,6 +1583,9 @@ class PetWindow(QWidget):
             top.append((cp.t("menu_update", v=upd[0]), self._do_update))
         # Codex 도 Claude 와 같은 모양(macOS 판 rightMouseDown_ 과 같은 순서) — 맨 위가 Claude,
         # 그 아래 Codex, 그 아래 업데이트. 둘 다 0 번에 끼우므로 Codex 를 먼저 넣는다.
+        # Gemini 는 맨 아래(macOS 판과 같은 순서: Claude → Codex → Gemini → 업데이트).
+        if self.state.get("gemini_onboard") == "login":
+            top.insert(0, (cp.t("menu_gemini_login"), self._login_gemini))
         cob = self.state.get("codex_onboard")
         if cob:
             top.insert(0, (cp.t("menu_install_codex"), self._install_codex) if cob == "install"
@@ -1834,6 +1863,16 @@ class PetWindow(QWidget):
             lines.append("$env:Path = '" + os.path.dirname(binp).replace("'", "''") + ";' + $env:Path")
         lines += ['cmd /c "codex login"', "Write-Host ''", self._ps_echo(cp.t("term_done"))]
         self._run_in_console(lines)
+
+    def _login_gemini(self):
+        """우클릭 "Gemini 로그인(agy)" — 새 콘솔에서 agy 를 연다(macOS 판 start_gemini_login).
+        사용자가 고른 로그인이라 브라우저가 열려야 한다: 백그라운드 조회의 가짜 rundll32 는 쓰지 않는다.
+        로그인이 끝나면 agy 가 자격 증명을 다시 쓰고, 다음 확인이 그 지문 변화를 보고 스스로 다시 읽는다."""
+        binp = cp._find_agy_cli()
+        if not binp:
+            return
+        self._run_in_console([self._ps_echo(cp.t("term_login")),
+                              "& '" + binp.replace("'", "''") + "'"])
 
     # ── 완전 삭제 (macOS 판 uninstallApp_ / do_uninstall 과 같은 순서: 거절할 수 있는 단계가 먼저) ──
     def _uninstall(self):
@@ -2232,6 +2271,8 @@ class PetWindow(QWidget):
             "codex_gauges": [g for g, b in ui["codex_g"].items() if b.isChecked()],
             "openai_admin_key": ui["okey"].text().strip(),
             "codex_budget": ui["cbud"].text(),
+            "show_gemini": bool(ui["show_gemini"].isChecked()),
+            "gemini_gauges": [g for g, b in ui["gemini_g"].items() if b.isChecked()],
         }
         plan, err = cp.plan_settings_save(self.cfg, form)
         if err:
@@ -2261,14 +2302,14 @@ class PetWindow(QWidget):
 
 
 class SettingsDialog(QDialog):
-    """macOS 판 open_settings 의 NSPanel(420×568) 을 같은 좌표로 옮긴 것.
+    """macOS 판 open_settings 의 NSPanel(420×652) 을 같은 좌표로 옮긴 것.
 
     AppKit 은 y 가 아래에서 위로, Qt 는 위에서 아래로 커지므로 위젯의 위쪽 = PHT − y − h 로 뒤집는다.
     라벨·입력·팝업·체크·버튼의 x/폭/높이와 y 간격은 macOS 판과 같다. 펫·언어, Claude Code 구역,
-    Codex 구역(같은 모양), 공통(급증 민감도·인사), 저장·버전 순서이고 높이 예산 ≤ 656 도 그대로다
+    Codex 구역(같은 모양), Gemini 구역(표시 + 게이지 셋), 공통(급증 민감도·인사), 저장·버전 순서이고 높이 예산 ≤ 656 도 그대로다
     (CLAUDE.md Danger zone). 보정·한도·고급 창은 2026-10-05 에 없어졌다.
     """
-    PWID, PHT = 420, 568
+    PWID, PHT = 420, 652
 
     def __init__(self, win):
         super().__init__(None, Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
@@ -2374,8 +2415,22 @@ class SettingsDialog(QDialog):
         label(t("s_codex_budget"), 20, y)
         f_cbud = field(180, y - 2, 90, R.get("codex_budget") or 0)
 
-        # ── 공통 ──
+        # ── Gemini 구역 (표시 + 게이지 셋 — 데이터 출처·키는 없다: agy 에게 묻는다) ──
         y -= 42
+        show_gemini = section(t("s_sec_gemini"), "show_gemini", y)
+        y -= 30
+        label(t("s_gauges"), 20, y)
+        gemini_title = {"gemini": t("s_gauge_gemini"), "limits": t("s_gauge_limits"),
+                        "group": t("s_gauge_group")}
+        chosen = set(cp.provider_gauges(R, "gemini"))
+        gemini_g = {}
+        for n, g in enumerate(cp.GEMINI_GAUGES):
+            # Claude 게이지와 같은 2열 격자 — 셋째 칸은 둘째 줄 왼쪽 (macOS 판과 같은 칸)
+            gx, gy = 180 + (n % 2) * 120, y - (n // 2) * 24
+            gemini_g[g] = check(gemini_title[g], gx, gy, 116, g in chosen)
+
+        # ── 공통 ──
+        y -= 54
         label(t("s_spike_sens"), 20, y)
         m = R.get("spike_mult", 1.0)
         sens = popup(180, y, 220, [t("s_sens_high"), t("s_sens_normal"), t("s_sens_low")],
@@ -2394,6 +2449,7 @@ class SettingsDialog(QDialog):
                        "show_claude": show_claude, "claude_g": claude_g,
                        "show_codex": show_codex, "codex_mode": codex_mode, "codex_g": codex_g,
                        "okey": f_okey, "cbud": f_cbud,
+                       "show_gemini": show_gemini, "gemini_g": gemini_g,
                        "pet": pet_pop, "pet_ids": pet_ids})
         scr = win.screen() or QApplication.primaryScreen()        # macOS panel.center()
         a = scr.availableGeometry()
@@ -2533,6 +2589,11 @@ def clean_update_leftovers():
 
 
 def main():
+    # 자격 증명 관리자 프로브(코어가 이 exe 를 숨은 인자로 다시 띄운다) — 앱이 되기 **전에** 답하고 끝낸다.
+    # 뮤텍스·앱 ID·QApplication 보다 먼저여야 한다: 뒤에 두면 자식이 "이미 떠 있다"로 조용히 끝나
+    # 프로브가 언제나 '모름'이 된다.
+    if cp.GEMINI_CRED_PROBE_FLAG in sys.argv[1:]:
+        return cp.gemini_cred_probe_main()
     claim_windows_app_identity()              # QApplication 보다 먼저 — 창이 만들어지기 전에 묶음 ID 가 있어야 한다
     if not acquire_single_instance_mutex():   # 이미 떠 있으면 조용히 끝난다 — 설치 파일의 재시작과 [Run] 이 둘 다 띄워도 하나만 남는다
         cp._dbg("win: another instance holds the mutex; exiting")
