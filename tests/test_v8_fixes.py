@@ -11,7 +11,8 @@ B3 과 M2 의 포트 쪽은 windows/tests/test_win_v8_fixes.py. F2·F4 는 화�
                                       (_run_refresh_job 에 cancel 을 어떻게 넘길지는 정하지 않는다. 기존
                                       호출 `_run_refresh_job(argv, label, stem, timeout)` 은 그대로 돈다.)
   cli_login_argv("gemini", path)      [path, "-p", "/usage", "--output-format", "json"]  (G1)
-  TR: term_gemini_done / term_gemini_timeout  (4개 로케일)
+  TR: term_gemini_done / term_gemini_failed / term_gemini_cert_hint  (4개 로케일; TOK-61 — 오류로 끝난
+      창에 시간 초과 문구를 찍지 않는다. term_gemini_timeout 은 없다)
   _win_wmi_create(cmdline, cwd=None, …)   M1 — 앱이 깐 claude 면 명령줄 또는 env= 로 두 변수를 넘긴다.
   M3 의 정션 판정은 app_cli_ok 와 같은 기준: os.lstat(...).st_file_attributes & 0x400.
 """
@@ -443,6 +444,8 @@ echo '{"schemaVersion": 1, "status": "SYNTHETIC-JSON-BODY"}'
 exit "$(cat "$here/rc")"
 """
 WANT_ARGS = ["-p", "/usage", "--output-format", "json"]
+# TOK-61: 오류로 끝난 로그인 창에 찍으면 안 되는 말(4개 로케일의 옛 term_gemini_timeout).
+TIMEOUT_WORDS = ("시간이 지났", "Time ran out", "時間切れ", "agotó el tiempo")
 
 
 @unittest.skipIf(sys.platform == "win32", "macOS 의 Terminal 명령(bash)을 돌려 본다")
@@ -492,19 +495,23 @@ class GeminiWindowScriptTests(V8Case):
     def test_the_window_runs_the_usage_query_under_the_three_steps_and_says_how_it_ended(self):
         """G1(+보완): 인자 없는 `agy`(TUI)는 대체 화면으로 바뀌어 안내 세 줄을 가린다. 창에서는
         `agy -p "/usage" --output-format json` 을 실행한다. 안내 세 줄이 먼저, agy 의 **stdout(JSON 본문)은
-        숨기고** stderr(로그인 안내·붙여 넣기 프롬프트)는 보인다. 끝나면 종료 코드로 한 줄 — 0 이면
-        `term_gemini_done`, 아니면 `term_gemini_timeout`. SSH_* 를 지우고 AGY_CLI_DISABLE_AUTO_UPDATE=1(M2).
+        숨기고** stderr(로그인 안내·붙여 넣기 프롬프트)는 보인다. 끝나면 종료 코드로 끝맺는다 — 0 이면
+        `term_gemini_done`, 아니면 `term_gemini_failed`("로그인하지 못했어요 — 위 오류를 확인하세요")와
+        `term_gemini_cert_hint`(TOK-61: 1.2.0 은 인증서 오류로 곧바로 끝난 agy 뒤에 "시간이 지났어요" 를
+        찍었다 — 0 이 아닌 종료에 시간 초과 문구는 없다). SSH_* 를 지우고 AGY_CLI_DISABLE_AUTO_UPDATE=1(M2).
         가짜 open 은 없다(브라우저가 떠야 한다). 4개 로케일.
         Rivals: 인자 없는 agy; JSON 이 창에 쏟아짐; stderr 까지 숨김(코드를 어디에 넣는지 안 보인다);
-        끝났는지 말이 없음; 실패에도 "완료"; SSH_* 가 남아 토큰이 파일로 감."""
+        끝났는지 말이 없음; 실패에도 "완료"; 오류에 "시간이 지났어요"; SSH_* 가 남아 토큰이 파일로 감."""
         for lang in LANGS:
             with self.subTest(lang=lang):
                 table = claude_pet.TR[lang]
                 steps = [table["term_gemini_step%d" % i] for i in (1, 2, 3)]
-                done, late = table.get("term_gemini_done"), table.get("term_gemini_timeout")
-                self.assertTrue(isinstance(done, str) and done.strip() and isinstance(late, str) and late.strip(),
-                                "끝맺는 문구(term_gemini_done / term_gemini_timeout)가 없다")
+                done, late = table.get("term_gemini_done"), table.get("term_gemini_failed")
+                cert = table.get("term_gemini_cert_hint")
+                self.assertTrue(all(isinstance(x, str) and x.strip() for x in (done, late, cert)),
+                                "끝맺는 문구(term_gemini_done / term_gemini_failed / term_gemini_cert_hint)가 없다")
                 self.assertNotEqual(done, late)
+                self.assertNotIn("term_gemini_timeout", table, "오류로 끝난 창에 찍던 시간 초과 문구가 남아 있다")
                 script = self.script(lang)
                 self.assertNotIn("fake-open", script)
                 for rc, shown, hidden in ((0, done, late), (1, late, done)):
@@ -524,14 +531,24 @@ class GeminiWindowScriptTests(V8Case):
                     self.assertIn(shown, out, "끝난 뒤 알맞은 한 줄이 없다(rc=%d)" % rc)
                     self.assertNotIn(hidden, out, "rc=%d 인데 반대쪽 문구를 찍었다" % rc)
                     self.assertGreater(out.find(shown), out.find("PASTE-THE-CODE-HERE-PROMPT"))
+                    self.assertEqual(cert in out, rc != 0, "인증서 안내는 오류로 끝났을 때만 찍는다(rc=%d)" % rc)
+                    for word in TIMEOUT_WORDS:
+                        self.assertNotIn(word, out, "창에 시간 초과 문구를 찍었다(rc=%d)" % rc)
 
     def test_the_closing_lines_exist_in_four_languages(self):
-        """G1: "완료 — 창을 닫아도 됩니다" / "시간이 지났어요 — 설정에서 [로그인]을 다시 누르세요" (4개 로케일)."""
+        """G1·TOK-61: "완료 — 창을 닫아도 됩니다" / "로그인하지 못했어요 — 위 오류를 확인하세요" / 인증서 안내
+        (4개 로케일). 어느 것에도 시간 초과라는 말이 없다."""
         ko = claude_pet.TR["ko"]
         self.assertEqual([w for w in ("완료", "창을 닫아도") if w not in str(ko.get("term_gemini_done"))], [])
-        self.assertEqual([w for w in ("시간이 지났어요", "[로그인]") if w not in str(ko.get("term_gemini_timeout"))], [])
+        self.assertEqual([w for w in ("로그인하지 못했어요", "위 오류") if w not in str(ko.get("term_gemini_failed"))], [])
+        self.assertEqual([w for w in ("인증서", "x509", "certificate", "프록시")
+                          if w not in str(ko.get("term_gemini_cert_hint"))], [])
+        for lang in LANGS:
+            for key in ("term_gemini_done", "term_gemini_failed", "term_gemini_cert_hint"):
+                for word in TIMEOUT_WORDS:
+                    self.assertNotIn(word, str(claude_pet.TR[lang].get(key)))
         for lang in ("en", "ja", "es"):
-            for key in ("term_gemini_done", "term_gemini_timeout"):
+            for key in ("term_gemini_done", "term_gemini_failed", "term_gemini_cert_hint"):
                 val = claude_pet.TR[lang].get(key)
                 self.assertTrue(isinstance(val, str) and val.strip(), "%s.%s 가 없다" % (lang, key))
                 self.assertNotEqual(val, ko.get(key), "%s 로케일에 한국어 문구가 그대로다" % lang)
@@ -545,7 +562,8 @@ class GeminiWindowOnWindowsTests(V8Case):
 
     def test_the_new_console_runs_the_usage_query_hides_stdout_and_says_how_it_ended(self):
         """G1(+보완), Windows: 새 콘솔(CREATE_NEW_CONSOLE)에서 안내 세 줄 → `agy.exe -p /usage --output-format
-        json`(stdout 만 버린다 — stderr 는 그대로) → 종료 코드에 따라 완료/시간 초과 한 줄. env 에는 SSH_* 가
+        json`(stdout 만 버린다 — stderr 는 그대로) → 종료 코드에 따라 완료 / 로그인하지 못했어요 + 인증서 안내
+        (TOK-61: 시간 초과 문구는 없다). env 에는 SSH_* 가
         없고 AGY_CLI_DISABLE_AUTO_UPDATE=1, PATH 에 가짜 rundll32 폴더가 없다.
         Rivals: 인자 없는 agy.exe; stdout 을 안 버림; 모든 스트림을 버림(`*>` / `2>`); 끝맺는 줄이 없음."""
         self.keep(claude_pet._gemini_cache)
@@ -577,8 +595,10 @@ class GeminiWindowOnWindowsTests(V8Case):
             self.assertIn(word, tail, "agy.exe 에 %r 인자가 없다" % word)
         self.assertRegex(tail, r"(Out-Null|(?<![2*])>\s*\$null|1>\s*\$null)", "agy 의 stdout 을 버리지 않는다")
         self.assertNotRegex(tail, r"(\*>|2>\s*\$null|2>&1\s*\|\s*Out-Null)", "agy 의 stderr 까지 버린다")
-        for key in ("term_gemini_done", "term_gemini_timeout"):
+        for key in ("term_gemini_done", "term_gemini_failed", "term_gemini_cert_hint"):
             self.assertTrue(isinstance(ko.get(key), str) and ko[key] in tail, "%s 문구가 명령에 없다" % key)
+        for word in TIMEOUT_WORDS:
+            self.assertNotIn(word, text, "새 콘솔의 명령에 시간 초과 문구가 있다")
         self.assertIn("LASTEXITCODE", tail, "agy 의 종료 코드를 보지 않는다")
         env = kw.get("env")
         self.assertIsInstance(env, dict)
