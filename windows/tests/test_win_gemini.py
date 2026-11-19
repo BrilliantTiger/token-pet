@@ -178,15 +178,19 @@ class WinGeminiWiringTests(unittest.TestCase):
         self.need("_login_gemini")
 
     def test_a_double_click_also_asks_gemini_again(self):
-        """클릭 60초: 더블클릭(수동 새로고침)이 macOS 와 같이 `cp.allow_keychain_prompt()` 를 지난다 — 그 함수가
-        _gemini_cache["click"] 을 올린다. Rival: Windows 의 더블클릭은 Claude·Codex 만 다시 받음."""
+        """클릭 60초: 더블클릭(수동 새로고침)이 `cp.request_gemini_refresh()` 를 부른다 — macOS 에서
+        allow_keychain_prompt 가 올리는 것과 같은 깃발(_gemini_cache["click"])을 올리는 코어 함수다.
+        포트는 `allow_keychain_prompt` 를 이름으로 쓰지 않는다(v1.1.1 계약 게이트가 Windows 포트에서 macOS
+        키체인 함수 이름을 금지한다).
+        Rival: Windows 의 더블클릭은 Claude·Codex 만 다시 받음."""
         m = self.need("mouseDoubleClickEvent")
         reach = set(_called(m))
         for name in list(reach):
             inner = _method(self.win, name)
             if inner is not None:
                 reach |= _called(inner)
-        self.assertIn("allow_keychain_prompt", reach)
+        self.assertIn("request_gemini_refresh", reach)
+        self.assertNotIn("allow_keychain_prompt", _names(self.tree))
 
 
 class WinGeminiSettingsTests(unittest.TestCase):

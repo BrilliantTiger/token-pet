@@ -15,6 +15,8 @@ Developer 는 이 파일의 단언·기대값·픽스처를 고치지 않는다(
                                                 | (None, None)(모름). 순수, 예외 없음.
   gemini_cred_probe_main()                      자식 쪽 본체 — CredReadW 한 건, RtlZeroMemory + CredFree,
                                                 `os.write(1, …)` 로 `1 <LastWritten>` 또는 `0` 만 쓴다.
+  request_gemini_refresh()                      사용자가 눌렀다 — _gemini_cache 의 click·click_check 를 올린다
+                                                (macOS 의 allow_keychain_prompt 가 하던 Gemini 몫. 포트가 부른다).
   _find_agy_cli() / fetch_gemini_usage() / compute_gemini_onboard_state()   macOS 와 같은 이름, win32 갈래.
 
 부모 쪽 관측(대역이 본다): 프로브는 `argv[0] == sys.executable` 이고 argv 에 GEMINI_CRED_PROBE_FLAG 가
@@ -936,6 +938,24 @@ class LoginMarkerOnWindowsTests(WinAgyCase):
         self.assertIsNone(self.fetch())
         self.assertEqual(self.fake.calls, [])
         self.assertIs(self.status().get("auth_error"), False)
+
+    def test_a_click_reads_again_after_sixty_seconds_but_not_sooner(self):
+        """W6(클릭 60초): `request_gemini_refresh()` — 사용자가 눌렀다는 신호. 마지막 실행에서 60초가 안 됐으면
+        띄우지 않고, 지났으면 300초를 기다리지 않고 바로 읽는다. 한 번의 누름은 한 번의 실행에만 쓰인다.
+        (Windows 포트는 macOS 의 allow_keychain_prompt 를 이름으로 쓸 수 없어 이 함수를 부른다.)
+        Rivals: 함수가 없음; 누를 때마다 60초 하한 없이 띄움; 한 번 누른 것이 계속 남음."""
+        click = _require("request_gemini_refresh")
+        self.assertTrue(self.fetch())
+        click()
+        self.later(30)
+        self.fetch()
+        self.assertEqual(len(self.fake.calls), 1, "60초가 안 됐는데 다시 띄웠다")
+        self.later(31)
+        self.assertTrue(self.fetch())
+        self.assertEqual(len(self.fake.calls), 2, "눌렀고 60초가 지났는데 읽지 않았다")
+        self.later(61)
+        self.fetch()
+        self.assertEqual(len(self.fake.calls), 2, "한 번 누른 것으로 두 번 읽었다")
 
     def test_reads_are_five_minutes_apart(self):
         """W6: 자동 실행은 300초에 한 번 — 그 사이의 새로고침(30초)은 아무것도 띄우지 않는다."""
