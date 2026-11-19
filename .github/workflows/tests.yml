@@ -85,6 +85,10 @@ jobs:
       # 자식에게 물려주지 않는다. 1.2.0 이 이 둘을 놓쳤다(소스로 돌리면 그 변수가 없어 CI 에 안 보였다).
       - name: Run gating contract — Gemini sign-in check
         run: python -m unittest discover -s tests -v -p "test_gemini_login_check.py"
+      # 이름은 Token Pet 으로 보이되, 1.2.0 업데이터가 찾는 자산 이름·zip 구조·설치 위치는 그대로인가
+      # (TOK-59). 앱을 임포트하지 않고 소스만 읽으므로 맥과 같은 검사가 여기서도 돈다.
+      - name: Run gating contract — Token Pet name and the 1.2.0 update path
+        run: python -m unittest discover -s tests -v -p "test_token_pet_rename.py"
       # 포트 자신의 스위트는 **진짜 윈도우에서 통과하지 않는다** — 이 CI 가 처음
       # 드러냈다(run 35452309458):
       #   ModuleNotFoundError: No module named 'fcntl'  (test_win_autostart, test_win_update)
