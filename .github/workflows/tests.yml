@@ -7,10 +7,13 @@ name: tests
 #
 # macOS 와 Windows 를 **둘 다** 돌린다. 이 저장소의 원칙은 맥에서 되는 것은 윈도우에서도
 # 똑같이 돼야 한다는 것이고, 그 원칙은 테스트 커버리지에도 적용된다.
+#
+# main 에 push 될 때도 돌린다. dev→main 머지 커밋은 main 에만 생기므로, main 이 빠져
+# 있으면 그 커밋에는 push CI 결과가 없어 CI 게이트가 머지를 막는다.
 
 on:
   push:
-    branches: ["claude/**", "dev"]
+    branches: ["claude/**", "dev", "main"]
   pull_request:
   workflow_dispatch:
 
@@ -74,6 +77,10 @@ jobs:
         run: python -m unittest discover -s tests -v -p "test_codex_usage.py"
       - name: Run gating contract — server-only usage
         run: python -m unittest discover -s tests -v -p "test_server_only_usage.py"
+      # Windows 의 Gemini(agy) 읽기 — 찾기 순서·자격 증명 프로브·가짜 rundll32·taskkill. 맥에서는
+      # sys.platform 을 바꿔 돌 뿐이라, 진짜 Windows 에서 갈리는 곳은 여기 하나다.
+      - name: Run gating contract — Gemini on Windows
+        run: python -m unittest discover -s tests -v -p "test_gemini_windows.py"
       # 포트 자신의 스위트는 **진짜 윈도우에서 통과하지 않는다** — 이 CI 가 처음
       # 드러냈다(run 35452309458):
       #   ModuleNotFoundError: No module named 'fcntl'  (test_win_autostart, test_win_update)

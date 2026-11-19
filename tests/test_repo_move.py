@@ -1,4 +1,12 @@
-"""Gates for the repository move uygnoey/claude-pet -> BrilliantTiger/claude-pet (macOS half).
+"""Gates for the repository move uygnoey/claude-pet -> BrilliantTiger/claude-pet -> BrilliantTiger/token-pet
+(macOS half).
+
+**Renamed 2026-11-12, pinned here 2026-11-19 (TOK-59).**  The repository is now
+``BrilliantTiger/token-pet``.  ``BrilliantTiger/claude-pet`` 301-redirects, exactly as
+``uygnoey/claude-pet`` did after the first move, and an update check that leans on that redirect
+stops the day the old name is reused or the redirect is dropped — so the constant carries the
+current name.  In the table below read "BrilliantTiger" as ``BrilliantTiger/token-pet``; the
+two older names are both refused (``RenamedRepositoryTests``).
 
 The user moved the GitHub repository to the organization ``BrilliantTiger`` on
 2026-10-11; the old address 301-redirects, the personal account ``uygnoey`` stays.
@@ -32,10 +40,12 @@ from unittest import mock
 
 import claude_pet
 
-NEW_REPO = "BrilliantTiger/claude-pet"
-NEW_API_LATEST = "https://api.github.com/repos/BrilliantTiger/claude-pet/releases/latest"
+NEW_REPO = "BrilliantTiger/token-pet"
+NEW_API_LATEST = "https://api.github.com/repos/BrilliantTiger/token-pet/releases/latest"
+FORMER_REPOS = ("uygnoey/claude-pet", "BrilliantTiger/claude-pet")
 OLD_DL = "https://github.com/uygnoey/claude-pet/releases/download/v9.9/"
-NEW_DL = "https://github.com/BrilliantTiger/claude-pet/releases/download/v9.9/"
+MID_DL = "https://github.com/BrilliantTiger/claude-pet/releases/download/v9.9/"
+NEW_DL = "https://github.com/BrilliantTiger/token-pet/releases/download/v9.9/"
 
 
 class _Response:
@@ -55,6 +65,31 @@ class _Response:
 class RepoConstantTests(unittest.TestCase):
     def test_github_repo_is_the_organization(self):
         self.assertEqual(claude_pet.GITHUB_REPO, NEW_REPO)
+
+
+class RenamedRepositoryTests(unittest.TestCase):
+    """Neither former name is what the app asks for — not in the constant, and not in the URL
+    the check actually requests (a URL written out by hand would pass the constant test)."""
+
+    def test_the_constant_is_neither_former_name(self):
+        self.assertNotIn(claude_pet.GITHUB_REPO, FORMER_REPOS)
+        self.assertNotIn("claude-pet", claude_pet.GITHUB_REPO)
+
+    def test_the_request_names_neither_former_repository(self):
+        calls = []
+
+        def urlopen(req, timeout=0):
+            calls.append(req.full_url)
+            return _Response({"tag_name": "v0.0.1", "assets": []})
+
+        old = dict(claude_pet._upd_cache)
+        self.addCleanup(lambda: (claude_pet._upd_cache.clear(), claude_pet._upd_cache.update(old)))
+        with mock.patch.object(claude_pet.urllib.request, "urlopen", side_effect=urlopen):
+            claude_pet.check_github_update()
+        self.assertEqual(len(calls), 1)
+        for former in FORMER_REPOS:
+            self.assertNotIn(former, calls[0])
+        self.assertTrue(calls[0].startswith("https://api.github.com/repos/BrilliantTiger/token-pet/"))
 
 
 class MacUpdateCheckUrlTests(unittest.TestCase):
@@ -92,7 +127,7 @@ class MacAssetOwnerAgnosticTests(unittest.TestCase):
             return claude_pet.select_update_asset(assets, machine)
 
     def test_both_owner_paths_are_accepted(self):
-        for base in (OLD_DL, NEW_DL):
+        for base in (OLD_DL, MID_DL, NEW_DL):
             for machine, name in (("arm64", "ClaudePet.zip"),
                                   ("arm64", "ClaudePet-universal.zip"),
                                   ("x86_64", "ClaudePet-universal.zip")):

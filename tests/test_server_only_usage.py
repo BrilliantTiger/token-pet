@@ -914,18 +914,25 @@ class MacGuiWiringTests(unittest.TestCase):
 
     def test_the_context_menu_offers_codex_install_and_login(self):
         """§7. ``rightMouseDown_`` builds the items from ``state["codex_onboard"]``;
-        ``Handler.installCodex_`` / ``loginCodex_`` call the two Terminal helpers."""
+        ``Handler.installCodex_`` / ``loginCodex_`` start the in-app install-and-sign-in flow
+        (``start_ai_connect`` or ``run_ai_connect`` with ``"codex"``). Contract v7-I1 (2026-11-19):
+        the menu no longer opens a Terminal — ``start_codex_install`` / ``start_codex_login`` are
+        not called from the handlers (behaviour: tests/test_cli_install_login.py)."""
         run_gui = _run_gui_tree()
         menu = _nested(run_gui, "rightMouseDown_")
         self.assertIsNotNone(menu)
         self.assertLessEqual({"menu_install_codex", "menu_login_codex"}, _t_keys(menu))
         self.assertLessEqual({"installCodex:", "loginCodex:", "codex_onboard"}, _str_consts(menu))
-        for handler, helper in (("installCodex_", "start_codex_install"),
-                                ("loginCodex_", "start_codex_login")):
+        for handler, old in (("installCodex_", "start_codex_install"),
+                             ("loginCodex_", "start_codex_login")):
             with self.subTest(handler=handler):
                 fn = _nested(run_gui, handler)
                 self.assertIsNotNone(fn, f"Handler.{handler} missing")
-                self.assertIn(helper, _called_names(fn))
+                called = set(_called_names(fn))
+                self.assertTrue({"start_ai_connect", "run_ai_connect"} & called,
+                                f"Handler.{handler} does not start the install-and-sign-in flow")
+                self.assertNotIn(old, called)
+                self.assertIn("codex", _str_consts(fn))
 
     def test_the_refresh_worker_learns_jumps_and_prices_codex(self):
         """The 30-second worker: learns limits (``learn_lane``, directly or through a

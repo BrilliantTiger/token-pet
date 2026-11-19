@@ -95,7 +95,6 @@ BTN_LINE = "#2E2E33"
 # SF Mono 는 Windows 에 배포할 수 없으므로 있으면 쓰고, 없으면 자간이 가장 비슷한 순서로 고른다.
 # 두 플랫폼에 같은 글꼴을 번들하면 여기 한 줄만 바꾼다 (QFontDatabase.addApplicationFont 뒤 그 이름을 앞에).
 MONO_FAMILIES = ("SF Mono", "Cascadia Mono", "Consolas")
-CLAUDE_INSTALL_URL_WIN = "https://claude.ai/install.ps1"   # macOS 판 install.sh 의 Windows 판
 UNINSTALL_PATHS_WIN = (cp.CONFIG_PATH, cp.CONFIG_PATH + ".lock", os.path.expanduser("~/claudepet_debug.log"))
 SPI_GETCLIENTAREAANIMATION = 0x1042
 
@@ -407,14 +406,7 @@ def find_codex_cli():
     확장자 없는 파일은 Windows 에서 실행할 수 없으므로 .cmd/.exe 를 먼저 찾고, 앱이 그 폴더가
     PATH 에 들어가기 전에 시작됐을 수 있어 그 폴더를 직접도 본다. 그 밖은 코어의 탐색에 맡긴다.
     """
-    cands = [shutil.which("codex.cmd"), shutil.which("codex.exe")]
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        cands.append(os.path.join(appdata, "npm", "codex.cmd"))
-    for p in cands:
-        if p and os.path.isfile(p):
-            return p
-    return cp._find_codex_cli()
+    return cp._find_codex_cli()      # .cmd/.exe 와 %APPDATA%\\npm 은 코어의 Windows 갈래가 본다
 
 
 def popen_detached(argv, inherit=None, cwd=None):
@@ -466,6 +458,10 @@ class PetWindow(QWidget):
                       # Codex API 모드의 오늘·이달 비용과 마지막 조회 실패 종류(키 거부/일시 실패).
                       "codex_cost": None, "codex_cost_month": None,
                       "codex_api_error": False, "codex_api_stale": False,
+                      # gemini: Gemini(agy) 사용량 행 또는 None — cp.start_gemini_refresh 가 자기 스레드에서
+                      # 채운다. gemini_onboard: None|'login'(cp.compute_gemini_onboard_state) — 우클릭
+                      # 메뉴가 읽는다(macOS 판과 같은 두 키).
+                      "gemini": None, "gemini_onboard": None,
                       # 요약 필 레이아웃. summary_lines_n 은 어댑터가 남기고 pill_band() 가 읽는다
                       # (높이가 줄 수를 따라가게 하는 유일한 경로). pill_w 는 _apply_pill_width 가
                       # 기록하고 geom() 이 읽는다 — 폭이 내용을 따라가게 하는 유일한 경로.
@@ -483,6 +479,13 @@ class PetWindow(QWidget):
             self.state.get("codex_cost"), self.state.get("codex_cost_month"),
             bool(self.state.get("codex_api_error")), bool(self.state.get("codex_api_stale")),
             auth_error=bool(cp.CODEX_STATUS.get("auth_error")))
+        # Gemini 구간 훅 — Codex 의 짝(macOS 판 state["gemini_summary"] 와 같은 모양). 급증 감지가
+        # 없으므로 provider_spiking 을 넘기지 않는다. 행이 없으면 구간도 없다 — 로그인 안 됨은 필이
+        # 아니라 우클릭 메뉴(state["gemini_onboard"])가 알린다.
+        self.state["gemini_summary"] = lambda: cp.gemini_summary_segment(
+            cp.RUNTIME, self.state.get("gemini"),
+            auth_error=bool(cp.GEMINI_STATUS.get("auth_error")),
+            last_error=cp.GEMINI_STATUS.get("last_error"), buckets=cp.GEMINI_BUCKETS)
         self.sticky = {"on": False}
         self._down = None
         self._moved = False
@@ -491,6 +494,9 @@ class PetWindow(QWidget):
         self._pending = None
         self._installer = None       # inno: 띄운 setup.exe 의 Popen — 앱을 닫지 않고 끝나면 _reap_installer 가 installing 을 지운다
         self.ui = {}                 # 설정 창 위젯 — macOS 판 ui 딕셔너리와 같은 키
+        # AI 연결: 제공자마다 진행 상태 하나, 취소 Event 하나 (macOS 판 ai_jobs / ai_cancel)
+        self.ai_jobs = {p: cp.new_ai_job() for p in cp.CLI_PROVIDERS}
+        self.ai_cancel = {p: threading.Event() for p in cp.CLI_PROVIDERS}
         self._logo_cache = {}        # 제공자 → 틴트까지 끝낸 QImage(또는 None). 필은 20 Hz 로 다시 그려진다
         self.tray = None             # make_tray 가 채운다 — 비모달 알림(notify) 의 출구
         self._closing = False        # closeEvent 재진입 방지 (Restart Manager 의 WM_CLOSE → 종료)
@@ -703,6 +709,7 @@ class PetWindow(QWidget):
         R = cp.RUNTIME
         show_claude = cp.provider_shown(R, "claude")
         show_codex = cp.provider_shown(R, "codex")
+        show_gemini = cp.provider_shown(R, "gemini")
         key = (R["mode"], cp.L["lang"], st.get("onboard"), id(stats), id(oauth),
                st["cost"], st["cost_month"], R.get("api_budget"),
                bool(cp.OAUTH_STATUS.get("auth_error")), bool(st.get("api_error")),
@@ -713,6 +720,8 @@ class PetWindow(QWidget):
                st.get("codex_cost"), st.get("codex_cost_month"),
                bool(st.get("codex_api_error")), bool(st.get("codex_api_stale")),
                bool(cp.CODEX_STATUS.get("auth_error")),
+               id(st.get("gemini")), show_gemini, tuple(R.get("gemini_gauges") or ()),
+               bool(cp.GEMINI_STATUS.get("auth_error")), cp.GEMINI_STATUS.get("last_error"),
                int(time.time() / 5))
         memo = getattr(self, "_summary_memo", None)
         if memo and memo[0] == key:
@@ -746,7 +755,9 @@ class PetWindow(QWidget):
         # 0% 도, 빈 '조회 중' 줄도 지어내지 않는다.
         codex_hook = st.get("codex_summary")
         codex_seg = codex_hook() if codex_hook else None
-        # Codex 만 쓰는 사용자에게 "Claude Code 미설치/로그인 필요"를 계속 들이밀지 않는다 —
+        gemini_hook = st.get("gemini_summary")
+        gemini_seg = gemini_hook() if gemini_hook else None
+        # Codex(또는 Gemini)만 쓰는 사용자에게 "Claude Code 미설치/로그인 필요"를 계속 들이밀지 않는다 —
         # Codex 행이 실제로 뜬다면(= 그 제공자를 켜서 쓰고 있다는 뜻) 온보딩 안내는 그 사람에게
         # 할 일이 없는 문구다. 토큰 만료·조회 중 같은 다른 status 는 그대로 둔다 — 저건
         # "Claude Code 를 쓰다가 지금 문제"라는 뜻이라 Codex 유무와 무관하게 알려야 한다.
@@ -754,7 +765,8 @@ class PetWindow(QWidget):
         claude_onboarding_suppressed = (
             segment is not None
             and segment[0] == "status" and segment[1] in ("onb_install", "onb_login")
-            and bool(codex_seg) and codex_seg[0] != "status"
+            and ((bool(codex_seg) and codex_seg[0] != "status")
+                 or (bool(gemini_seg) and gemini_seg[0] != "status"))
         )
         # 지금 떠 있는 상태 키 — 필 클릭의 뜻을 고를 때 쓴다. 상태 문구가 아니면 None 이라
         # 숫자가 떠 있는 필의 클릭은 아무 뜻도 갖지 않는다. 위에서 억눌러 화면에 보이지 않는
@@ -782,13 +794,15 @@ class PetWindow(QWidget):
         # 같은 순간이다. (두 조회가 나중에 서로 독립이 되면 제공자별 신호가 필요해진다.)
         fetched = isinstance(st.get("stats"), dict)
         kinds = {}
-        for pid, seg in (("claude", segment), ("codex", codex_seg)):
+        for pid, seg in (("claude", segment), ("codex", codex_seg), ("gemini", gemini_seg)):
             if not seg:
                 continue                    # 꺼졌거나 보일 게 없는 제공자 — 블록이 없다
             # Codex 의 API 모드 상태(codex_need_admin_key 등)는 그 제공자의 할 일이라 Codex
             # 블록으로 보인다. 그 밖의 Codex 상태(조회 중 등)는 블록을 만들지 않는다.
-            codex_own = pid == "codex" and seg[0] == "status" and str(seg[1]).startswith("codex_")
-            if seg[0] != "status" or codex_own:
+            # Gemini 는 지금 상태 구간을 내지 않지만(cp.gemini_summary_segment) 낸다면 같은 규칙이다.
+            own_status = (pid in ("codex", "gemini") and seg[0] == "status"
+                          and str(seg[1]).startswith(pid + "_"))
+            if seg[0] != "status" or own_status:
                 kinds[pid] = ("ready", seg)
             elif not fetched and seg[1] in ("loading", "scanning"):
                 # '받는중'은 **일반 대기 상태(loading/scanning)일 때만**이다. api_key_rejected·온보딩·
@@ -801,7 +815,7 @@ class PetWindow(QWidget):
         if not kinds:
             # 보일 제공자가 없다. 둘 다 꺼 두었으면 그렇다고 말하고(설정으로 가는 클릭),
             # 켜 둔 쪽이 아직 아무것도 못 냈으면 기다리는 중이다.
-            key_ = "no_providers" if not (show_claude or show_codex) else (
+            key_ = "no_providers" if not (show_claude or show_codex or show_gemini) else (
                 "scanning" if fetched else "loading")
             groups = [(None, [("status", key_)])]
             if key_ == "no_providers":
@@ -811,7 +825,7 @@ class PetWindow(QWidget):
             groups = [(None, [("status", "loading")])]
         else:
             groups = []
-            for pid in ("claude", "codex"):
+            for pid in ("claude", "codex", "gemini"):
                 kind, seg = kinds.get(pid, ("absent", None))
                 if kind in ("ready", "loading"):
                     groups.append((pid, [seg]))
@@ -1003,7 +1017,8 @@ class PetWindow(QWidget):
         # 서버 %가 기준이다(Claude·Codex 중 보이는 쪽). 서버 행이 없으면 idle — 로그에서
         # 기분을 만들지 않는다(macOS 판 current_mood 와 같다).
         # 제공자별로 따로 넘긴다 — 각자 자기 게이지 선택으로 걸러진다(cp.mood_for).
-        return cp.mood_for(None, st["oauth"], codex_rows=st.get("codex"))
+        return cp.mood_for(None, st["oauth"], codex_rows=st.get("codex"),
+                           gemini_rows=st.get("gemini"))
 
     def _apply_pending(self):
         """새로고침 워커가 남긴 결과를 메인 스레드(tick)에서 반영한다 — 워커는 위젯·상태를 직접 만지지 않는다."""
@@ -1033,6 +1048,8 @@ class PetWindow(QWidget):
         st = self.state
         now = time.monotonic()
         dirty = self._apply_pending()
+        if st.pop("ai_refresh", False):            # 설치·로그인이 끝났다 — 기다리지 않고 다시 받는다
+            self.refresh()
         if st.pop("relayout", False):              # paint 밖에서 크기를 바꾼다 (paint 중 resize 는 재진입 위험)
             self._relayout()
             dirty = True
@@ -1101,6 +1118,11 @@ class PetWindow(QWidget):
         with self._refresh_lock:
             self._refresh_gen += 1
             gen = self._refresh_gen
+        # Gemini 는 agy(프로세스)에게 묻는다 — 자기 스레드에서 받아 state 에 직접 넣는다. agy 가 느려도
+        # Claude·Codex 값을 붙들지 않게, 그리고 Gemini 를 숨기면 아무것도 띄우지 않게(그 함수가 맡는다).
+        cp.start_gemini_refresh(self.state)
+        # 앱이 깐 CLI 의 하루 한 번 갱신(macOS 판 refresh_ 와 같다) — 확인할 차례가 아니면 아무것도 하지 않는다.
+        cp.start_app_cli_updates()
 
         def work():
             values = {}
@@ -1519,6 +1541,9 @@ class PetWindow(QWidget):
         if e.button() == Qt.LeftButton:
             self.set_override("jumping")
             cp._oauth_cache["t"] = 0.0
+            # 사용자가 직접 눌렀다 — Gemini 도 60초 하한만 지키고 agy 에게 바로 다시 묻는다
+            # (macOS 판 더블클릭이 올리는 것과 같은 깃발. 키체인 함수는 이 포트에서 부르지 않는다).
+            cp.request_gemini_refresh()
             self.refresh()
 
     def _clamp_to_screen(self):
@@ -1557,6 +1582,9 @@ class PetWindow(QWidget):
             top.append((cp.t("menu_update", v=upd[0]), self._do_update))
         # Codex 도 Claude 와 같은 모양(macOS 판 rightMouseDown_ 과 같은 순서) — 맨 위가 Claude,
         # 그 아래 Codex, 그 아래 업데이트. 둘 다 0 번에 끼우므로 Codex 를 먼저 넣는다.
+        # Gemini 는 맨 아래(macOS 판과 같은 순서: Claude → Codex → Gemini → 업데이트).
+        if self.state.get("gemini_onboard") == "login":
+            top.insert(0, (cp.t("menu_gemini_login"), self._login_gemini))
         cob = self.state.get("codex_onboard")
         if cob:
             top.insert(0, (cp.t("menu_install_codex"), self._install_codex) if cob == "install"
@@ -1784,56 +1812,63 @@ class PetWindow(QWidget):
             pass
         os.startfile(cp.USER_PETS_DIR)
 
-    def _run_in_console(self, lines):
-        """새 PowerShell 창에서 실행 — macOS 판 _run_in_terminal(Terminal.app) 의 Windows 판."""
-        script = "; ".join(lines)
-        subprocess.Popen(["powershell", "-NoExit", "-Command", script],
-                         creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    # ── AI 연결: 세 CLI 의 설치·로그인 (계약 v7-I, macOS 판 ai_connect_click 과 같은 흐름) ──
+    # 콘솔 창에서 설치 스크립트(install.ps1·npm)를 돌리던 길은 없어졌다. 코어가 공식 실행 파일을 받아
+    # 해시·서명을 확인하고 앱 전용 폴더에 둔 뒤, 그 CLI 의 공식 로그인을 띄운다. 스레드는 코어가 연다.
+    def _ai_done(self, _result):
+        """설치·로그인이 끝났다(워커 스레드) — GUI 스레드의 tick 이 보고 바로 다시 받는다."""
+        self.state["ai_refresh"] = True
 
-    @staticmethod
-    def _ps_echo(s):
-        return "Write-Host '" + str(s).replace("'", "''") + "'"
+    def ai_idle(self, provider):
+        """그 제공자의 설치·로그인이 돌고 있지 않은가 (macOS 판 ai_idle). 도는 중에는 취소 깃발을 지우지 않는다."""
+        return self.ai_jobs[provider].get("phase") not in ("download", "verify", "login")
 
+    def ai_connect_click(self, provider):
+        """설정 "AI 연결" 줄의 버튼 — 돌고 있으면 [취소], 아니면 [설치]/[로그인]/[다시 시도]."""
+        if not self.ai_idle(provider):
+            self.ai_cancel[provider].set()
+            return
+        self.ai_cancel[provider].clear()
+        cp.start_ai_connect(provider, self.ai_jobs[provider], cancel=self.ai_cancel[provider].is_set,
+                            done=self._ai_done)
+
+    # 우클릭의 다섯 항목 — 같은 흐름을 시작하고, 진행 상황과 [취소]가 보이게 설정 창을 연다.
     def _install_claude(self):
-        """Claude Code 설치 → 이어서 로그인까지 새 콘솔에서 (macOS 판 start_claude_install)."""
-        self._run_in_console([self._ps_echo(cp.t("term_installing")),
-                              f"irm {CLAUDE_INSTALL_URL_WIN} | iex",
-                              "Write-Host ''", self._ps_echo(cp.t("term_login")),
-                              '& "$env:USERPROFILE\\.local\\bin\\claude.exe" auth login',
-                              "Write-Host ''", self._ps_echo(cp.t("term_done"))])
+        if self.ai_idle("claude"):
+            self.ai_cancel["claude"].clear()
+            cp.start_ai_connect("claude", self.ai_jobs["claude"], cancel=self.ai_cancel["claude"].is_set,
+                                done=self._ai_done)
+        self._open_settings()
 
     def _login_claude(self):
-        binp = (shutil.which("claude") or shutil.which("claude.exe")
-                or os.path.expanduser("~/.local/bin/claude.exe"))
-        self._run_in_console([self._ps_echo(cp.t("term_login")),
-                              "& '" + binp.replace("'", "''") + "' auth login",
-                              "Write-Host ''", self._ps_echo(cp.t("term_done"))])
+        if self.ai_idle("claude"):
+            self.ai_cancel["claude"].clear()
+            cp.start_ai_connect("claude", self.ai_jobs["claude"], cancel=self.ai_cancel["claude"].is_set,
+                                done=self._ai_done)
+        self._open_settings()
 
     def _install_codex(self):
-        """Codex 설치(npm) → 이어서 로그인까지 새 콘솔에서 (macOS 판 start_codex_install).
-
-        npm 과 codex 는 cmd 로 부른다: PowerShell 에서 이름만 쓰면 npm.ps1/codex.ps1 이 먼저 잡히고,
-        Windows 클라이언트의 기본 실행 정책(Restricted)이 그 스크립트를 막는다. 설치 직후에는 이
-        콘솔의 PATH 에 npm 전역 폴더가 없을 수 있어 앞에 붙인다.
-        """
-        need = self._ps_echo(cp.t("term_need_npm"))
-        self._run_in_console([self._ps_echo(cp.t("term_installing_codex")),
-                              "if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { "
-                              + need + " }",
-                              'cmd /c "npm install -g @openai/codex"',
-                              "Write-Host ''", self._ps_echo(cp.t("term_login")),
-                              '$env:Path = "$env:APPDATA\\npm;" + $env:Path',
-                              'cmd /c "codex login"',
-                              "Write-Host ''", self._ps_echo(cp.t("term_done"))])
+        if self.ai_idle("codex"):
+            self.ai_cancel["codex"].clear()
+            cp.start_ai_connect("codex", self.ai_jobs["codex"], cancel=self.ai_cancel["codex"].is_set,
+                                done=self._ai_done)
+        self._open_settings()
 
     def _login_codex(self):
-        """설치돼 있으나 로그인만 필요한 경우 (macOS 판 start_codex_login). 찾은 CLI 의 폴더를 PATH 앞에."""
-        binp = find_codex_cli()
-        lines = [self._ps_echo(cp.t("term_login"))]
-        if binp:
-            lines.append("$env:Path = '" + os.path.dirname(binp).replace("'", "''") + ";' + $env:Path")
-        lines += ['cmd /c "codex login"', "Write-Host ''", self._ps_echo(cp.t("term_done"))]
-        self._run_in_console(lines)
+        if self.ai_idle("codex"):
+            self.ai_cancel["codex"].clear()
+            cp.start_ai_connect("codex", self.ai_jobs["codex"], cancel=self.ai_cancel["codex"].is_set,
+                                done=self._ai_done)
+        self._open_settings()
+
+    def _login_gemini(self):
+        """코어가 새 콘솔 창에서 agy 를 연다(start_gemini_login). 맨 위에 할 일 세 줄이 찍히고, 설정 창의
+        Gemini 줄이 같은 안내를 보여 준다. 끝나면 자격 증명의 지문 변화로 안다."""
+        if self.ai_idle("gemini"):
+            self.ai_cancel["gemini"].clear()
+            cp.start_ai_connect("gemini", self.ai_jobs["gemini"], cancel=self.ai_cancel["gemini"].is_set,
+                                done=self._ai_done)
+        self._open_settings()
 
     # ── 완전 삭제 (macOS 판 uninstallApp_ / do_uninstall 과 같은 순서: 거절할 수 있는 단계가 먼저) ──
     def _uninstall(self):
@@ -2181,6 +2216,7 @@ class PetWindow(QWidget):
             p.hide()
             p.deleteLater()
         self.ui["panel"] = None        # 다음에 열 때 새 언어로 재구성
+        self.ui["ai_rows"] = None
 
     def closeEvent(self, e):
         """창 닫기 요청(WM_CLOSE) 은 곧 앱 종료다. 트레이의 보이기/숨기기는 setVisible 이라 여기를 거치지 않는다.
@@ -2232,6 +2268,8 @@ class PetWindow(QWidget):
             "codex_gauges": [g for g, b in ui["codex_g"].items() if b.isChecked()],
             "openai_admin_key": ui["okey"].text().strip(),
             "codex_budget": ui["cbud"].text(),
+            "show_gemini": bool(ui["show_gemini"].isChecked()),
+            "gemini_gauges": [g for g, b in ui["gemini_g"].items() if b.isChecked()],
         }
         plan, err = cp.plan_settings_save(self.cfg, form)
         if err:
@@ -2261,14 +2299,14 @@ class PetWindow(QWidget):
 
 
 class SettingsDialog(QDialog):
-    """macOS 판 open_settings 의 NSPanel(420×568) 을 같은 좌표로 옮긴 것.
+    """macOS 판 open_settings 의 NSPanel(820×652) 을 같은 좌표로 옮긴 것(오른쪽 400 이 "AI 연결" 칸).
 
     AppKit 은 y 가 아래에서 위로, Qt 는 위에서 아래로 커지므로 위젯의 위쪽 = PHT − y − h 로 뒤집는다.
     라벨·입력·팝업·체크·버튼의 x/폭/높이와 y 간격은 macOS 판과 같다. 펫·언어, Claude Code 구역,
-    Codex 구역(같은 모양), 공통(급증 민감도·인사), 저장·버전 순서이고 높이 예산 ≤ 656 도 그대로다
+    Codex 구역(같은 모양), Gemini 구역(표시 + 게이지 셋), 공통(급증 민감도·인사), 저장·버전 순서이고 높이 예산 ≤ 656 도 그대로다
     (CLAUDE.md Danger zone). 보정·한도·고급 창은 2026-10-05 에 없어졌다.
     """
-    PWID, PHT = 420, 568
+    PWID, PHT = 820, 652
 
     def __init__(self, win):
         super().__init__(None, Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
@@ -2374,8 +2412,22 @@ class SettingsDialog(QDialog):
         label(t("s_codex_budget"), 20, y)
         f_cbud = field(180, y - 2, 90, R.get("codex_budget") or 0)
 
-        # ── 공통 ──
+        # ── Gemini 구역 (표시 + 게이지 셋 — 데이터 출처·키는 없다: agy 에게 묻는다) ──
         y -= 42
+        show_gemini = section(t("s_sec_gemini"), "show_gemini", y)
+        y -= 30
+        label(t("s_gauges"), 20, y)
+        gemini_title = {"gemini": t("s_gauge_gemini"), "limits": t("s_gauge_limits"),
+                        "group": t("s_gauge_group")}
+        chosen = set(cp.provider_gauges(R, "gemini"))
+        gemini_g = {}
+        for n, g in enumerate(cp.GEMINI_GAUGES):
+            # Claude 게이지와 같은 2열 격자 — 셋째 칸은 둘째 줄 왼쪽 (macOS 판과 같은 칸)
+            gx, gy = 180 + (n % 2) * 120, y - (n // 2) * 24
+            gemini_g[g] = check(gemini_title[g], gx, gy, 116, g in chosen)
+
+        # ── 공통 ──
+        y -= 54
         label(t("s_spike_sens"), 20, y)
         m = R.get("spike_mult", 1.0)
         sens = popup(180, y, 220, [t("s_sens_high"), t("s_sens_normal"), t("s_sens_low")],
@@ -2383,10 +2435,34 @@ class SettingsDialog(QDialog):
         y -= 32
         greet = check(t("s_greet"), 20, y, 380, R.get("greet"))
 
+        # ── AI 연결 (오른쪽 칸, macOS 판과 같은 좌표) — 글자와 버튼은 cp.ai_connect_row 가 정한다 ──
+        ax = 440
+        head = label(t("ai_sec"), ax, self.PHT - 40, 300)
+        head.setStyleSheet("font-weight: bold;")
+        ai_rows = {}
+        for n, p in enumerate(cp.CLI_PROVIDERS):
+            top = self.PHT - 78 - n * cp.AI_ROW_PITCH
+            name = label(cp.AI_PROVIDER_NAMES[p], ax, top, 230)
+            name.setStyleSheet("font-weight: bold;")
+            status_l = label("", ax, top - 24, 240)
+            btn = QPushButton("", self)
+            btn.setGeometry(self.PWID - 130, self.PHT - (top - 16) - 30, 110, 30)
+            btn.clicked.connect(lambda _=False, prov=p: win.ai_connect_click(prov))
+            hint_l = label("", ax, top - 76, 360, 46)
+            hint_l.setWordWrap(False)              # 줄은 ai_rows_refresh 가 낱말 단위로 직접 끊는다
+            hint_l.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            hint_l.setStyleSheet("color: palette(placeholder-text);")
+            ai_rows[p] = {"status": status_l, "button": btn, "hint": hint_l}
+        self.ai_rows = ai_rows
+        self.ai_timer = QTimer(self)                 # 받는 중 n%·로그인 안내를 1초마다 고친다
+        self.ai_timer.timeout.connect(self.ai_rows_refresh)
+        self.ai_timer.start(1000)
+        self.ai_rows_refresh()
+
         vl = label(f"ClaudePet v{cp.APP_VERSION}", 20, 18, 200)
         vl.setStyleSheet("color: palette(placeholder-text);")     # NSColor.secondaryLabelColor
         save_btn = QPushButton(t("s_save"), self)
-        save_btn.setGeometry(self.PWID - 110, self.PHT - 12 - 30, 90, 30)
+        save_btn.setGeometry(420 - 110, self.PHT - 12 - 30, 90, 30)
         save_btn.clicked.connect(win.save_settings)
 
         win.ui.update({"panel": self, "mode": mode, "sens": sens, "greet": greet,
@@ -2394,10 +2470,40 @@ class SettingsDialog(QDialog):
                        "show_claude": show_claude, "claude_g": claude_g,
                        "show_codex": show_codex, "codex_mode": codex_mode, "codex_g": codex_g,
                        "okey": f_okey, "cbud": f_cbud,
+                       "show_gemini": show_gemini, "gemini_g": gemini_g,
+                       "ai_rows": ai_rows,
                        "pet": pet_pop, "pet_ids": pet_ids})
         scr = win.screen() or QApplication.primaryScreen()        # macOS panel.center()
         a = scr.availableGeometry()
         self.move(a.center().x() - self.PWID // 2, a.center().y() - self.PHT // 2)
+
+    @staticmethod
+    def _wrap_words(text, lbl):
+        """text 를 lbl 의 폭에 맞춰 **낱말 단위로** 줄바꿈한다. Qt 의 자동 줄바꿈은 한글을 글자 단위로 끊어
+        "받습니/다" 처럼 갈린다 (macOS 판은 줄바꿈 전략으로 같은 결과를 낸다)."""
+        fm, width = lbl.fontMetrics(), lbl.width()
+        lines, cur = [], ""
+        for word in str(text).split(" "):
+            trial = (cur + " " + word) if cur else word
+            if cur and fm.horizontalAdvance(trial) > width:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = trial
+        if cur:
+            lines.append(cur)
+        return "\n".join(lines)
+
+    def ai_rows_refresh(self):
+        """"AI 연결" 세 줄을 지금 상태로 고친다 (macOS 판 ai_rows_refresh)."""
+        for p, w in self.ai_rows.items():
+            row = cp.ai_connect_row(p, bool(cp.find_cli(p)), cp.cli_logged_in(p), self.win.ai_jobs[p])
+            status, button, hint = cp.ai_connect_text(row)
+            w["status"].setText(status)
+            w["hint"].setText(self._wrap_words(hint, w["hint"]))
+            w["button"].setVisible(button is not None)
+            if button is not None:
+                w["button"].setText(button)
 
     def closeEvent(self, e):
         # X 로 닫힐 때 (macOS 판 windowWillClose_ → close_main_panel)
@@ -2533,6 +2639,11 @@ def clean_update_leftovers():
 
 
 def main():
+    # 자격 증명 관리자 프로브(코어가 이 exe 를 숨은 인자로 다시 띄운다) — 앱이 되기 **전에** 답하고 끝낸다.
+    # 뮤텍스·앱 ID·QApplication 보다 먼저여야 한다: 뒤에 두면 자식이 "이미 떠 있다"로 조용히 끝나
+    # 프로브가 언제나 '모름'이 된다.
+    if cp.GEMINI_CRED_PROBE_FLAG in sys.argv[1:]:
+        return cp.gemini_cred_probe_main()
     claim_windows_app_identity()              # QApplication 보다 먼저 — 창이 만들어지기 전에 묶음 ID 가 있어야 한다
     if not acquire_single_instance_mutex():   # 이미 떠 있으면 조용히 끝난다 — 설치 파일의 재시작과 [Run] 이 둘 다 띄워도 하나만 남는다
         cp._dbg("win: another instance holds the mutex; exiting")

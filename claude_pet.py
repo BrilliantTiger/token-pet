@@ -21,6 +21,7 @@ Claude Pet — Codex Pets 스타일 투명 오버레이 펫 + Claude 토큰 사�
 import json
 import math
 import os
+import platform
 import random
 import re
 import sys
@@ -32,6 +33,7 @@ import errno
 import fcntl
 import plistlib
 import shutil
+import signal
 import threading
 import subprocess
 import ssl
@@ -958,8 +960,8 @@ def discover_pets():
 SESSION_HOURS = 5
 REFRESH_SEC = 30
 
-APP_VERSION = "1.1.2"                # CFBundleShortVersionString 과 일치해야 한다
-GITHUB_REPO = "BrilliantTiger/claude-pet"  # 자동 업데이트 확인용
+APP_VERSION = "1.2.0"                # CFBundleShortVersionString 과 일치해야 한다
+GITHUB_REPO = "BrilliantTiger/token-pet"  # 자동 업데이트 확인용
 UPDATE_CHECK_SEC = 3600             # 새 릴리즈 확인 주기(1시간). 시작 시엔 확인하지 않고 한 주기 뒤부터 — run_gui 참조
 _upd_cache = {"t": 0.0, "busy": False}
 
@@ -1025,13 +1027,18 @@ RUNTIME = {
     # OpenAI Admin API 키 — Anthropic Admin 키(admin_key)와 같은 처리: ~/.claude_pet.json 에 평문.
     "openai_admin_key": "",
     "codex_budget": 0.0,        # Codex API 모드 월 예산($), 0이면 예산 표시 없음
+    # Gemini(Antigravity CLI, agy) — 기본은 보이고 게이지는 대표 한 줄("gemini")만(TOK-43 사용자 결정).
+    # 게이지: "gemini"(Gemini 한도 중 가장 많이 쓴 것) / "limits"(Gemini 의 5시간·주간 한도마다) /
+    # "group"(Claude·GPT 묶음 한도).
+    "show_gemini": True,
+    "gemini_gauges": ["gemini"],
 }
 # 사용량 한도·모델 키워드·주간 리셋 설정은 없어졌다(사용자 결정 2026-10-05: "추정 로그치
 # 적는건 이제 없애자"). 옛 ~/.claude_pet.json 에 그 키가 남아 있어도 읽지 않고, 지우지도 않는다.
 _RUNTIME_CONFIG_KEYS = ("mode", "spike_mult", "greet", "roam", "admin_key", "api_budget",
                         "auto_recover", "credit_display", "show_claude", "claude_gauges",
                         "show_codex", "codex_mode", "codex_gauges", "openai_admin_key",
-                        "codex_budget", "lang")
+                        "codex_budget", "show_gemini", "gemini_gauges", "lang")
 
 
 def apply_config(cfg):
@@ -1040,7 +1047,7 @@ def apply_config(cfg):
             RUNTIME[k] = cfg[k]
     # 손으로 고친 파일의 "false" 같은 값은 진짜 bool 로, 목록이 아닌 게이지는 기본값으로
     # 정규화해 둔다 — RUNTIME 을 읽는 모든 곳이 같은 뜻을 보게(provider_shown 과 같은 규칙).
-    for p in ("claude", "codex"):
+    for p in ("claude", "codex", "gemini"):
         if "show_" + p in cfg:
             RUNTIME["show_" + p] = config_bool(RUNTIME.get("show_" + p), True)
         if p + "_gauges" in cfg:
@@ -1148,6 +1155,42 @@ TR = {
     "no_providers": "Nothing to show — turn on Claude Code or Codex in Settings",
     "codex_need_admin_key": "Codex: right-click → Settings to enter an OpenAI Admin API key",
     "codex_token_expired": "Codex token expired — run codex once to restore usage",
+    "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5h",
+    "gemini_5h": "5h", "menu_gemini_login": "🔑 Sign in to Gemini (agy)…",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
+    "s_gauge_limits": "5h · Weekly", "s_gauge_group": "Claude·GPT",
+    # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
+    "ai_sec": "AI connections",
+    "ai_not_installed": "Not installed",
+    "ai_need_login": "Sign-in needed",
+    "ai_connected": "Connected",
+    "ai_downloading": "Downloading {pct}%",
+    "ai_verifying": "Verifying",
+    "ai_login_browser": "Sign in in your browser",
+    "ai_login_paste": "Paste the code into the open window",
+    "ai_btn_install": "Install",
+    "ai_btn_login": "Sign in",
+    "ai_btn_cancel": "Cancel",
+    "ai_btn_retry": "Try again",
+    "ai_hint_claude": "Shows the same limits as claude.ai. The official CLI is downloaded from Anthropic.",
+    "ai_hint_codex": "Shows Codex usage only, not ChatGPT chats. The official CLI is downloaded from OpenAI.",
+    "ai_hint_gemini": "Shows Antigravity limits only — separate from gemini.google.com chats.",
+    "ai_gemini_guide": "Sign in in the browser, then paste the code it shows into the open window and press Enter.",
+    "term_gemini_step1": "① Pick your account and sign in in the browser.",
+    "term_gemini_step2": "② Copy the code the browser shows.",
+    "term_gemini_step3": "③ Paste it into this window and press Enter.",
+    "term_gemini_done": "✅ Done — you can close this window.",
+    "term_gemini_timeout": "⏱ Time ran out — press [Sign in] in Settings again.",
+    "ai_fail_unsupported": "This computer is not supported",
+    "ai_fail_manifest": "The download server gave an unexpected answer",
+    "ai_fail_network": "Could not reach the download server",
+    "ai_fail_hash": "The downloaded file was damaged",
+    "ai_fail_archive": "The downloaded file could not be unpacked",
+    "ai_fail_signature": "The publisher signature did not match",
+    "ai_fail_locked": "The file is in use — close the CLI and retry",
+    "ai_fail_denied": "Sign-in was declined",
+    "ai_fail_timeout": "Sign-in took too long",
+    "ai_fail_failed": "Sign-in did not finish",
     "codex_api_key_rejected": "⚠ Codex: OpenAI Admin API key rejected — check the key in Settings",
     "codex_api_unreachable": "⚠ Codex usage temporarily unavailable — retrying",
     "menu_install_codex": "⬇︎ Install Codex…",
@@ -1226,6 +1269,42 @@ TR = {
     "no_providers": "표시할 제공자가 없어요 — 설정에서 Claude Code 나 Codex 를 켜세요",
     "codex_need_admin_key": "Codex: 우클릭 → 설정에서 OpenAI Admin API 키를 입력하세요",
     "codex_token_expired": "Codex 토큰 만료 — codex 한번 실행하면 사용량 복구",
+    "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5시간",
+    "gemini_5h": "5시간", "menu_gemini_login": "🔑 Gemini 로그인(agy)…",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
+    "s_gauge_limits": "5시간·주간", "s_gauge_group": "Claude·GPT",
+    # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
+    "ai_sec": "AI 연결",
+    "ai_not_installed": "설치 안 됨",
+    "ai_need_login": "로그인 필요",
+    "ai_connected": "연결됨",
+    "ai_downloading": "받는 중 {pct}%",
+    "ai_verifying": "확인 중",
+    "ai_login_browser": "브라우저에서 로그인하세요",
+    "ai_login_paste": "열린 창에 붙여 넣으세요",
+    "ai_btn_install": "설치",
+    "ai_btn_login": "로그인",
+    "ai_btn_cancel": "취소",
+    "ai_btn_retry": "다시 시도",
+    "ai_hint_claude": "claude.ai 와 같은 한도를 보여 줍니다. 공식 CLI 를 Anthropic 서버에서 받습니다.",
+    "ai_hint_codex": "ChatGPT 대화가 아니라 Codex 사용량만 보여 줍니다. 공식 CLI 를 OpenAI 서버에서 받습니다.",
+    "ai_hint_gemini": "Antigravity 한도만 보여 줍니다. gemini.google.com 채팅과는 별개입니다.",
+    "ai_gemini_guide": "브라우저에서 로그인하고, 코드가 나오면 열린 창에 붙여 넣은 뒤 Enter 를 누르세요.",
+    "term_gemini_step1": "① 브라우저에서 계정을 고르고 로그인하세요.",
+    "term_gemini_step2": "② 브라우저에 나온 코드를 복사하세요.",
+    "term_gemini_step3": "③ 이 창에 붙여 넣고 Enter 를 누르세요.",
+    "term_gemini_done": "✅ 완료 — 창을 닫아도 됩니다.",
+    "term_gemini_timeout": "⏱ 시간이 지났어요 — 설정에서 [로그인]을 다시 누르세요.",
+    "ai_fail_unsupported": "이 컴퓨터는 지원하지 않습니다",
+    "ai_fail_manifest": "받는 서버의 답이 예상과 다릅니다",
+    "ai_fail_network": "받는 서버에 연결하지 못했습니다",
+    "ai_fail_hash": "받은 파일이 손상됐습니다",
+    "ai_fail_archive": "받은 파일을 풀지 못했습니다",
+    "ai_fail_signature": "제작사 서명이 맞지 않습니다",
+    "ai_fail_locked": "파일이 사용 중입니다 — CLI 를 닫고 다시 시도하세요",
+    "ai_fail_denied": "로그인이 거부됐습니다",
+    "ai_fail_timeout": "로그인 시간이 지났습니다",
+    "ai_fail_failed": "로그인이 끝나지 않았습니다",
     "codex_api_key_rejected": "⚠ Codex: OpenAI Admin API 키가 거부됨 — 설정에서 키를 확인하세요",
     "codex_api_unreachable": "⚠ Codex 사용량을 잠시 가져올 수 없음 — 다시 시도하는 중",
     "menu_install_codex": "⬇︎ Codex 설치…",
@@ -1306,6 +1385,42 @@ TR = {
     "no_providers": "表示するプロバイダがありません — 設定で Claude Code か Codex をオンにしてください",
     "codex_need_admin_key": "Codex: 右クリック → 設定で OpenAI Admin API キーを入力してください",
     "codex_token_expired": "Codex トークン期限切れ — codex を一度実行すると使用量が復帰",
+    "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5時間",
+    "gemini_5h": "5時間", "menu_gemini_login": "🔑 Gemini にログイン(agy)…",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
+    "s_gauge_limits": "5時間・週間", "s_gauge_group": "Claude·GPT",
+    # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
+    "ai_sec": "AI 接続",
+    "ai_not_installed": "未インストール",
+    "ai_need_login": "ログインが必要",
+    "ai_connected": "接続済み",
+    "ai_downloading": "ダウンロード中 {pct}%",
+    "ai_verifying": "確認中",
+    "ai_login_browser": "ブラウザでログインしてください",
+    "ai_login_paste": "開いたウィンドウに貼り付けてください",
+    "ai_btn_install": "インストール",
+    "ai_btn_login": "ログイン",
+    "ai_btn_cancel": "キャンセル",
+    "ai_btn_retry": "再試行",
+    "ai_hint_claude": "claude.ai と同じ上限を表示します。公式 CLI を Anthropic のサーバーから取得します。",
+    "ai_hint_codex": "ChatGPT の会話ではなく Codex の使用量だけを表示します。公式 CLI を OpenAI から取得します。",
+    "ai_hint_gemini": "Antigravity の上限だけを表示します。gemini.google.com のチャットとは別です。",
+    "ai_gemini_guide": "ブラウザでログインし、表示されたコードを開いたウィンドウに貼り付けて Enter を押してください。",
+    "term_gemini_step1": "① ブラウザでアカウントを選んでログインしてください。",
+    "term_gemini_step2": "② ブラウザに表示されたコードをコピーしてください。",
+    "term_gemini_step3": "③ このウィンドウに貼り付けて Enter を押してください。",
+    "term_gemini_done": "✅ 完了 — このウィンドウは閉じて構いません。",
+    "term_gemini_timeout": "⏱ 時間切れです — 設定で［ログイン］をもう一度押してください。",
+    "ai_fail_unsupported": "このコンピューターには対応していません",
+    "ai_fail_manifest": "ダウンロードサーバーの応答が想定と違います",
+    "ai_fail_network": "ダウンロードサーバーに接続できません",
+    "ai_fail_hash": "ダウンロードしたファイルが壊れています",
+    "ai_fail_archive": "ダウンロードしたファイルを展開できません",
+    "ai_fail_signature": "発行元の署名が一致しません",
+    "ai_fail_locked": "ファイルが使用中です — CLI を閉じて再試行してください",
+    "ai_fail_denied": "ログインが拒否されました",
+    "ai_fail_timeout": "ログインが時間切れになりました",
+    "ai_fail_failed": "ログインが完了しませんでした",
     "codex_api_key_rejected": "⚠ Codex: OpenAI Admin API キーが拒否されました — 設定でキーを確認してください",
     "codex_api_unreachable": "⚠ Codex の使用量を一時的に取得できません — 再試行中",
     "menu_install_codex": "⬇︎ Codex をインストール…",
@@ -1388,6 +1503,42 @@ TR = {
     "no_providers": "Nada que mostrar — activa Claude Code o Codex en Ajustes",
     "codex_need_admin_key": "Codex: clic derecho → Ajustes para introducir una clave de OpenAI Admin API",
     "codex_token_expired": "Token de Codex expirado — ejecuta codex una vez para restaurar el uso",
+    "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5h",
+    "gemini_5h": "5h", "menu_gemini_login": "🔑 Iniciar sesión en Gemini (agy)…",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
+    "s_gauge_limits": "5h · Semanal", "s_gauge_group": "Claude·GPT",
+    # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
+    "ai_sec": "Conexiones de IA",
+    "ai_not_installed": "No instalado",
+    "ai_need_login": "Falta iniciar sesión",
+    "ai_connected": "Conectado",
+    "ai_downloading": "Descargando {pct}%",
+    "ai_verifying": "Verificando",
+    "ai_login_browser": "Inicia sesión en el navegador",
+    "ai_login_paste": "Pega el código en la ventana abierta",
+    "ai_btn_install": "Instalar",
+    "ai_btn_login": "Iniciar sesión",
+    "ai_btn_cancel": "Cancelar",
+    "ai_btn_retry": "Reintentar",
+    "ai_hint_claude": "Muestra los mismos límites que claude.ai. La CLI oficial se descarga de Anthropic.",
+    "ai_hint_codex": "Muestra solo el uso de Codex, no los chats de ChatGPT. La CLI oficial se descarga de OpenAI.",
+    "ai_hint_gemini": "Muestra solo los límites de Antigravity, aparte de los chats de gemini.google.com.",
+    "ai_gemini_guide": "Inicia sesión en el navegador, pega el código que aparece en la ventana abierta y pulsa Enter.",
+    "term_gemini_step1": "① Elige tu cuenta e inicia sesión en el navegador.",
+    "term_gemini_step2": "② Copia el código que muestra el navegador.",
+    "term_gemini_step3": "③ Pégalo en esta ventana y pulsa Enter.",
+    "term_gemini_done": "✅ Listo: ya puedes cerrar esta ventana.",
+    "term_gemini_timeout": "⏱ Se agotó el tiempo: pulsa [Iniciar sesión] de nuevo en Ajustes.",
+    "ai_fail_unsupported": "Este equipo no es compatible",
+    "ai_fail_manifest": "El servidor de descarga respondió algo inesperado",
+    "ai_fail_network": "No se pudo conectar con el servidor de descarga",
+    "ai_fail_hash": "El archivo descargado está dañado",
+    "ai_fail_archive": "No se pudo descomprimir el archivo descargado",
+    "ai_fail_signature": "La firma del editor no coincide",
+    "ai_fail_locked": "El archivo está en uso: cierra la CLI y reintenta",
+    "ai_fail_denied": "Se rechazó el inicio de sesión",
+    "ai_fail_timeout": "El inicio de sesión tardó demasiado",
+    "ai_fail_failed": "El inicio de sesión no terminó",
     "codex_api_key_rejected": "⚠ Codex: clave de OpenAI Admin API rechazada — revísala en Ajustes",
     "codex_api_unreachable": "⚠ Uso de Codex no disponible por ahora — reintentando",
     "menu_install_codex": "⬇︎ Instalar Codex…",
@@ -1416,6 +1567,9 @@ TR = {
 for _lang in TR:
     for _window in ("session", "weekly"):
         TR[_lang]["codex_" + _window] = TR[_lang][_window]
+    # Gemini 의 Claude·GPT 묶음 주간 한도도 같은 이유로 그 로케일의 `weekly` 표기를 물려받는다 — en 에서
+    # "Weekly 17%" 옆에 "Claude·GPT weekly 30%" 가 서지 않게.
+    TR[_lang]["gemini_group_weekly"] = TR[_lang]["gemini_group"] + " " + TR[_lang]["weekly"]
 
 
 # 모션별 (프레임 간격 ms, 반복, 루프 후 휴식 ms) — 평소엔 얌전히!
@@ -1501,7 +1655,8 @@ def save_config(cfg, expect_stamp=_UNCHECKED):
 SETTINGS_OWNED_KEYS = ("pet", "lang", "mode", "admin_key", "api_budget",
                        "spike_mult", "greet", "auto_recover", "credit_display",
                        "show_claude", "claude_gauges", "show_codex", "codex_mode",
-                       "codex_gauges", "openai_admin_key", "codex_budget")
+                       "codex_gauges", "openai_admin_key", "codex_budget",
+                       "show_gemini", "gemini_gauges")
 
 
 def _config_lock_path():
@@ -1605,6 +1760,10 @@ def _budget_value(raw):
 # 게이지 분류 — 설정의 체크박스와 필의 필터가 같은 이름을 쓴다(claude_gauge_class 참조).
 CLAUDE_GAUGES = ("session", "weekly", "model", "credit")
 CODEX_GAUGES = ("session", "weekly")
+GEMINI_GAUGES = ("gemini", "limits", "group")
+# 게이지 값이 목록이 아닐 때(손으로 고친 설정) 쓰는 기본값. Claude·Codex 는 전부, Gemini 는 대표 한 줄 —
+# 기본값 RUNTIME["gemini_gauges"] 와 같다(한도 줄이 망가진 설정 하나로 쏟아지지 않게).
+PROVIDER_GAUGE_DEFAULTS = {"claude": CLAUDE_GAUGES, "codex": CODEX_GAUGES, "gemini": ("gemini",)}
 
 
 def _gauge_list(value, allowed):
@@ -1619,7 +1778,7 @@ def _gauge_list(value, allowed):
 # 시험할 수가 없어서, 검증과 반영을 이렇게 떼어 놓는다.
 # 폼 키: pet, lang, mode, admin_key, api_budget, spike_mult, greet,
 #        show_claude, claude_gauges, show_codex, codex_mode, codex_gauges,
-#        openai_admin_key, codex_budget
+#        openai_admin_key, codex_budget, show_gemini, gemini_gauges
 def plan_settings_save(base_cfg, form):
     """폼 → (plan, error). 전부 통과해야 plan 이 나온다(부분 적용은 존재 불가).
 
@@ -1647,13 +1806,15 @@ def plan_settings_save(base_cfg, form):
     for key in ("mode", "codex_mode"):
         if key in form:
             draft[key] = "api" if form[key] == "api" else "sub"
-    for key in ("greet", "show_claude", "show_codex"):
+    for key in ("greet", "show_claude", "show_codex", "show_gemini"):
         if key in form:
             draft[key] = bool(form[key])
     if "claude_gauges" in form:
         draft["claude_gauges"] = _gauge_list(form["claude_gauges"], CLAUDE_GAUGES)
     if "codex_gauges" in form:
         draft["codex_gauges"] = _gauge_list(form["codex_gauges"], CODEX_GAUGES)
+    if "gemini_gauges" in form:
+        draft["gemini_gauges"] = _gauge_list(form["gemini_gauges"], GEMINI_GAUGES)
     if form.get("pet"):
         draft["pet"] = form["pet"]
     draft["api_budget"] = api_budget
@@ -2285,8 +2446,22 @@ def allow_keychain_prompt():
 
     네이티브 읽기는 'ClaudePet 이 키체인에 접근하려 합니다' 창을 띄울 수 있는 유일한 경로다.
     자동 경로(30초 새로고침, 401 강제 재조회)는 절대 그 창을 띄우지 않는다. 창은 사용자가
-    펫을 더블클릭해 새로 고치거나 필의 상태 문구를 눌렀을 때, 그 직후에만 뜰 수 있다."""
+    펫을 더블클릭해 새로 고치거나 필의 상태 문구를 눌렀을 때, 그 직후에만 뜰 수 있다.
+
+    같은 누름이 Gemini(agy) 사용량도 바로 다시 받게 한다(_gemini_cache["click"]) — 키체인과는
+    상관없다: Gemini 는 agy 에게 묻고, 앱은 agy 의 키체인 항목을 읽지 않는다."""
     _keychain_prompt_until[0] = time.time() + KEYCHAIN_PROMPT_WINDOW_SEC
+    request_gemini_refresh()
+
+
+def request_gemini_refresh():
+    """사용자가 직접 눌렀다 — Gemini(agy) 사용량을 다음 새로고침에서 바로 다시 받게 한다.
+
+    깃발만 올린다(_gemini_cache 의 click·click_check). 마지막 실행에서 GEMINI_CLICK_MIN_SEC(60초)이
+    지나지 않았으면 그때까지 기다리고, 한 번의 누름은 한 번의 실행에만 쓰인다(fetch_gemini_usage).
+    키체인과 무관하다 — Windows 포트는 allow_keychain_prompt 대신 이것을 부른다."""
+    _gemini_cache["click"] = True
+    _gemini_cache["click_check"] = True
 
 
 def _keychain_prompt_allowed():
@@ -3042,13 +3217,18 @@ def _fetch_oauth_usage():
 def _find_claude_cli():
     # ~/.local/bin/claude 가 네이티브 설치 기본 위치다. Finder로 띄운 앱은 PATH가
     # 최소(/usr/bin:/bin 등)라 shutil.which 가 이걸 못 찾으므로 명시적으로 넣는다.
-    for p in (shutil.which("claude"),
-              os.path.expanduser("~/.local/bin/claude"),
-              os.path.expanduser("~/.claude/local/claude"),
-              "/opt/homebrew/bin/claude", "/usr/local/bin/claude"):
+    # 앱 전용 bin 은 **마지막**이다 — 사용자가 깐 것이 먼저(계약 v7-I2). 그것도 실행해도 되는 파일일 때만.
+    cands = [shutil.which("claude"),
+             os.path.expanduser("~/.local/bin/claude"),
+             os.path.expanduser("~/.claude/local/claude"),
+             "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+    if sys.platform == "win32":
+        cands = [shutil.which("claude"), shutil.which("claude.exe"),
+                 os.path.join(_win_home(), ".local", "bin", "claude.exe")]
+    for p in cands:
         if p and os.path.exists(p):
             return p
-    return None
+    return _app_cli("claude")
 
 
 CLAUDE_INSTALL_URL = "https://claude.ai/install.sh"   # Anthropic 공식(홈 디렉터리 설치)
@@ -3141,12 +3321,21 @@ CODEX_NPM_PACKAGE = "@openai/codex"   # OpenAI 공식 npm 패키지
 
 def _find_codex_cli():
     # Finder 로 띄운 앱은 PATH 가 최소라 shutil.which 가 npm 전역 설치를 못 찾을 수 있다.
-    for p in (shutil.which("codex"), "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
-              os.path.expanduser("~/.npm-global/bin/codex"),
-              os.path.expanduser("~/.local/bin/codex")):
+    # 앱 전용 bin 은 마지막(계약 v7-I2).
+    cands = [shutil.which("codex"), "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
+             os.path.expanduser("~/.npm-global/bin/codex"),
+             os.path.expanduser("~/.local/bin/codex")]
+    if sys.platform == "win32":
+        # npm 전역 설치는 %APPDATA%\\npm 에 codex.cmd 를 둔다(확장자 없는 sh 스크립트는 실행할 수 없다).
+        # 앱이 그 폴더가 PATH 에 들어가기 전에 시작됐을 수 있어 직접도 본다.
+        cands = [shutil.which("codex.cmd"), shutil.which("codex.exe")]
+        if os.environ.get("APPDATA"):
+            cands.append(os.path.join(os.environ["APPDATA"], "npm", "codex.cmd"))
+        cands.append(os.path.join(_win_home(), ".local", "bin", "codex.exe"))
+    for p in cands:
         if p and os.path.exists(p):
             return p
-    return None
+    return _app_cli("codex")
 
 
 def compute_codex_onboard_state(show_codex, codex_mode, has_token, cli_present,
@@ -3401,7 +3590,7 @@ def _fetch_cli_usage():
 #  마진 하나로 같은 결과를 얻는다.)
 REFRESH_MARGIN_SEC = 120
 RECOVERY_TIMEOUT_SEC = 120        # 한 번의 시도를 기다려 주는 상한(실측 3.6~4.2초)
-LOGIN_TIMEOUT_SEC = 180           # 로그인 한 번의 상한(실측 21초 — 브라우저에서 꾸물대는 몫)
+LOGIN_TIMEOUT_SEC = 300           # 로그인 한 번의 상한(실측 21초 — 브라우저에서 꾸물대는 몫, 2단계 인증 포함)
 RECOVERY_DELAYS_SEC = (0, 300, 900)   # 거부당한 뒤 재시도 시각 — 첫 거부 기준. 총 3회
 RECOVERY_COOLDOWN_SEC = 900       # 선제 갱신의 최소 간격(참고: CodexBar 백그라운드 15분)
 
@@ -3818,7 +4007,52 @@ def _win_kill_tree(pid):
                      "/F", "/T", "/PID", str(pid)], timeout=30)
 
 
-def _run_refresh_job(argv, label, stem, timeout):
+def _job_wait(alive, timeout, cancel=None, fine=False):
+    """떼어 낸 job 이 끝나기를 기다린다 → "exit"(스스로 끝남) | "timeout" | "cancelled".
+
+    alive() 는 프로세스를 띄워 묻는 비싼 확인이다(launchctl list / tasklist). 복구 스폰은 예전대로 2초마다
+    묻는다. fine 이면(사용자가 지켜보는 로그인) cancel() 을 0.1초마다, alive() 를 1초마다 본다 — [취소]가
+    2초 잠이 끝나기를 기다리지 않게. 기한에 닿으면 마지막으로 한 번 더 물어, 막 끝난 job 을 시간 초과로
+    적지 않는다."""
+    deadline = time.time() + timeout
+    if not fine:
+        while time.time() < deadline:
+            time.sleep(2.0)
+            if not alive():
+                return "exit"
+        return "timeout"
+    next_alive = time.time() + 1.0
+    while True:
+        if cancel is not None and cancel():
+            return "cancelled"
+        now = time.time()
+        if now >= deadline:
+            return "timeout" if alive() else "exit"
+        if now >= next_alive:
+            next_alive = now + 1.0
+            if not alive():
+                return "exit"
+        time.sleep(0.1)
+
+
+def _win_app_claude_cmdline(argv, out):
+    """Windows: 앱이 깐 claude 를 띄울 명령줄 — 그 CLI 의 자체 업데이터를 끄는 두 변수를 먼저 `set` 한다.
+    앱이 깐 claude 가 아니면 None(예전 명령줄을 그대로 쓴다).
+
+    WMI 가 만든 프로세스는 우리 환경을 물려받지 않는다. 그래서 cmd.exe 한 겹 안에서 변수를 정하고 같은
+    줄에서 CLI 를 띄운다: `cmd.exe /d /s /c "set "A=1" && set "B=1" && <CLI …> > out 2>&1"`. `/s` 는 맨 앞과
+    맨 뒤 따옴표만 벗기고 나머지를 그대로 읽는다. **진짜 Windows 에서 돌려 보지 않았다.**"""
+    argv = [str(a) for a in argv]
+    inner = argv[2:] if len(argv) > 2 and argv[1].lower() == "/c" else argv
+    extra = cli_env("claude", inner[0] if inner else "", base_env={})
+    if not extra:
+        return None
+    sets = " && ".join('set "%s=%s"' % (k, v) for k, v in sorted(extra.items()))
+    body = "%s && %s > %s 2>&1" % (sets, subprocess.list2cmdline(inner), subprocess.list2cmdline([out]))
+    return '%s /d /s /c "%s"' % (subprocess.list2cmdline([_windows_cmd_exe()]), body)
+
+
+def _run_refresh_job(argv, label, stem, timeout, cancel=None, outcome=None):
     """argv 를 떼어 낸 job 으로 **한 번** 돌리고 끝날 때까지(최대 timeout) 기다렸다가
     출력을 돌려준다. argv 는 *_spawn_argv 가 준, job 이 실행할 명령이다.
 
@@ -3847,6 +4081,9 @@ def _run_refresh_job(argv, label, stem, timeout):
     설치판) — `cmd.exe /c` 한 겹이 그것까지 받아 내도록 넣었지만 그 기계는 네이티브 claude.exe
     였다.
     """
+    # cancel/outcome 은 사용자가 지켜보는 로그인만 넘긴다: 취소를 바로 보고, 어떻게 끝났는지
+    # (outcome["ended"] = "exit" | "timeout" | "cancelled")를 돌려준다. 복구 스폰은 넘기지 않는다.
+    fine = cancel is not None or outcome is not None
     if sys.platform != "darwin":
         out, err = _recovery_io_paths(stem)
         cwd = recovery_cli_cwd()
@@ -3861,16 +4098,15 @@ def _run_refresh_job(argv, label, stem, timeout):
                 pass
         # 출력은 cmd 의 리디렉션으로 받는다. list2cmdline 이 공백 있는 경로만 인용하고
         # `>` 와 `2>&1` 은 그대로 두므로 cmd 가 연산자로 읽는다.
-        cmdline = subprocess.list2cmdline(list(argv) + [">", out, "2>&1"])
+        cmdline = (_win_app_claude_cmdline(argv, out)
+                   or subprocess.list2cmdline(list(argv) + [">", out, "2>&1"]))
         pid = _win_wmi_create(cmdline, cwd=cwd)
         if pid is None:
             return None
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            time.sleep(2.0)
-            if not _win_pid_alive(pid):
-                break
-        else:
+        ended = _job_wait(lambda: _win_pid_alive(pid), timeout, cancel, fine=fine)
+        if outcome is not None:
+            outcome["ended"] = ended
+        if ended != "exit":
             _win_kill_tree(pid)
         return _drain_job_output(stem)
     out, err = _recovery_io_paths(stem)
@@ -3892,7 +4128,13 @@ def _run_refresh_job(argv, label, stem, timeout):
                 pass
         fd = os.open(plist, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as f:
-            plistlib.dump(_launchd_job_spec(label, argv, cwd, out, err), f)
+            spec = _launchd_job_spec(label, argv, cwd, out, err)
+            # 앱이 깐 claude 는 앱이 갱신한다(update_app_cli) — 그 CLI 의 자체 업데이터를 끈다. 사용자가
+            # 깐 claude 에는 넣지 않는다(cli_env).
+            extra = {k: v for k, v in cli_env("claude", argv[0] if argv else "", base_env={}).items()}
+            if extra:
+                spec["EnvironmentVariables"] = extra
+            plistlib.dump(spec, f)
         _launchctl_bootout(label)      # 같은 label 의 옛 job(v0.26 의 submit 포함)을 먼저 내린다
         r = subprocess.run([LAUNCHCTL, "bootstrap", _launchd_gui_domain(), plist],
                            capture_output=True, text=True, timeout=30)
@@ -3906,12 +4148,10 @@ def _run_refresh_job(argv, label, stem, timeout):
         _launchctl_bootout(label)
         _drop_plist()
         return None
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(2.0)
-        if not _launchctl_job_alive(label):
-            break
-    # 제한을 넘겼든 제때 끝났든 여기서 내린다. bootout 은 아직 돌고 있는 job 을 끝낸다 —
+    ended = _job_wait(lambda: _launchctl_job_alive(label), timeout, cancel, fine=fine)
+    if outcome is not None:
+        outcome["ended"] = ended
+    # 제한을 넘겼든 제때 끝났든(취소됐든) 여기서 내린다. bootout 은 아직 돌고 있는 job 을 끝낸다 —
     # 붙어 있는 자식이 다음 시도를 영원히 막는 상태를 만들지 않는다.
     _launchctl_bootout(label)
     _drop_plist()
@@ -4428,6 +4668,2041 @@ def fetch_codex_usage():
 def codex_window_seconds(lane):
     """Codex 레인의 창 길이(초). 서버가 준 값이 있으면 그것, 없으면 관측 기준값."""
     return CODEX_WINDOWS.get(lane) or CODEX_LANE_WINDOWS.get(lane)
+
+
+# ─────────────── Gemini(Antigravity CLI, agy) 사용량 — agy 에게 묻는다 ───────────────
+#
+# 사용량은 `agy -p "/usage" --output-format json` 의 답에서 읽는다(계약 v2~v5, 2026-11-18). 앱은 agy 의
+# 키체인 **비밀값**도, cloudcode-pa HTTP 도 쓰지 않는다 — 토큰을 보지 않으므로 만료·갱신은 전부 agy 의
+# 일이다. 키체인에 묻는 것은 항목이 **있는지**와 그 수정 시각뿐이다(`-w` 없는 find-generic-password —
+# 비밀값을 열지 않으므로 창이 뜨지 않는다).
+#
+# 관측(2026-11-18, 이 저장소 주인의 Mac 한 대, agy 1.5.10, 계정 하나 — 표본이지 불변식이 아니다):
+#   · 그 명령은 5초쯤 걸리고 모델 토큰을 쓰지 않았다(usage 가 전부 0).
+#   · 답은 {"status": "SUCCESS", "command": {"data": {"groups": [{"name", "buckets": [{"id", "window",
+#     "remaining_fraction", "reset_time"}]}]}}} 모양이고, 묶음은 "Gemini Models"(버킷 gemini-weekly·
+#     gemini-5h)와 "Claude and GPT models"(3p-weekly·3p-5h) 둘이었다.
+#   · 전에 쓰던 HTTP 두 엔드포인트에는 Gemini 묶음의 값이 없었다(모델별 비율이 1.0 에 머물렀다).
+#   · agy 1.5.11 은 SSH 를 감지하면(SSH_TTY·SSH_CLIENT·SSH_CONNECTION 중 하나라도 있으면) 토큰
+#     저장소를 키체인에서 파일로 바꾼다 — 로그에 "Using file-based token storage because SSH session
+#     detected". 그래서 SSH_TTY=1 로 띄우면 키체인으로 로그인된 사용자가 "Authentication required" 가
+#     된다(같은 때 SSH_* 없이는 SUCCESS). 브라우저를 막으려고 SSH_TTY 를 쓸 수 없는 까닭이다.
+#   · 로그인하지 않은 agy 는(agy 쪽 검토 세션의 샌드박스 재현과 바이너리 확인 — 우리가 직접 본 것이
+#     아니다) stdout 없이 stderr 에 "Authentication required. Please visit the URL to log in: …" 를 쓰고
+#     60초를 기다리며, SSH_* 환경변수가 없으면 기본 브라우저에 로그인 탭을 연다. `-p /usage` 를 띄우는
+#     것 자체가 그 절차를 시작한다. `/logout` 뒤에도 키체인 항목은 남는다(token: null).
+#
+# 원칙:
+#   1. 0% 를 지어내지 않는다. 쓸 비율이 없는 버킷은 행을 만들지 않고, 쓸 게 없으면 None.
+#   2. agy 는 프로세스다 — 자주 띄우지 않는다. 자동으로는 GEMINI_AUTO_SEC(300초)에 한 번 이하,
+#      사용자가 펫·필을 누른 뒤에는 바로, 단 마지막 실행에서 GEMINI_CLICK_MIN_SEC(60초)은 지나야 한다.
+#      Gemini 를 숨기면 띄우지 않는다(start_gemini_refresh), 주 새로고침 경로에서 기다리지도 않는다.
+#   3. 셸을 거치지 않고, 중립 폴더(gemini_cli_cwd)에서, GEMINI_AGY_TIMEOUT 안에 끝나게, 브라우저를
+#      열지 못하게(_agy_env — PATH 맨 앞의 아무것도 하지 않는 `open`), 자기 프로세스 그룹으로 띄우고,
+#      끝낼 때는 그룹째 끝내고 거둔다.
+#   5. **로그인 안 된 agy 를 띄우지 않는다**(대표님: "로그인 안 하면 표시 안 하면 되는 거야! 왜 로그인을
+#      재시도해"). 항목도 폴백 파일도 없으면 실행 0회·필에 아무것도 없음·우클릭 메뉴에 "Gemini
+#      로그인(agy)". 항목은 있는데 agy 가 로그인을 요구하면 그 즉시 끝내고 자동 실행을 멈춘다 — 지문
+#      (키체인 mdat + 폴백 파일)이 바뀌거나 사용자가 누를 때까지.
+#   4. agy 의 출력(계정·대화 내용이 섞일 수 있다)은 로그(_dbg)·예외·상태 어디에도 남기지 않는다 —
+#      종료 코드와 실패의 종류만 남긴다.
+# Windows 에서는 아직 읽지 않는다(later issue) — 지금은 macOS 에서만 띄운다.
+
+GEMINI_AGY_ARGS = ("-p", "/usage", "--output-format", "json")
+GEMINI_AGY_TIMEOUT = 30        # agy 한 번의 상한(초) — 관측된 5초의 여섯 배
+GEMINI_AUTO_SEC = 300          # 자동 실행 사이의 최소 간격
+GEMINI_CLICK_MIN_SEC = 60      # 사용자가 눌러도 이보다 자주 띄우지 않는다
+GEMINI_CHECK_SEC = 300         # 읽지 않는 동안(로그인 안 됨·멈춤) 로그인 지문을 다시 보는 간격
+GEMINI_SECURITY_TIMEOUT = 5    # 존재 확인(security) 한 번의 상한(초)
+GEMINI_KEYCHAIN_SERVICE = "gemini"          # agy 의 키체인 항목 — 있는지만 본다
+GEMINI_KEYCHAIN_ACCOUNT = "antigravity"
+GEMINI_FALLBACK_NAME = "antigravity-oauth-token"   # agy 의 파일 폴백 저장소(존재·mtime 만 본다)
+# Windows(계약 v7-W): agy 는 토큰을 자격 증명 관리자의 일반 자격 증명 "gemini:antigravity" 에 둔다
+# (go-keyring 의 service + ":" + user). 앱 본체는 그 항목을 읽지 않는다 — 앱 자신을 숨은 인자로 다시
+# 띄운 짧은 자식(gemini_cred_probe_main)이 있는지와 LastWritten 만 알려 준다.
+GEMINI_CRED_TARGET = "gemini:antigravity"
+GEMINI_CRED_PROBE_FLAG = "--gemini-cred-probe"
+GEMINI_APP_DIRNAME = "me.yeongyu.claudepet"        # %LOCALAPPDATA% 아래의 앱 전용 폴더
+GEMINI_FAKE_OPEN_DIRNAME = "fake-open"             # 그 안의, 아무것도 하지 않는 rundll32.exe 의 폴더
+# 일시 실패 때 직전 행을 보여 주는 한도 — 마지막 성공에서 이만큼 지나면 옛 값을 내린다.
+GEMINI_KEEP_SEC = 1800
+# agy 가 뜰 폴더의 이름(개인 임시 폴더 아래). 비어 있는 전용 폴더다.
+GEMINI_CLI_DIRNAME = "claudepet-agy"
+
+# t: 마지막으로 agy 를 띄운 시각, ok_t: 마지막 '성공' 응답 시각, click: 60초 하한만 지키고 바로 읽으라
+# (사용자가 눌렀거나 로그인 지문이 바뀌었다 — fetch_gemini_usage 가 띄우며 내린다), click_check: 누른
+# 뒤 로그인 지문을 아직 다시 보지 않았다, cwd: 임시 폴더의 고정 이름을 쓸 수 없을 때 한 번 만든 폴더.
+# open_dir: 아무것도 하지 않는 `open` 을 둔 폴더(_gemini_fake_open_dir).
+# check_t: 마지막으로 로그인 지문을 본 시각, login: 그때의 판단(None 모름 | True | False), marker: 그
+# 지문, auth_failed_marker: agy 가 로그인을 요구했을 때의 지문 — None 이 아니면 자동 실행이 멈춰 있다.
+_gemini_cache = {"t": 0.0, "rows": None, "ok_t": None, "click": False, "click_check": False,
+                 "cwd": None, "check_t": 0.0, "login": None, "marker": None,
+                 "auth_failed_marker": None, "open_dir": None}
+# Gemini 조회 상태. last_error: None(성공) | "not_installed"(agy 없음) | "timeout" | "agy_failed"
+# (0 아닌 종료·실행 실패) | "parse"(JSON 이 아니거나 쓸 버킷이 없다) | "status"(SUCCESS 가 아닌 답) |
+# "login"(로그인 안 됨 — 항목이 없거나 agy 가 로그인을 요구했다). auth_error 는 "login" 일 때만 True —
+# 필에는 아무것도 보이지 않고, 우클릭 메뉴에 "Gemini 로그인(agy)" 이 뜬다(compute_gemini_onboard_state).
+GEMINI_STATUS = {"auth_error": False, "last_error": None}
+# 버킷 표 {bucket id: (window 또는 None, Gemini 묶음인가)} — 조회 경로(fetch_gemini_usage)가
+# agy_usage_buckets 로 꺼내 적고, 필 구간(gemini_summary_segment)이 게이지와 라벨을 고를 때 읽는다.
+# 파서(parse_agy_usage)는 이 표를 건드리지 않는다(순수). bucket id 의 모양에서 창을 짐작하지 않는다
+# (관측된 id "gemini-5h" 는 우연히 창을 담고 있을 뿐이다).
+GEMINI_BUCKETS = {}
+# 새로고침 워커가 Gemini 를 자기 스레드에서 받는 중인가(start_gemini_refresh) — 한 번에 하나만.
+_gemini_refresh = {"busy": False}
+
+# RFC 3339(소수 초 0–9 자리, UTC 면 Z). datetime.fromisoformat 은 파이썬 버전마다 받는 소수 초
+# 자릿수와 'Z' 가 달라 직접 읽는다.
+_RFC3339_RE = re.compile(
+    r"(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?"
+    r"([Zz]|[+-]\d{2}:\d{2})")
+
+
+def _parse_rfc3339(value):
+    """RFC 3339 문자열 → aware UTC datetime, 못 읽으면 None. 소수 초는 마이크로초로 자른다."""
+    if not isinstance(value, str):
+        return None
+    m = _RFC3339_RE.fullmatch(value.strip())
+    if not m:
+        return None
+    y, mo, d, h, mi, s, frac, tz = m.groups()
+    us = int(frac[:6].ljust(6, "0")) if frac else 0
+    if tz in ("Z", "z"):
+        offset = timedelta(0)
+    else:
+        offset = timedelta(hours=int(tz[1:3]), minutes=int(tz[4:6]))
+        if tz[0] == "-":
+            offset = -offset
+    try:
+        dt = datetime(int(y), int(mo), int(d), int(h), int(mi), int(s), us,
+                      tzinfo=timezone(offset))
+        return dt.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+
+
+def _gemini_fraction(value):
+    """remaining_fraction → [0,1] 실수, 못 쓰면 None.
+
+    숫자와 숫자 문자열을 받는다. bool 은 int 지만 비율이 아니고, NaN·inf·숫자 아닌 문자열·없음은
+    '모른다'다 — 0 도 1 도 아니므로 그 버킷은 행을 내지 않는다. 범위 밖은 버리지 않고 자른다
+    (Codex 의 102% 와 같은 규칙)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            v = float(value.strip())
+        except ValueError:
+            return None
+    elif isinstance(value, (int, float)):
+        v = float(value)
+    else:
+        return None
+    if not math.isfinite(v):
+        return None
+    return max(0.0, min(1.0, v))
+
+
+def _gemini_used_pct(fraction):
+    """남은 비율 → 쓴 퍼센트(float)."""
+    return 100.0 - fraction * 100.0
+
+
+def _agy_payload(payload):
+    """agy 의 답(dict 또는 JSON 문자열) → dict, 아니면 None. 예외를 내지 않는다."""
+    if isinstance(payload, (str, bytes, bytearray)):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _agy_usage_entries(payload):
+    """SUCCESS 응답의 버킷들 → [(bucket id, Gemini 묶음인가, window 또는 None, 비율 또는 None, 리셋)],
+    서버 순서. SUCCESS 가 아니거나 모양이 다르면 [].
+
+    Gemini 묶음 = 버킷 id 가 "gemini-" 로 시작하는 버킷을 가진 묶음. 그런 묶음이 응답 어디에도 없을
+    때에만 이름에 "Gemini" 가 든 묶음(대소문자 무시)을 Gemini 묶음으로 본다. id 가 문자열이 아니거나
+    빈 버킷은 뺀다(행 라벨을 만들 수 없다). `"disabled": true` 인 버킷도 뺀다 — 0행 계산에서도 행에서도."""
+    obj = _agy_payload(payload)
+    if obj is None or obj.get("status") != "SUCCESS":
+        return []
+    command = obj.get("command")
+    data = command.get("data") if isinstance(command, dict) else None
+    groups = data.get("groups") if isinstance(data, dict) else None
+    parsed = []            # [(이름, [버킷 dict])]
+    for g in groups if isinstance(groups, list) else ():
+        if not isinstance(g, dict):
+            continue
+        gb = g.get("buckets")
+        buckets = [b for b in (gb if isinstance(gb, list) else ())
+                   if isinstance(b, dict) and isinstance(b.get("id"), str) and b["id"].strip()
+                   and b.get("disabled") is not True]
+        parsed.append((g.get("name"), buckets))
+    by_id = [any(b["id"].startswith("gemini-") for b in buckets) for _name, buckets in parsed]
+    if any(by_id):
+        is_gemini = by_id
+    else:
+        is_gemini = [isinstance(name, str) and "gemini" in name.lower() for name, _b in parsed]
+    out = []
+    for (_name, buckets), gem in zip(parsed, is_gemini):
+        for b in buckets:
+            window = b.get("window")
+            window = window.strip() if isinstance(window, str) and window.strip() else None
+            out.append((b["id"], bool(gem), window, _gemini_fraction(b.get("remaining_fraction")),
+                        _parse_rfc3339(b.get("reset_time"))))
+    return out
+
+
+def parse_agy_usage(payload):
+    """`agy -p "/usage" --output-format json` 의 답 → [(label, pct, reset_dt, None)] 또는 None.
+
+    순수 함수다 — 모듈 상태를 읽지도 쓰지도 않고, 어떤 입력에도 예외를 내지 않는다. payload 는 dict
+    또는 JSON 문자열. pct 는 **쓴** 비율(0–100), reset_dt 는 aware UTC 또는 None. 순서:
+      · "gemini" — Gemini 묶음의 버킷 중 남은 비율이 가장 낮은 것(동률이면 리셋이 가장 이른 것).
+        다른 묶음의 버킷은 이 행에 섞지 않는다. Gemini 묶음에 쓸 버킷이 없으면 이 행은 없다.
+      · "gemini_group:<bucket id>" — 모든 묶음의 버킷마다 한 행, 서버 순서.
+    쓸 수 있는 비율이 없는 버킷은 행을 내지 않는다(0%·100% 를 지어내지 않는다). status 가 "SUCCESS" 가
+    아니거나 쓸 버킷이 하나도 없으면 None. 어느 버킷이 Gemini 묶음이고 창이 무엇인지는
+    agy_usage_buckets 가 같은 답에서 따로 꺼낸다."""
+    usable = [e for e in _agy_usage_entries(payload) if e[3] is not None]
+    if not usable:
+        return None
+    rows = []
+    gemini = [e for e in usable if e[1]]
+    if gemini:
+        far = datetime.max.replace(tzinfo=timezone.utc)
+        _id, _gem, _window, frac, reset = min(gemini, key=lambda e: (e[3], e[4] or far))
+        rows.append(("gemini", _gemini_used_pct(frac), reset, None))
+    for bucket_id, _gem, _window, frac, reset in usable:
+        rows.append(("gemini_group:" + bucket_id, _gemini_used_pct(frac), reset, None))
+    return rows
+
+
+def agy_usage_buckets(payload):
+    """같은 답 → {bucket id: (window 또는 None, Gemini 묶음인가)}(순수). 쓸 게 없으면 {}."""
+    return {bucket_id: (window, gem)
+            for bucket_id, gem, window, _frac, _reset in _agy_usage_entries(payload)}
+
+
+def _gemini_edge_rules():
+    """테스트·계약이 정하지 않은 경계의 규칙을 **한곳에** 모은다(Coordinator 결정, agy 동의 —
+    2026-11-18 확정). 아래 코드는 이 표만 읽는다. 경계 f(ANTIGRAVITY_APP_DATA_DIR 아래의 폴백 파일)는
+    뺐다 — agy CLI 는 그 변수를 토큰 파일 위치로 쓰지 않는다.
+
+      a fallback_gone_is_change  멈춘 동안 폴백 파일이 **사라지는** 것도 지문 변화로 본다.
+      b menu_login_retries       우클릭 "Gemini 로그인(agy)" 을 누른 것을 재시도 신호로 본다(False:
+                                 복구는 지문 변화가 맡는다).
+      c run_when_locked_unknown  키체인이 잠긴 채 시작해 직전 판단이 없을 때 agy 를 띄운다(False: 안 띄움).
+      d security_unknown         존재 확인이 0·44 밖의 코드로 끝났을 때 — "skip"(그 주기를 건너뛰고 직전
+                                 행·깃발 유지) | "present" | "absent".
+      e no_agy_status            agy 가 설치돼 있지 않을 때의 last_error — "not_installed" | "login".
+                                 agy 가 없으면 키체인도 보지 않으므로 항목이 있든 없든 이 값이다.
+      g no_color                 백그라운드 agy 의 env 에 NO_COLOR=1 도 넣는다.
+    """
+    return {"fallback_gone_is_change": True, "menu_login_retries": False,
+            "run_when_locked_unknown": False, "security_unknown": "skip",
+            "no_agy_status": "not_installed", "no_color": True}
+
+
+def _win_home():
+    """Windows 의 사용자 홈 — %USERPROFILE%, 없으면 expanduser."""
+    return os.environ.get("USERPROFILE") or os.path.expanduser("~")
+
+
+def _win_local_appdata():
+    """%LOCALAPPDATA%, 없으면 홈 아래의 AppData\\Local."""
+    return os.environ.get("LOCALAPPDATA") or os.path.join(_win_home(), "AppData", "Local")
+
+
+def _win_app_dir():
+    """앱 전용 폴더 %LOCALAPPDATA%\\me.yeongyu.claudepet (만들지는 않는다)."""
+    return os.path.join(_win_local_appdata(), GEMINI_APP_DIRNAME)
+
+
+def _find_agy_cli():
+    """agy 실행 파일의 경로, 없으면 None. PATH 에서 찾고, 없으면 실행 가능한 ~/.local/bin/agy —
+    Finder 가 띄운 앱의 PATH 는 짧아서 사용자의 셸이 찾는 자리를 못 볼 수 있다."""
+    found = shutil.which("agy")
+    if found:
+        return found
+    if sys.platform == "win32":
+        # 계약 v7-W1: 공식 설치 위치 → ~/.local/bin → 앱 전용 bin(마지막 — 사용자가 깐 것이 먼저다).
+        for path in (os.path.join(_win_local_appdata(), "agy", "bin", "agy.exe"),
+                     os.path.join(_win_home(), ".local", "bin", "agy.exe")):
+            if os.path.isfile(path):
+                return path
+        return _app_cli("gemini")
+    local = os.path.join(os.path.expanduser("~"), ".local", "bin", "agy")
+    if os.path.isfile(local) and os.access(local, os.X_OK):
+        return local
+    return _app_cli("gemini")
+
+
+def gemini_cli_cwd():
+    """agy 가 뜰 작업 폴더 — 개인 임시 폴더 아래의 빈 전용 폴더(없으면 만든다).
+
+    앱의 작업 폴더(번들의 Contents/Resources)나 `/` 에서 CLI 를 띄우지 않는다 — claude CLI 가 `/` 에서
+    보호 위치를 읽어 권한 창을 띄운 일이 있다(recovery_cli_cwd 의 주석). 고정 이름의 폴더가 우리 것이
+    아니면(다른 사용자의 것·링크·파일) 새 임시 폴더를 한 번 만들어 쓴다. 그것도 안 되면 홈."""
+    path = os.path.join(tempfile.gettempdir(), GEMINI_CLI_DIRNAME)
+    try:
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            pass
+        st = os.lstat(path)
+        if stat.S_ISDIR(st.st_mode) and (sys.platform == "win32" or st.st_uid == os.getuid()):
+            return path
+    except OSError:
+        pass
+    made = _gemini_cache.get("cwd")
+    if made and os.path.isdir(made):
+        return made
+    try:
+        made = tempfile.mkdtemp(prefix=GEMINI_CLI_DIRNAME + "-")
+    except OSError:
+        return os.path.expanduser("~")
+    _gemini_cache["cwd"] = made
+    return made
+
+
+# ── 로그인 여부 — agy 를 띄우지 않고 본다 ──
+
+_GEMINI_MDAT_RE = re.compile(r'"mdat"<[^>]*>=(?:0x[0-9A-Fa-f]*\s+)?"([^"\\]+)')
+
+
+def _gemini_item_mdat():
+    """agy 키체인 항목이 있는가, 그리고 그 수정 시각 → (있음 True | 없음 False | 모름 None, mdat 문자열
+    또는 None).
+
+    `-w`·`-g` 없는 find-generic-password 다 — 비밀값을 열지 않으므로 창이 뜨지 않는다. 종료 0 = 있음,
+    44 = 없음, 그 밖(시간 초과·실행 실패 포함)은 모름. 출력에서 꺼내는 것은 "mdat" 줄의 시각뿐이고,
+    출력 자체는 어디에도 남기지 않는다. Windows 에서는 자격 증명 관리자 프로브(_gemini_cred_probe)가
+    같은 모양으로 답한다 — 지문은 LastWritten."""
+    if sys.platform == "win32":
+        return _gemini_cred_probe()
+    try:
+        r = subprocess.run(["security", "find-generic-password", "-s", GEMINI_KEYCHAIN_SERVICE,
+                            "-a", GEMINI_KEYCHAIN_ACCOUNT],
+                           capture_output=True, text=True, timeout=GEMINI_SECURITY_TIMEOUT)
+    except Exception as e:
+        _dbg("gemini login: security did not answer", type(e).__name__)
+        return None, None
+    if r.returncode == 0:
+        m = _GEMINI_MDAT_RE.search(r.stdout or "")
+        return True, (m.group(1) if m else None)
+    if r.returncode == 44:
+        return False, None
+    _dbg("gemini login: security rc", r.returncode)
+    return None, None
+
+
+def _gemini_fallback_paths(rules):
+    """agy 의 파일 폴백 저장소(키체인을 못 쓰는 환경)가 있을 자리들 — 늘 홈 아래 한 곳이다
+    (agy CLI 는 ANTIGRAVITY_APP_DATA_DIR 를 토큰 파일 위치로 쓰지 않는다)."""
+    home = _win_home() if sys.platform == "win32" else os.path.expanduser("~")
+    return [os.path.join(home, ".gemini", "antigravity-cli", GEMINI_FALLBACK_NAME)]
+
+
+# ── Windows: 자격 증명 관리자 프로브 ──
+#
+# Win32 에는 비밀값을 복호화하지 않고 메타데이터만 주는 호출이 없다(CredReadW 는 blob 까지 한 덩어리로
+# 돌려준다). 그래서 **앱 본체는 부르지 않는다**: 앱 자신을 숨은 인자로 다시 띄운 짧은 자식이 한 건만
+# 읽고, blob 을 파이썬 객체로 만들지 않은 채 지우고(RtlZeroMemory) 놓은(CredFree) 뒤 표준출력에
+# `1 <LastWritten>` 또는 `0` 만 쓴다. 목록을 훑는 호출과 명령줄 도구는 쓰지 않는다 — 앞의 것은 다른
+# 자격 증명의 비밀값까지 메모리에 올리고, 뒤의 것은 종료 코드가 언제나 0 이고 수정 시각을 주지 않는다.
+
+def parse_gemini_cred_probe(text):
+    """프로브 자식의 표준출력 → (True, LastWritten 정수) | (False, None) | (None, None)(모름).
+
+    뜻이 있는 모양은 `1 <음이 아닌 정수>` 와 `0` 둘뿐이다(앞뒤 공백·줄바꿈 허용). 순수, 예외 없음."""
+    try:
+        if isinstance(text, (bytes, bytearray)):
+            text = bytes(text).decode("ascii")
+        if not isinstance(text, str):
+            return None, None
+        body = text.strip()
+        if body == "0":
+            return False, None
+        parts = body.split(" ")
+        if (len(parts) == 2 and parts[0] == "1" and parts[1].isascii() and parts[1].isdigit()
+                and len(parts[1]) <= 20):
+            return True, int(parts[1])
+    except Exception:
+        pass
+    return None, None
+
+
+def _gemini_cred_last_written():
+    """자격 증명 관리자에서 GEMINI_CRED_TARGET 한 건을 읽어 (True, LastWritten) | (False, None) |
+    (None, None). 자식 프로세스에서만 부른다. blob 은 파이썬 객체로 만들지 않는다 — 주소와 길이만 받아
+    그 자리에서 0 으로 덮고 놓는다."""
+    import ctypes
+    from ctypes import wintypes
+
+    class CREDENTIALW(ctypes.Structure):
+        _fields_ = [("Flags", wintypes.DWORD), ("Type", wintypes.DWORD),
+                    ("TargetName", ctypes.c_void_p), ("Comment", ctypes.c_void_p),
+                    ("LastWrittenLow", wintypes.DWORD), ("LastWrittenHigh", wintypes.DWORD),
+                    ("CredentialBlobSize", wintypes.DWORD), ("CredentialBlob", ctypes.c_void_p),
+                    ("Persist", wintypes.DWORD), ("AttributeCount", wintypes.DWORD),
+                    ("Attributes", ctypes.c_void_p), ("TargetAlias", ctypes.c_void_p),
+                    ("UserName", ctypes.c_void_p)]
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    read = advapi.CredReadW
+    read.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                     ctypes.POINTER(ctypes.POINTER(CREDENTIALW))]
+    read.restype = wintypes.BOOL
+    free = advapi.CredFree
+    free.argtypes = [ctypes.c_void_p]
+    free.restype = None
+    wipe = kernel.RtlZeroMemory
+    wipe.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+    wipe.restype = None
+    pcred = ctypes.POINTER(CREDENTIALW)()
+    if not read(GEMINI_CRED_TARGET, 1, 0, ctypes.byref(pcred)):      # 1 = CRED_TYPE_GENERIC
+        if ctypes.get_last_error() == 1168:                          # ERROR_NOT_FOUND — 이것만 '없음'
+            return False, None
+        return None, None
+    try:
+        cred = pcred.contents
+        stamp = (int(cred.LastWrittenHigh) << 32) | int(cred.LastWrittenLow)
+        if cred.CredentialBlob and cred.CredentialBlobSize:
+            wipe(cred.CredentialBlob, cred.CredentialBlobSize)
+        return True, stamp
+    finally:
+        free(pcred)
+
+
+def gemini_cred_probe_main():
+    """자식 쪽 본체(앱을 GEMINI_CRED_PROBE_FLAG 로 다시 띄웠을 때) → 종료 코드.
+
+    표준출력에 `1 <LastWritten>` 또는 `0` 만 쓴다. 모르는 결과면 아무것도 쓰지 않는다(부모는 '모름').
+    창 없는 빌드의 자식은 파이썬의 표준출력 객체가 없을 수 있어 파일 기술자 1 에 직접 쓴다."""
+    try:
+        present, stamp = _gemini_cred_last_written()
+    except Exception:
+        return 2
+    if present is True:
+        line = "1 %d\n" % stamp
+    elif present is False:
+        line = "0\n"
+    else:
+        return 2
+    try:
+        os.write(1, line.encode("ascii"))
+    except OSError:
+        return 2
+    return 0
+
+
+def _gemini_probe_argv():
+    """프로브 자식의 argv — 앱 자신 + 숨은 인자. 배포판에서는 exe 하나, 소스 실행에서는 인터프리터와
+    지금 도는 진입 스크립트(Windows 포트의 것 — 코어를 직접 실행할 수는 없다)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, GEMINI_CRED_PROBE_FLAG]
+    script = getattr(sys.modules.get("__main__"), "__file__", None) or __file__
+    return [sys.executable, os.path.abspath(script), GEMINI_CRED_PROBE_FLAG]
+
+
+def _gemini_cred_probe():
+    """부모 쪽: 프로브 자식을 한 번 띄워 (있음 True | 없음 False | 모름 None, LastWritten 또는 None).
+    창 없이(CREATE_NO_WINDOW), 짧은 상한 안에. 답이 두 모양 밖이면(죽음·멈춤·뜻 모를 줄) 모름."""
+    try:
+        r = subprocess.run(_gemini_probe_argv(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, timeout=GEMINI_SECURITY_TIMEOUT,
+                           cwd=gemini_cli_cwd(), creationflags=_spawn_no_window_flags())
+    except Exception as e:
+        _dbg("gemini login: probe did not answer", type(e).__name__)
+        return None, None
+    if r.returncode != 0:
+        _dbg("gemini login: probe rc", r.returncode)
+        return None, None
+    return parse_gemini_cred_probe(r.stdout)
+
+
+def _gemini_login_marker(rules):
+    """로그인 지문 (키체인 항목이 있는가, 그 mdat, ((폴백 파일이 있는가, mtime_ns), …)), 모르면 None.
+
+    폴백 파일은 읽지 않는다 — 있는지와 수정 시각만 본다."""
+    present, mdat = _gemini_item_mdat()
+    if present is None:
+        if rules["security_unknown"] == "skip":
+            return None
+        present = rules["security_unknown"] == "present"
+    files = []
+    for path in _gemini_fallback_paths(rules):
+        try:
+            st = os.stat(path)
+            files.append((True, st.st_mtime_ns) if stat.S_ISREG(st.st_mode) else (False, None))
+        except OSError:
+            files.append((False, None))
+    return (bool(present), mdat, tuple(files))
+
+
+def _gemini_marker_logged_in(marker):
+    """지문이 '로그인돼 있을 수 있다'를 말하는가 — 키체인 항목이나 폴백 파일이 하나라도 있다.
+    (로그아웃 뒤에도 항목은 남으므로 True 가 '로그인됨'은 아니다 — 그건 agy 를 띄워 봐야 안다.)"""
+    return bool(marker) and bool(marker[0] or any(f[0] for f in marker[2]))
+
+
+def _gemini_marker_changed(old, new, rules):
+    """agy 가 로그인을 요구했을 때의 지문(old)과 지금(new)이 다른가."""
+    if old == new:
+        return False
+    if not rules["fallback_gone_is_change"] and len(old[2]) == len(new[2]):
+        files = tuple(o if (o[0] and not n[0]) else n for o, n in zip(old[2], new[2]))
+        return (new[0], new[1], files) != old
+    return True
+
+
+def compute_gemini_onboard_state(runtime=None):
+    """우클릭 메뉴의 "Gemini 로그인(agy)" 깃발 — "login" 또는 None(compute_codex_onboard_state 의 짝).
+
+    Gemini 를 보이게 했고, agy 가 설치돼 있고, 로그인이 안 돼 있을 때(GEMINI_STATUS["auth_error"] —
+    항목이 없거나 agy 가 로그인을 요구했다)만 "login". agy 가 없으면 눌러도 열 것이 없으니 내지 않는다."""
+    if sys.platform not in ("darwin", "win32"):
+        return None
+    if not provider_shown(RUNTIME if runtime is None else runtime, "gemini"):
+        return None
+    if not GEMINI_STATUS.get("auth_error"):
+        return None
+    return "login" if _find_agy_cli() else None
+
+
+def start_gemini_login():
+    """Gemini 로그인 — **보이는 창**에서 agy 를 연다(사용자가 직접 로그인한다). 대표님 결정 2026-11-19.
+
+    agy 는 브라우저에서 로그인한 뒤 화면에 나온 코드를 **진짜 터미널에 붙여 넣어야** 끝난다(파이프로 띄운
+    agy 는 그 코드를 받지 못한다 — Windows 실측). 그래서 창을 띄워 두고 맨 위에 할 일 세 줄을 먼저 찍는다
+    (앱 언어로): ① 브라우저에서 로그인 ② 코드를 복사 ③ 이 창에 붙여 넣고 Enter.
+
+    창에서 도는 것은 `agy -p /usage --output-format json` 이다(v8-G1). 인자 없는 `agy`(TUI)는 대체 화면으로
+    바뀌어 그 세 줄을 가린다. 이 명령은 화면을 바꾸지 않고, 로그인이 없으면 브라우저를 열고 코드를 받는다.
+    **stdout(JSON 본문)만 버린다** — stderr(로그인 안내·붙여 넣기 프롬프트)는 창에 보여야 한다. 끝나면 agy
+    의 종료 코드로 한 줄을 찍는다: 0 이면 "완료", 아니면 "시간이 지났어요". 창은 닫지 않는다.
+
+    SSH_* 는 지우고(있으면 agy 가 토큰을 파일에 둔다) AGY_CLI_DISABLE_AUTO_UPDATE=1 을 준다. 가짜
+    open/rundll32(_agy_env)는 쓰지 않는다 — 로그인에서는 브라우저가 열려야 한다. macOS 는 Terminal, Windows
+    는 새 콘솔 창(PowerShell)이다. 앱의 성공 판정은 종료 코드가 아니라 로그인 지문의 변화다
+    (_run_gemini_login) — 이 창의 프로세스는 앱의 자식이 아니다."""
+    binp = _find_agy_cli()
+    if not binp:
+        return
+    steps = [t("term_gemini_step1"), t("term_gemini_step2"), t("term_gemini_step3")]
+    done, late = t("term_gemini_done"), t("term_gemini_timeout")
+    args = list(GEMINI_AGY_ARGS)
+    if _gemini_edge_rules()["menu_login_retries"]:
+        request_gemini_refresh()
+    if sys.platform == "win32":
+        ps = lambda x: "'" + str(x).replace("'", "''") + "'"
+        script = "; ".join(
+            ["Write-Host " + ps(x) for x in steps] + ["Write-Host ''"]
+            + ["& " + " ".join(ps(x) for x in [binp] + args) + " | Out-Null",
+               "if ($LASTEXITCODE -eq 0) { Write-Host %s } else { Write-Host %s }" % (ps(done), ps(late))])
+        subprocess.Popen([_windows_powershell_exe(), "-NoProfile", "-NoExit", "-Command", script],
+                         creationflags=0x00000010,                 # CREATE_NEW_CONSOLE — 보이는 창
+                         cwd=gemini_cli_cwd(), env=cli_env("gemini", binp))
+        return
+    import shlex
+    q = shlex.quote
+    cmd = "".join("echo %s\n" % q(x) for x in steps) + "echo\n"
+    cmd += "unset SSH_CLIENT SSH_TTY SSH_CONNECTION\nexport AGY_CLI_DISABLE_AUTO_UPDATE=1\n"
+    cmd += " ".join(q(x) for x in [binp] + args) + " > /dev/null\n"
+    cmd += "if [ $? -eq 0 ]; then echo %s; else echo %s; fi\n" % (q(done), q(late))
+    _run_in_terminal(cmd)
+
+
+# ── agy 실행 ──
+
+# agy 가 로그인을 요구할 때 stderr 에 쓰는 말(합의안 v5). 소문자로 비교한다. 오프라인 토큰 갱신 실패
+# ("authentication failed: token refresh failed due to network error", "authentication failed or timed
+# out")는 여기에 걸리지 않아야 한다 — 그건 일시 실패다. stdout 은 두 경우가 같아서 보지 않는다.
+_AGY_LOGIN_HINTS = ("authentication required", "visit the url to log in", "run 'agy'")
+_AGY_OUTPUT_CAP = 1 << 20      # 읽어 두는 출력의 상한(바이트) — 넘는 것은 읽고 버린다
+
+
+def _agy_wants_login(stderr):
+    """stderr(bytes 또는 str)가 로그인하라는 말인가."""
+    if isinstance(stderr, (bytes, bytearray)):
+        stderr = bytes(stderr).decode("utf-8", errors="replace")
+    text = (stderr or "").lower()
+    return any(h in text for h in _AGY_LOGIN_HINTS)
+
+
+_GEMINI_FAKE_OPEN = "#!/bin/sh\nexit 0\n"
+
+
+def _gemini_fake_open_ok(folder):
+    """folder 가 우리 전용 폴더(진짜 폴더, 0700, 소유자 본인)이고 그 안의 `open` 이 우리가 쓴 그대로인가."""
+    try:
+        st = os.lstat(folder)
+        if not (stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid()
+                and stat.S_IMODE(st.st_mode) == 0o700):
+            return False
+        path = os.path.join(folder, "open")
+        fst = os.lstat(path)
+        if not (stat.S_ISREG(fst.st_mode) and fst.st_uid == os.getuid()
+                and stat.S_IMODE(fst.st_mode) == 0o700):
+            return False
+        with open(path, encoding="utf-8") as f:
+            return f.read(len(_GEMINI_FAKE_OPEN) + 1) == _GEMINI_FAKE_OPEN
+    except (OSError, ValueError):
+        return False
+
+
+def _gemini_fake_open_dir():
+    """아무것도 하지 않는 `open` 하나만 든 전용 폴더의 경로, 만들 수 없으면 None.
+
+    로그인이 필요해진 agy 는 `open <주소>` 로 기본 브라우저에 로그인 탭을 연다. 백그라운드 실행의 PATH
+    맨 앞에 이 폴더를 두면 그 `open` 이 여기서 끝난다 — 인자를 무시하고 0 으로. 폴더는 한 번 만들어
+    다시 쓰되(mkdtemp, 0700), **부를 때마다 확인한다**: 폴더나 파일이 지워졌거나(임시 폴더는 시스템이
+    치울 수 있다) 우리가 쓴 그대로가 아니면 새 폴더를 다시 만든다. 없으면 PATH 의 다음 open
+    (/usr/bin/open)으로 넘어가 브라우저가 열리기 때문이다. 앱은 이 폴더를 지우지 않는다 — 떠 있는 agy 가
+    쓰는 중일 수 있다."""
+    folder = _gemini_cache.get("open_dir")
+    if folder and _gemini_fake_open_ok(folder):
+        return folder
+    try:
+        folder = tempfile.mkdtemp(prefix="claudepet-open-")      # 0700
+        fd = os.open(os.path.join(folder, "open"),
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(_GEMINI_FAKE_OPEN)
+        os.chmod(os.path.join(folder, "open"), 0o700)            # umask 와 무관하게
+    except OSError as e:
+        _dbg("gemini fetch: fake open not made", type(e).__name__)
+        return None
+    if not _gemini_fake_open_ok(folder):
+        return None
+    _gemini_cache["open_dir"] = folder
+    return folder
+
+
+def _file_sha256(path):
+    """파일의 (크기, SHA-256 16진수) — 청크로 읽는다."""
+    h = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1 << 16)
+            if not chunk:
+                break
+            h.update(chunk)
+            size += len(chunk)
+    return size, h.hexdigest()
+
+
+def _gemini_fake_rundll_dir():
+    """Windows: 아무것도 하지 않는 `rundll32.exe` 하나만 든 앱 전용 폴더의 경로, 만들 수 없으면 None.
+
+    Windows 의 agy 는 `rundll32 url.dll,FileProtocolHandler <주소>` 로 브라우저를 연다 — 절대 경로가
+    아니라 이름으로. 백그라운드 실행의 PATH 맨 앞에 이 폴더를 두면 그 이름이 여기서 끝난다. 파일은
+    **이 기기의 지금 System32\\systray.exe 의 사본**이다(GUI 서브시스템, 인자를 무시하고 창 없이 0 으로
+    끝난다 — agy 협의 5 의 Windows 11 실측). 배치 파일(.cmd/.bat)은 쓰지 않는다: cmd.exe 가 로그인 주소의
+    `&` 를 명령으로 읽는다.
+
+    **부를 때마다** 그 systray.exe 와 크기·SHA-256 을 대조해 다르면 다시 복사한다(고정 해시 상수는 두지
+    않는다 — Windows 업데이트가 systray.exe 를 바꾼다). 폴더에 다른 것이 있으면 치운다(PATHEXT 에서
+    .com 은 .exe 보다 먼저 잡힌다). systray.exe 가 없으면 None — 브라우저를 막지 못한 채로는 띄우지 않는다."""
+    source = _windows_system32("systray.exe")
+    app_dir = _win_app_dir()
+    folder = os.path.join(app_dir, GEMINI_FAKE_OPEN_DIRNAME)
+    target = os.path.join(folder, "rundll32.exe")
+    try:
+        want = _file_sha256(source)
+        if _is_reparse_point(folder) or _is_reparse_point(app_dir):
+            _dbg("gemini: fake-open folder is a reparse point")
+            return None                           # 정션 — 다른 곳으로 이어진 폴더는 쓰지 않는다
+        if os.path.islink(folder) or (os.path.lexists(folder) and not os.path.isdir(folder)):
+            os.unlink(folder)
+        os.makedirs(folder, exist_ok=True)
+        if _is_reparse_point(folder):
+            return None
+        for name in os.listdir(folder):
+            if name.lower() == "rundll32.exe":
+                continue
+            extra = os.path.join(folder, name)
+            if os.path.isdir(extra) and not os.path.islink(extra):
+                shutil.rmtree(extra)
+            else:
+                os.unlink(extra)
+        ok = False
+        if os.path.lexists(target):
+            if stat.S_ISREG(os.lstat(target).st_mode):
+                ok = _file_sha256(target) == want
+            if not ok:
+                os.unlink(target)
+        if not ok:
+            # 폴더 밖(앱 전용 폴더)에 써 두고 옮긴다 — 폴더 안에는 언제나 rundll32.exe 하나뿐이다.
+            fd, staged = tempfile.mkstemp(prefix="rundll32-", suffix=".tmp", dir=app_dir)
+            try:
+                with os.fdopen(fd, "wb") as out, open(source, "rb") as src:
+                    shutil.copyfileobj(src, out, 1 << 16)
+                os.replace(staged, target)
+            except BaseException:
+                try:
+                    os.unlink(staged)
+                except OSError:
+                    pass
+                raise
+            if not (stat.S_ISREG(os.lstat(target).st_mode) and _file_sha256(target) == want):
+                return None
+    except OSError as e:
+        _dbg("gemini fetch: fake rundll32 not made", type(e).__name__)
+        return None
+    return folder
+
+
+def _agy_env(rules):
+    """백그라운드 agy 의 환경(os.environ 의 **사본** — 앱 자신의 환경은 바꾸지 않는다), 만들 수 없으면 None.
+
+      · SSH_CLIENT·SSH_TTY·SSH_CONNECTION 은 사본에서 지운다 — agy 는 SSH 를 감지하면 토큰 저장소를
+        키체인에서 파일로 바꿔 로그인된 사용자를 "로그인 필요"로 본다(위 머리 주석의 관측).
+      · PATH 맨 앞에 아무것도 하지 않는 `open` 의 폴더(_gemini_fake_open_dir) — 로그인이 필요해진 agy 가
+        브라우저를 열지 못한다. 나머지 PATH 는 원래 순서 그대로.
+      · NO_COLOR=1 — stderr 의 로그인 문구에 색 코드가 섞이지 않게.
+      · AGY_CLI_DISABLE_AUTO_UPDATE=1 — 조회용 실행이 agy 의 자동 업데이터를 띄우지 않게. 로그인 요구나
+        시간 초과로 트리를 끊을 때 업데이터가 실행 파일을 바꾸는 도중에 죽는 일을 막는다(계약 v7-W4).
+      · Windows: 가짜 open 대신 아무것도 하지 않는 rundll32.exe 의 폴더(_gemini_fake_rundll_dir), 그리고
+        NoDefaultCurrentDirectoryInExePath=1 — 작업 폴더의 같은 이름이 먼저 잡히지 않게.
+    가짜 open 을 만들지 못하면 None — 브라우저를 막지 못한 채로는 띄우지 않는다."""
+    win = sys.platform == "win32"
+    folder = _gemini_fake_rundll_dir() if win else _gemini_fake_open_dir()
+    if folder is None:
+        return None
+    env = dict(os.environ)
+    for key in [k for k in env if k.upper() in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION")]:
+        env.pop(key, None)
+    path_key = "PATH"
+    if win:
+        path_key = next((k for k in env if k.upper() == "PATH"), "PATH")
+        env["NoDefaultCurrentDirectoryInExePath"] = "1"
+    env[path_key] = folder + os.pathsep + env.get(path_key, os.defpath)
+    if rules["no_color"]:
+        env["NO_COLOR"] = "1"
+    env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "1"
+    return env
+
+
+def _agy_drain(stream, chunks):
+    """파이프를 끝까지 읽어 chunks 에 쌓는다(리더 스레드). 상한을 넘으면 읽기만 하고 버린다."""
+    size = 0
+    try:
+        fd = stream.fileno()
+        while True:
+            data = os.read(fd, 65536)
+            if not data:
+                return
+            if size < _AGY_OUTPUT_CAP:
+                chunks.append(data)
+                size += len(data)
+    except (OSError, ValueError):
+        return
+
+
+def _agy_kill_group(proc):
+    """agy 와 그것이 띄운 것들을 한꺼번에 끝낸다. agy 는 자기 세션의 리더로 떴으므로(start_new_session)
+    그룹 id 가 pid 와 같다. Windows 에는 프로세스 그룹 신호가 없다 — **agy 가 살아 있을 때**
+    System32 의 taskkill /PID <pid> /T /F 로 트리를 끝낸다(죽은 pid 로는 자식을 못 찾는다, 계약 v7-W5).
+    이미 끝난 agy 에는 아무것도 하지 않는다."""
+    if sys.platform == "win32":
+        if proc.poll() is not None:
+            return
+        try:
+            subprocess.run([_windows_system32("taskkill.exe"), "/PID", str(proc.pid), "/T", "/F"],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=15,
+                           creationflags=_spawn_no_window_flags())
+        except Exception as e:
+            _dbg("gemini fetch: taskkill failed", type(e).__name__)
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+def _agy_reap(proc):
+    """끝낸 프로세스를 거둔다(wait) — 좀비를 남기지 않는다."""
+    for _ in range(2):
+        try:
+            proc.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            if sys.platform == "win32":
+                try:
+                    proc.kill()               # taskkill 이 못 끝냈다 — 적어도 agy 자신은 끝낸다
+                except OSError:
+                    pass
+            else:
+                _agy_kill_group(proc)
+        except Exception as e:
+            _dbg("gemini fetch: reap failed", type(e).__name__)
+            return
+    _dbg("gemini fetch: agy would not die")
+
+
+def _agy_exec(agy, rules):
+    """agy 를 한 번 띄워 끝까지 지켜본다 → (종료 코드 또는 None, stdout 글자, stderr 글자,
+    "login" | "timeout" | None). 띄우지 못하면 None.
+
+    자기 세션(프로세스 그룹)으로 띄우고, 두 파이프를 스레드로 읽으면서 기다린다. stderr 에 로그인하라는
+    말이 보이면 **그 즉시** 그룹을 끝낸다 — 그 실행이 agy 의 로그인 절차(60초 대기)를 열어 둔 것이다.
+    GEMINI_AGY_TIMEOUT 을 넘겨도 끝낸다. 어느 경우든 거둔 뒤에 돌아온다. 상한은 time.monotonic 으로 잰다."""
+    env = _agy_env(rules)          # 띄우기 직전에 — 가짜 open 이 지워졌으면 여기서 다시 만든다
+    if env is None:
+        return None
+    try:
+        if sys.platform == "win32":
+            how = {"creationflags": _spawn_no_window_flags()}      # 콘솔 창 없이
+        else:
+            how = {"start_new_session": True}
+        proc = subprocess.Popen([agy] + list(GEMINI_AGY_ARGS), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                cwd=gemini_cli_cwd(), env=env, **how)
+    except Exception as e:
+        _dbg("gemini fetch: agy did not run", type(e).__name__)
+        return None
+    out, err = [], []
+    readers = [threading.Thread(target=_agy_drain, args=(proc.stdout, out), daemon=True),
+               threading.Thread(target=_agy_drain, args=(proc.stderr, err), daemon=True)]
+    for th in readers:
+        th.start()
+    deadline = time.monotonic() + GEMINI_AGY_TIMEOUT
+    ended = None
+    while True:
+        if _agy_wants_login(b"".join(list(err))):
+            ended = "login"
+            break
+        if proc.poll() is not None:
+            break
+        if time.monotonic() >= deadline:
+            ended = "timeout"
+            break
+        time.sleep(0.05)
+    if ended is not None:
+        _agy_kill_group(proc)
+        _agy_reap(proc)
+    else:
+        # 스스로 끝났다(poll 이 거뒀다). 리더가 곧 끝나지 않으면 agy 가 남긴 자식이 파이프를 쥐고 있는
+        # 것이다 — 그때만 그룹을 끝낸다(그룹에 산 프로세스가 있는 동안 그 id 는 다른 것이 될 수 없다).
+        for th in readers:
+            th.join(1.0)
+        if any(th.is_alive() for th in readers):
+            _agy_kill_group(proc)
+    for th in readers:
+        th.join(2.0)
+    if not any(th.is_alive() for th in readers):
+        for stream in (proc.stdout, proc.stderr):
+            try:
+                stream.close()
+            except Exception:
+                pass
+    stdout = b"".join(list(out)).decode("utf-8", errors="replace")
+    stderr = b"".join(list(err)).decode("utf-8", errors="replace")
+    return proc.returncode, stdout, stderr, ended
+
+
+def _run_agy_usage(agy, rules):
+    """agy 를 한 번 띄워 (rows, err, buckets) 로. err 는 GEMINI_STATUS["last_error"] 의 어휘, 성공이면
+    None. 예외를 내지 않는다. agy 의 출력은 여기 밖으로 나가지 않는다(행과 버킷 표만 나간다).
+
+    로그인 판정은 stderr 로만 한다(_agy_wants_login) — 60초를 다 기다린 로그인 요구와 오프라인 갱신
+    실패는 stdout 이 같다."""
+    res = _agy_exec(agy, rules)
+    if res is None:
+        return None, "agy_failed", None
+    rc, stdout, stderr, ended = res
+    if ended == "login" or _agy_wants_login(stderr):
+        _dbg("gemini fetch: agy asks for a login")
+        return None, "login", None
+    if ended == "timeout":
+        _dbg("gemini fetch: agy timed out")
+        return None, "timeout", None
+    obj = _agy_payload(stdout.strip())
+    if obj is not None and obj.get("status") != "SUCCESS":
+        _dbg("gemini fetch: agy answered without SUCCESS, rc", rc)
+        return None, ("agy_failed" if rc != 0 else "status"), None
+    if rc != 0:
+        _dbg("gemini fetch: agy rc", rc)
+        return None, "agy_failed", None
+    rows = parse_agy_usage(obj)
+    if rows is None:
+        _dbg("gemini fetch: no usable answer")
+        return None, "parse", None
+    return rows, None, agy_usage_buckets(obj)
+
+
+def fetch_gemini_usage():
+    """Gemini(agy) 사용량 행 [(label, pct, reset_dt, None)], 읽을 게 없으면 None. macOS 와 Windows 에서.
+
+    새로고침(30초)마다 불리지만 프로세스는 드물게 띄운다. 차례:
+
+    1. agy 가 없으면(_find_agy_cli) 아무것도 띄우지 않는다 — None, "not_installed".
+    2. **로그인 여부를 agy 없이 본다**(_gemini_login_marker — `-w` 없는 키체인 존재 확인 + 폴백 파일).
+       로그인 안 된 agy 를 띄우는 것 자체가 agy 의 로그인 절차를 시작하기 때문이다. 확인하는 때: 읽을
+       차례가 됐을 때(바로 그 직전), 읽지 않는 동안(로그인 안 됨·멈춤)에는 GEMINI_CHECK_SEC(300초)마다,
+       사용자가 누른 뒤에는 바로. 키체인이 잠겨 있으면 묻지 않고 직전 판단을 쓴다.
+    3. 항목도 폴백 파일도 없으면 agy 를 띄우지 않는다 — 행을 지우고 "login"/auth_error True.
+    4. 있으면 읽는다: 마지막 실행에서 GEMINI_AUTO_SEC(300초)이 지났을 때, 또는 사용자가 누른 뒤이고
+       GEMINI_CLICK_MIN_SEC(60초)이 지났을 때. 그 사이에는 기억한 행. 한 번의 누름은 한 번의 실행에만
+       쓰인다. 실패한 실행도 실행으로 센다.
+    5. agy 가 로그인을 요구하면(_run_agy_usage 가 그 즉시 끝낸다) 행을 지우고 "login"/auth_error True,
+       그때의 지문을 기억하고(auth_failed_marker) **자동 실행을 멈춘다**. 다시 읽는 것은 지문이 달라졌을
+       때(사용자가 로그인을 마쳐 agy 가 키체인을 다시 썼다 — 클릭 없이 다음 확인에서)와 사용자가 눌렀을
+       때뿐이다. 로그인 절차를 자동으로 다시 시작하지 않는다.
+    6. 그 밖의 실패("timeout"·"agy_failed"·"parse"·"status" — 오프라인 토큰 갱신 실패 포함)는 일시
+       실패다: 직전에 성공한 행이 있고 마지막 성공에서 GEMINI_KEEP_SEC 이 지나지 않았으면 리셋 지난
+       레인만 빼고 그 행을 돌려준다.
+    """
+    if sys.platform not in ("darwin", "win32"):
+        return None
+    rules = _gemini_edge_rules()
+    c = _gemini_cache
+    now = time.time()
+    agy = _find_agy_cli()
+    if agy is None:
+        # 띄운 것이 없으니 실행 시각은 그대로 둔다 — 설치하면 다음 새로고침에서 바로 본다.
+        _dbg("gemini fetch: agy not installed")
+        GEMINI_STATUS["auth_error"] = rules["no_agy_status"] == "login"
+        GEMINI_STATUS["last_error"] = rules["no_agy_status"]
+        c["rows"] = None
+        return None
+
+    since_run = now - c["t"]
+    floor_ok = not (0 <= since_run < GEMINI_CLICK_MIN_SEC)
+
+    def run_due():
+        return bool((c.get("click") and floor_ok) or not (0 <= since_run < GEMINI_AUTO_SEC))
+
+    reading = c.get("login") is True and c.get("auth_failed_marker") is None
+    if reading:
+        check_due = run_due()                 # 읽기 직전에 본다 — 지문이 실행과 같은 때의 것이게
+    else:
+        check_due = bool(c.get("click_check")
+                         or not (0 <= now - c["check_t"] < GEMINI_CHECK_SEC))
+    if check_due:
+        c["click_check"] = False
+        if keychain_locked() is True:
+            _dbg("gemini login: keychain locked; keeping the last answer")
+            if c.get("login") is None and rules["run_when_locked_unknown"]:
+                c["login"] = True
+        else:
+            marker = _gemini_login_marker(rules)
+            if marker is None:
+                # 모름 — 이 주기를 건너뛴다. 직전 행·상태는 그대로.
+                c["check_t"] = now
+                if reading:
+                    c["t"] = now
+                return c["rows"]
+            c["check_t"] = now
+            c["marker"] = marker
+            c["login"] = _gemini_marker_logged_in(marker)
+            failed = c.get("auth_failed_marker")
+            if failed is not None and _gemini_marker_changed(failed, marker, rules):
+                _dbg("gemini login: marker changed; reading again")
+                c["auth_failed_marker"] = None
+                c["click"] = True             # 누른 것과 같이 — 60초 하한만 지키고 바로 읽는다
+    if c.get("login") is not True:
+        if c.get("login") is False:
+            GEMINI_STATUS["auth_error"] = True
+            GEMINI_STATUS["last_error"] = "login"
+            c["auth_failed_marker"] = None
+            c["rows"] = None
+        return c["rows"]
+    if c.get("auth_failed_marker") is not None:
+        if not (c.get("click") and floor_ok):
+            return None                       # 멈춤 — 지문이 그대로고 누르지도 않았다
+    elif not run_due():
+        return c["rows"]
+
+    c["t"] = now
+    c["click"] = False     # 띄우기 전에 내린다 — 도는 동안의 누름은 다음 실행으로 남는다
+    prev = c.get("rows")
+    rows, err, buckets = _run_agy_usage(agy, rules)
+    if err is None:
+        # 버킷 표를 조회 경로가 나른다(파서는 순수하다). 새 값을 먼저 넣고 사라진 버킷만 뺀다 —
+        # 다른 스레드가 읽는 사이 표가 잠깐 비지 않게.
+        GEMINI_BUCKETS.update(buckets)
+        for stale in [k for k in GEMINI_BUCKETS if k not in buckets]:
+            GEMINI_BUCKETS.pop(stale, None)
+        GEMINI_STATUS["auth_error"] = False
+        GEMINI_STATUS["last_error"] = None
+        c["ok_t"] = now
+        c["auth_failed_marker"] = None
+    elif err == "login":
+        GEMINI_STATUS["auth_error"] = True
+        GEMINI_STATUS["last_error"] = err
+        # 지문을 모르면(잠긴 채 띄운 경우) 빈 지문으로 멈춘다 — 다음 확인의 지문은 그것과 다르다.
+        c["auth_failed_marker"] = c.get("marker") or (False, None, ())
+    else:
+        GEMINI_STATUS["auth_error"] = False
+        GEMINI_STATUS["last_error"] = err
+        c["auth_failed_marker"] = None
+        ok_t = c.get("ok_t")
+        if prev and ok_t is not None and 0 <= now - ok_t < GEMINI_KEEP_SEC:
+            # 일시 실패 — 직전 값 유지(ok_t 는 그대로), 리셋 지난 레인은 뺀다.
+            kept = drop_reset_rows(prev)
+            _dbg("gemini fetch: kept last rows", len(kept or ()))
+            c["rows"] = kept
+            return kept
+    c["rows"] = rows
+    _dbg("gemini fetch: rows", len(rows or ()))
+    return rows
+
+
+def start_gemini_refresh(state, runtime=None):
+    """Gemini 사용량을 주 새로고침과 **따로**, 자기 데몬 스레드에서 받아 state["gemini"] 에 넣는다.
+
+    agy 가 느리거나 멈춰도(GEMINI_AGY_TIMEOUT 까지) Claude·Codex 값이 그만큼 늦게 들어오지 않게
+    하려는 것이다. Gemini 를 보이지 않으면(provider_shown) 아무것도 하지 않는다 — 숨긴 사용자를 위해
+    agy 를 띄우지도, 키체인을 확인하지도 않는다. 한 번에 하나만 돈다(_gemini_refresh["busy"]); 앞의
+    것이 아직 끝나지 않았으면 이번 새로고침은 건너뛴다. 받은 뒤 우클릭 메뉴의 로그인 깃발
+    (state["gemini_onboard"])을 맞추고 state["repaint"] 를 올린다. 시작했으면 True."""
+    rt = RUNTIME if runtime is None else runtime
+    if not provider_shown(rt, "gemini"):
+        state["gemini_onboard"] = None
+        return False
+    if _gemini_refresh.get("busy"):
+        return False
+    _gemini_refresh["busy"] = True
+
+    def work():
+        try:
+            state["gemini"] = fetch_gemini_usage()
+            state["gemini_onboard"] = compute_gemini_onboard_state(rt)
+        except Exception as e:
+            _dbg("gemini refresh: failed", type(e).__name__)
+        finally:
+            _gemini_refresh["busy"] = False
+            state["repaint"] = True
+
+    threading.Thread(target=work, daemon=True).start()
+    return True
+
+
+# ─────────────── 세 CLI 를 앱 안에서 받고 로그인까지 (계약 v7-I, 2026-11-19) ───────────────
+#
+# 대표님: "cli가 설치 안되어잇음 설치 가능하게 해놔야지 사람이 설정에서 설치 버튼 누르면 알아서 설치되게끔
+# 그리고 로그인까지 마무리 시켜야지". 설정 창 "AI 연결" 구역의 버튼 하나가 받기 → 확인 → 로그인을 잇는다.
+#
+#   1. **사용자가 버튼을 눌렀을 때만** 받고 로그인한다. 새로고침·토큰 복구·Gemini 조회 경로에서 여기로
+#      오는 길은 없다(로그인 창을 스스로 다시 띄우지 않는다). 하루 한 번의 갱신(update_app_cli)만 예외이고,
+#      그것도 앱이 깐 CLI 에 한한다.
+#   2. 이미 있으면 쓰고 받지 않는다. 찾기 순서의 마지막이 앱 전용 bin 이다 — 사용자가 깐 것이 먼저다.
+#   3. 앱 전용 bin 에만 둔다(macOS ~/Library/Application Support/me.yeongyu.claudepet/bin, Windows
+#      %LOCALAPPDATA%\me.yeongyu.claudepet\bin). 사용자의 PATH·셸 설정·레지스트리는 건드리지 않고, 공식
+#      설치 스크립트(install.sh/ps1)와 `claude install` 은 실행하지 않는다 — 그것들이 셸 설정과 ~/.local/bin
+#      을 고친다.
+#   4. 받는 곳은 각 제공사의 공식 서버뿐이고 앱에 동봉하지 않는다. staging 에 청크로 받으며 해시를 대조하고,
+#      아카이브에서는 기대한 한 엔트리만 꺼내고, **코드 서명**(그 제공사의 팀/주체)까지 확인한 뒤에만 같은
+#      볼륨에서 os.replace 로 바꿔 넣는다. 어느 단계든 실패하면 staging 을 비우고 옛 파일은 그대로 둔다.
+#   5. 로그인은 공식 CLI 자신이 한다. 앱은 토큰을 만들지도 읽지도 않고, 성공은 저장소 지문으로만 본다.
+#   6. 로그(_dbg)에는 종류·상태·종료 코드만 — 주소(서명된 쿼리가 붙는다)·경로·토큰은 남기지 않는다.
+
+CLI_PROVIDERS = ("claude", "codex", "gemini")
+AI_ROW_PITCH = 100          # 설정 "AI 연결" 한 줄의 높이(pt) — 이름·상태·안내(세 줄까지)가 들어가는 최소에 가깝게
+AI_PROVIDER_NAMES = {"claude": "Claude Code", "codex": "Codex (ChatGPT)", "gemini": "Gemini (Antigravity)"}
+_CLI_EXE = {"claude": "claude", "codex": "codex", "gemini": "agy"}
+CLI_APP_BIN_MACOS = "~/Library/Application Support/me.yeongyu.claudepet"   # 이 아래 bin/
+CLAUDE_RELEASES_URL = "https://downloads.claude.ai/claude-code-releases"
+CODEX_CHANNEL_URL = "https://releases.openai.com/codex/channels/latest"
+CODEX_GITHUB_URL = "https://api.github.com/repos/openai/codex/releases/latest"
+AGY_MANIFEST_URL = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/"
+# macOS: Developer ID 의 TeamIdentifier. claude·agy 는 agy 조사 보고의 실측, codex 는 이 Mac 에서 공식
+# 자산을 받아 codesign -dv 로 본 값(2026-11-19, rust-v0.170.0 대).
+CLI_TEAM_IDS = {"claude": "Q6L2SF6YDW", "codex": "2DC432GLL2", "gemini": "EQHXZ8M8AV"}
+# Windows: Authenticode 서명 인증서 주체의 O.
+CLI_AUTHENTICODE_ORGS = {"claude": "Anthropic, PBC", "codex": "OpenAI OpCo, LLC", "gemini": "Google LLC"}
+CLI_LOGIN_TIMEOUT_SEC = {"claude": 300, "codex": 300}   # 앱이 끊는 상한. Gemini 는 앱이 끊지 않는다
+GEMINI_LOGIN_HINT_SEC = 300      # 표시용 — 지나면 "다시 시도" 안내로 바뀔 뿐, 창도 프로세스도 건드리지 않는다
+GEMINI_LOGIN_POLL_SEC = 1.5      # 로그인을 기다리는 동안 지문을 다시 보는 간격
+CODEX_LOGIN_CANCEL_URL = "http://127.0.0.1:1455/cancel"
+CLI_UPDATE_SEC = 86400           # 앱이 깐 CLI 의 새 버전 확인 — 하루에 한 번 이하
+CLI_DOWNLOAD_CHUNK = 1 << 16
+CLI_HTTP_TIMEOUT = 30
+CLI_SIGN_TIMEOUT = 60
+_CLI_VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$")
+_CLI_HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
+
+
+class CliInstallError(Exception):
+    """받기·설치의 실패. kind ∈ unsupported | manifest | network | hash | archive | signature |
+    cancelled | locked. 메시지에는 종류만 담는다(주소·경로를 넣지 않는다)."""
+
+    def __init__(self, kind):
+        super().__init__(kind)
+        self.kind = kind
+
+
+def app_cli_bin_dir():
+    """앱 전용 bin 의 경로(만들지는 않는다)."""
+    if sys.platform == "win32":
+        return os.path.join(_win_app_dir(), "bin")
+    return os.path.join(os.path.expanduser(CLI_APP_BIN_MACOS), "bin")
+
+
+def app_cli_path(provider):
+    """앱 전용 bin 안의 실행 파일 경로 — claude / codex / agy (Windows 는 .exe)."""
+    name = _CLI_EXE[provider] + (".exe" if sys.platform == "win32" else "")
+    return os.path.join(app_cli_bin_dir(), name)
+
+
+def app_cli_ok(path):
+    """앱 전용 bin 의 파일을 실행해도 되는가 — lstat 로: 보통 파일, 링크(재해석 지점) 아님, 소유자 본인."""
+    try:
+        st = os.lstat(path)
+    except (OSError, ValueError, TypeError):
+        return False
+    if not stat.S_ISREG(st.st_mode):
+        return False
+    if sys.platform == "win32":
+        return not (getattr(st, "st_file_attributes", 0) & 0x400)     # FILE_ATTRIBUTE_REPARSE_POINT
+    return st.st_uid == os.getuid()
+
+
+def _app_cli(provider):
+    """앱 전용 bin 의 그 CLI — 실행해도 되는 것일 때만 경로, 아니면 None."""
+    path = app_cli_path(provider)
+    return path if app_cli_ok(path) else None
+
+
+def find_cli(provider):
+    """그 제공자의 CLI 경로, 없으면 None. 사용자가 깐 것이 먼저, 앱 전용 bin 은 마지막."""
+    if provider == "claude":
+        return _find_claude_cli()
+    if provider == "codex":
+        return _find_codex_cli()
+    if provider == "gemini":
+        return _find_agy_cli()
+    return None
+
+
+def _find_user_cli(provider):
+    """사용자가 직접 깐 CLI(앱 전용 bin 밖) — 있으면 그것을 쓰고 받지 않는다."""
+    found = find_cli(provider)
+    if found and os.path.normcase(os.path.abspath(found)) == \
+            os.path.normcase(os.path.abspath(app_cli_path(provider))):
+        return None
+    return found
+
+
+# ── 무엇을 어디서 받는가 ──
+
+def _cli_platform(system, machine):
+    """(system, machine) → "mac-arm" | "mac-x64" | "win-x64", 지원하지 않으면 CliInstallError."""
+    system = str(system or "")
+    machine = str(machine or "").lower()
+    if system == "Darwin" and machine in ("arm64", "aarch64"):
+        return "mac-arm"
+    if system == "Darwin" and machine in ("x86_64", "amd64"):
+        return "mac-x64"
+    if system == "Windows" and machine in ("amd64", "x86_64"):
+        return "win-x64"
+    raise CliInstallError("unsupported")
+
+
+def _cli_get(http_get, url):
+    """매니페스트 한 건 → bytes. 서버가 답하지 않으면 "network"."""
+    try:
+        body = http_get(url)
+    except CliInstallError:
+        raise
+    except Exception:
+        raise CliInstallError("network") from None
+    if isinstance(body, str):
+        body = body.encode("utf-8")
+    if not isinstance(body, (bytes, bytearray)):
+        raise CliInstallError("manifest")
+    return bytes(body)
+
+
+def _cli_json(body):
+    try:
+        obj = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        raise CliInstallError("manifest") from None
+    if not isinstance(obj, dict):
+        raise CliInstallError("manifest")
+    return obj
+
+
+def _cli_version(value):
+    """버전 문자열 — 영문·숫자·`.`·`+`·`-` 만. 주소에 끼워 넣으므로 그 밖의 글자는 거절한다."""
+    if not isinstance(value, str) or not _CLI_VERSION_RE.match(value) or ".." in value:
+        raise CliInstallError("manifest")
+    return value
+
+
+def _cli_digest(value, length):
+    if not (isinstance(value, str) and len(value) == length and _CLI_HEX_RE.match(value)):
+        raise CliInstallError("manifest")
+    return value.lower()
+
+
+def _cli_https(value):
+    if not (isinstance(value, str) and value.startswith("https://") and len(value) < 2048
+            and not any(c.isspace() for c in value)):
+        raise CliInstallError("manifest")
+    return value
+
+
+def cli_release_info(provider, http_get, system=None, machine=None):
+    """공식 매니페스트에서 받을 파일을 정한다 → {"version", "url", "alg", "digest", "archive", "member"}.
+
+    http_get(url) → bytes. 믿을 수 없는 매니페스트는 받기 전에 거절한다(CliInstallError "manifest"),
+    서버가 답하지 않으면 "network", 지원하지 않는 플랫폼이면 서버에 묻지도 않고 "unsupported".
+
+      · Claude Code: …/latest(버전) → …/{버전}/manifest.json 의 그 플랫폼 → …/{버전}/{플랫폼}/{binary}, SHA-256.
+      · Codex: releases.openai.com 의 채널(답하지 않을 때만 GitHub 의 releases/latest) → 그 플랫폼의 단일
+        CLI 자산과 그 digest(SHA-256). 아카이브 안의 한 엔트리가 실행 파일이다.
+      · agy: 그 플랫폼의 매니페스트 → url 과 SHA-512. macOS 는 tar.gz 의 `antigravity`, Windows 는 exe 하나."""
+    plat = _cli_platform(platform.system() if system is None else system,
+                         platform.machine() if machine is None else machine)
+    if provider == "claude":
+        key, binary = {"mac-arm": ("darwin-arm64", "claude"), "mac-x64": ("darwin-x64", "claude"),
+                       "win-x64": ("win32-x64", "claude.exe")}[plat]
+        try:
+            latest = _cli_get(http_get, CLAUDE_RELEASES_URL + "/latest").decode("ascii").strip()
+        except UnicodeDecodeError:
+            raise CliInstallError("manifest") from None
+        version = _cli_version(latest)
+        manifest = _cli_json(_cli_get(http_get, "%s/%s/manifest.json" % (CLAUDE_RELEASES_URL, version)))
+        entry = (manifest.get("platforms") or {}).get(key) if isinstance(manifest.get("platforms"), dict) \
+            else None
+        if not isinstance(entry, dict) or entry.get("binary") != binary:
+            raise CliInstallError("manifest")
+        return {"version": version, "url": "%s/%s/%s/%s" % (CLAUDE_RELEASES_URL, version, key, binary),
+                "alg": "sha256", "digest": _cli_digest(entry.get("checksum"), 64),
+                "archive": None, "member": None}
+    if provider == "codex":
+        asset, member, archive = {
+            "mac-arm": ("codex-aarch64-apple-darwin.tar.gz", "codex-aarch64-apple-darwin", "tar.gz"),
+            "mac-x64": ("codex-x86_64-apple-darwin.tar.gz", "codex-x86_64-apple-darwin", "tar.gz"),
+            "win-x64": ("codex-x86_64-pc-windows-msvc.exe.zip", "codex-x86_64-pc-windows-msvc.exe", "zip"),
+        }[plat]
+        try:
+            body = _cli_get(http_get, CODEX_CHANNEL_URL)
+        except CliInstallError as e:
+            if e.kind != "network":
+                raise
+            body = _cli_get(http_get, CODEX_GITHUB_URL)
+        release = _cli_json(body)
+        tag = release.get("tag_name")
+        if not isinstance(tag, str):
+            raise CliInstallError("manifest")
+        version = _cli_version(tag[len("rust-v"):] if tag.startswith("rust-v") else tag.lstrip("v"))
+        assets = release.get("assets")
+        found = [a for a in assets if isinstance(a, dict) and a.get("name") == asset] \
+            if isinstance(assets, list) else []
+        if len(found) != 1:
+            raise CliInstallError("manifest")
+        digest = found[0].get("digest")
+        if not (isinstance(digest, str) and digest.startswith("sha256:")):
+            raise CliInstallError("manifest")
+        return {"version": version, "url": _cli_https(found[0].get("browser_download_url")),
+                "alg": "sha256", "digest": _cli_digest(digest[len("sha256:"):], 64),
+                "archive": archive, "member": member}
+    if provider == "gemini":
+        key = {"mac-arm": "darwin_arm64", "mac-x64": "darwin_amd64", "win-x64": "windows_amd64"}[plat]
+        manifest = _cli_json(_cli_get(http_get, AGY_MANIFEST_URL + key + ".json"))
+        win = plat == "win-x64"
+        return {"version": _cli_version(manifest.get("version")), "url": _cli_https(manifest.get("url")),
+                "alg": "sha512", "digest": _cli_digest(manifest.get("sha512"), 128),
+                "archive": None if win else "tar.gz", "member": None if win else "antigravity"}
+    raise CliInstallError("unsupported")
+
+
+# ── 받기 ──
+
+def _cli_http_get(url):
+    """기본 http_get — 공식 매니페스트 한 건(작다). TLS 는 앱이 이미 쓰는 검증된 오프너를 그대로 쓴다."""
+    req = urllib.request.Request(url, headers={"User-Agent": "ClaudePet", "Accept": "*/*"})
+    with urllib.request.urlopen(req, timeout=CLI_HTTP_TIMEOUT) as resp:
+        return resp.read(1 << 22)
+
+
+def _cli_open(url):
+    """기본 opener — 받을 파일의 응답(read(n)·close()·length)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "ClaudePet", "Accept": "*/*"})
+    return urllib.request.urlopen(req, timeout=CLI_HTTP_TIMEOUT)
+
+
+def _is_reparse_point(path):
+    """Windows: path 가 재해석 지점(정션·심볼릭 링크)인가 — app_cli_ok 와 같은 기준. 없으면 False."""
+    try:
+        return bool(getattr(os.lstat(path), "st_file_attributes", 0) & 0x400)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _cli_staging_dir():
+    """앱 bin 안의 staging/ — 둘 다 0700 으로 만들어 돌려준다. 받는 파일과 최종 자리가 같은 볼륨이다."""
+    bin_dir = app_cli_bin_dir()
+    staging = os.path.join(bin_dir, "staging")
+    for folder in (bin_dir, staging):
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        if os.path.islink(folder) or not os.path.isdir(folder):
+            raise OSError("not a directory")
+        if sys.platform != "win32":
+            os.chmod(folder, 0o700)
+        elif _is_reparse_point(folder):
+            raise OSError("reparse point")        # 정션 — 다른 곳으로 이어진 폴더에 실행 파일을 쓰지 않는다
+    return staging
+
+
+def _cli_staging_new(mode=0o600):
+    """staging 에 난수 이름의 새 파일을 만든다(O_EXCL) → (fd, 경로)."""
+    staging = _cli_staging_dir()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    for _ in range(8):
+        path = os.path.join(staging, os.urandom(8).hex())
+        try:
+            return os.open(path, flags, mode), path
+        except FileExistsError:
+            continue
+    raise OSError("no free staging name")
+
+
+def _cli_unlink(path):
+    try:
+        if path:
+            os.unlink(path)
+    except OSError:
+        pass
+
+
+def cli_stage_download(url, alg, digest, opener, progress=None, cancel=None):
+    """url 을 staging 의 새 파일로 받으며 해시한다 → 그 경로. 청크로 읽는다(수백 MB 를 메모리에 올리지 않는다).
+
+    opener(url) → read(n)·close()·length 를 가진 응답. progress(받은 바이트, 전체 또는 None), cancel() → bool.
+    해시가 다르면 "hash", 연결이 끊기면 "network", 취소면 "cancelled" — 어느 경우든 받던 파일은 지운다."""
+    try:
+        fd, path = _cli_staging_new()
+    except OSError:
+        raise CliInstallError("locked") from None
+    resp = None
+    done = False
+    try:
+        with os.fdopen(fd, "wb") as out:
+            try:
+                resp = opener(url)
+            except CliInstallError:
+                raise
+            except Exception:
+                raise CliInstallError("network") from None
+            total = getattr(resp, "length", None)
+            total = total if isinstance(total, int) and total > 0 else None
+            h = hashlib.new(alg)
+            got = 0
+            while True:
+                if cancel is not None and cancel():
+                    raise CliInstallError("cancelled")
+                try:
+                    chunk = resp.read(CLI_DOWNLOAD_CHUNK)
+                except Exception:
+                    raise CliInstallError("network") from None
+                if not chunk:
+                    break
+                h.update(chunk)
+                out.write(chunk)
+                got += len(chunk)
+                if progress is not None:
+                    progress(got, total)
+        if total is not None and got != total:
+            raise CliInstallError("network")
+        if h.hexdigest().lower() != str(digest).lower():
+            _dbg("cli install: hash mismatch")
+            raise CliInstallError("hash")
+        done = True
+        return path
+    except CliInstallError:
+        raise
+    except OSError:
+        raise CliInstallError("network") from None
+    finally:
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
+        if not done:
+            _cli_unlink(path)
+
+
+def cli_extract_one(archive_path, kind, member, dest_path):
+    """아카이브에서 이름이 member 인 **한 엔트리만** 보통 파일로 dest_path 에 꺼낸다.
+
+    통째로 푸는 호출은 쓰지 않는다 — 다른 엔트리(`..` 경로·절대 경로·링크)는 어디에도 풀리지 않는다.
+    그 이름의 엔트리가 정확히 하나가 아니거나, 보통 파일이 아니거나(링크·폴더), 아카이브가 깨졌으면
+    "archive" 이고 아무것도 남기지 않는다. 이름은 글자 그대로 비교한다(정규화하지 않는다)."""
+    import tarfile
+    import zlib
+    wrote = False
+    ok = False
+    try:
+        if kind == "tar.gz":
+            with tarfile.open(archive_path, mode="r:gz") as tf:
+                hits = [m for m in tf.getmembers() if m.name == member]
+                if len(hits) != 1 or not hits[0].isreg():
+                    raise CliInstallError("archive")
+                src = tf.extractfile(hits[0])
+                if src is None:
+                    raise CliInstallError("archive")
+                wrote = True
+                with src, open(dest_path, "xb") as out:
+                    shutil.copyfileobj(src, out, CLI_DOWNLOAD_CHUNK)
+        elif kind == "zip":
+            with zipfile.ZipFile(archive_path) as zf:
+                hits = [i for i in zf.infolist() if i.filename == member]
+                if len(hits) != 1 or hits[0].is_dir() or stat.S_ISLNK(hits[0].external_attr >> 16):
+                    raise CliInstallError("archive")
+                wrote = True
+                with zf.open(hits[0]) as src, open(dest_path, "xb") as out:
+                    shutil.copyfileobj(src, out, CLI_DOWNLOAD_CHUNK)
+        else:
+            raise CliInstallError("archive")
+        ok = True
+    except CliInstallError:
+        raise
+    except (tarfile.TarError, zipfile.BadZipFile, zlib.error, EOFError, OSError, ValueError,
+            RuntimeError, NotImplementedError):
+        raise CliInstallError("archive") from None
+    finally:
+        if wrote and not ok:
+            _cli_unlink(dest_path)
+
+
+# ── 코드 서명 ──
+
+def _dn_values(subject, key):
+    """인증서 주체("CN=…, O=\"A, B\", C=US")에서 key 의 값들. 따옴표 안의 쉼표는 값의 일부다."""
+    parts, cur, quoted = [], [], False
+    for ch in subject:
+        if ch == '"':
+            quoted = not quoted
+            cur.append(ch)
+        elif ch == "," and not quoted:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    out = []
+    for part in parts:
+        name, sep, value = part.strip().partition("=")
+        if not sep or name.strip().upper() != key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1].replace('""', '"')
+        out.append(value)
+    return out
+
+
+def authenticode_ok(provider, status, subject):
+    """Windows: Authenticode 상태가 "Valid" 이고 서명 인증서 주체의 O 가 그 제공사와 **통째로** 같은가."""
+    org = CLI_AUTHENTICODE_ORGS.get(provider)
+    if org is None or status != "Valid" or not isinstance(subject, str):
+        return False
+    orgs = _dn_values(subject, "O")
+    return bool(orgs) and all(o == org for o in orgs)
+
+
+_WIN_AUTHENTICODE_PS = (
+    "$s = Get-AuthenticodeSignature -LiteralPath $env:CLAUDEPET_SIGN_PATH; "
+    "[Console]::Out.WriteLine([string]$s.Status); "
+    "if ($s.SignerCertificate) { [Console]::Out.WriteLine($s.SignerCertificate.Subject) }")
+
+
+def cli_signing_requirement(team):
+    """macOS 코드 서명 요구 문자열 — Apple 사슬의 Developer ID Application 인증서이고 그 OU 가 team."""
+    return ('=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists '
+            'and certificate leaf[field.1.2.840.113635.100.6.1.13] exists '
+            'and certificate leaf[subject.OU] = "%s"' % team)
+
+
+def cli_signature_ok(provider, path):
+    """받은 실행 파일의 코드 서명이 그 제공사의 것인가. 확인할 수 없으면 False(설치하지 않는다).
+
+    macOS: `/usr/bin/codesign --verify --strict` 가 0 이고 TeamIdentifier 가 그 제공사의 팀.
+    Windows: Authenticode 가 Valid 이고 주체의 O 가 그 제공사(authenticode_ok). 해시는 매니페스트 서버가
+    내주는 값이라, 서버가 뚫렸을 때의 두 번째 방어선이 이것이다."""
+    try:
+        if sys.platform == "darwin":
+            team = CLI_TEAM_IDS.get(provider)
+            if not team:
+                return False
+            # 요구(-R)가 없으면 ad-hoc 서명도 통과하고, TeamIdentifier 줄은 ad-hoc 서명에도 써 넣을 수 있다.
+            # Apple 이 발급한 Developer ID 사슬 + leaf 의 OU 가 그 제공사의 팀일 것을 **검증에** 건다.
+            r = subprocess.run(["/usr/bin/codesign", "--verify", "--strict",
+                                "-R", cli_signing_requirement(team), str(path)],
+                               capture_output=True, text=True, timeout=CLI_SIGN_TIMEOUT)
+            if r.returncode != 0:
+                return False
+            r = subprocess.run(["/usr/bin/codesign", "-dv", str(path)],
+                               capture_output=True, text=True, timeout=CLI_SIGN_TIMEOUT)
+            if r.returncode != 0:
+                return False
+            found = re.findall(r"^TeamIdentifier=(.*)$", (r.stderr or "") + "\n" + (r.stdout or ""), re.M)
+            return len(found) == 1 and found[0].strip() == team
+        if sys.platform == "win32":
+            # PSModulePath 는 지운다(어느 철자든): 앱이 PowerShell 7 에서 떴으면 그 값이 7 의 모듈 폴더를
+            # 가리켜 powershell.exe(5.1)가 Get-AuthenticodeSignature 의 모듈을 읽지 못한다(실기기 2026-11-19).
+            env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+            env["CLAUDEPET_SIGN_PATH"] = str(path)
+            r = subprocess.run([_windows_powershell_exe(), "-NoProfile", "-NonInteractive", "-Command",
+                                _WIN_AUTHENTICODE_PS],
+                               capture_output=True, text=True, timeout=CLI_SIGN_TIMEOUT, env=env,
+                               stdin=subprocess.DEVNULL, creationflags=_spawn_no_window_flags())
+            lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+            return r.returncode == 0 and len(lines) == 2 and authenticode_ok(provider, lines[0], lines[1])
+    except Exception as e:
+        _dbg("cli install: signature check failed", type(e).__name__)
+    return False
+
+
+# ── 설치·갱신 ──
+
+def _app_cli_meta_path(provider):
+    return os.path.join(app_cli_bin_dir(), ".%s.json" % _CLI_EXE[provider])
+
+
+def read_app_cli_meta(provider):
+    """앱이 그 CLI 를 깔거나 갱신하며 남긴 메타 {"version", "checked"(초)}, 없으면 None.
+    버전을 알려고 CLI 를 띄우지 않는다 — 이 파일에서 읽는다."""
+    try:
+        with open(_app_cli_meta_path(provider), encoding="utf-8") as f:
+            obj = json.load(f)
+    except (OSError, ValueError, KeyError):
+        return None
+    if not isinstance(obj, dict) or not isinstance(obj.get("version"), str):
+        return None
+    checked = obj.get("checked")
+    return {"version": obj["version"],
+            "checked": float(checked) if isinstance(checked, (int, float)) and not isinstance(checked, bool)
+            else 0.0}
+
+
+def _write_app_cli_meta(provider, version, checked):
+    """메타를 staging 에 써서 바꿔 넣는다. 실패해도 설치는 된 것이다 — 다음 갱신 확인이 다시 받을 뿐이다."""
+    staged = None
+    try:
+        fd, staged = _cli_staging_new()
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"version": version, "checked": float(checked)}, f)
+        os.replace(staged, _app_cli_meta_path(provider))
+        staged = None
+    except OSError as e:
+        _dbg("cli install: meta not written", type(e).__name__)
+    finally:
+        _cli_unlink(staged)
+
+
+def _install_app_cli(provider, info, opener, progress, cancel):
+    """info(cli_release_info 의 답)대로 받아 확인하고 앱 전용 bin 에 바꿔 넣는다 → 최종 경로.
+    실패는 CliInstallError. 어느 경우든 staging 에 만든 것은 지운다."""
+    made = []
+    try:
+        staged = cli_stage_download(info["url"], info["alg"], info["digest"], opener,
+                                    progress=progress, cancel=cancel)
+        made.append(staged)
+        binary = staged
+        if info.get("archive"):
+            try:
+                fd, binary = _cli_staging_new()
+            except OSError:
+                raise CliInstallError("locked") from None
+            os.close(fd)
+            os.unlink(binary)                 # 이름만 잡는다 — 꺼내는 쪽이 새로 만든다(O_EXCL)
+            made.append(binary)
+            cli_extract_one(staged, info["archive"], info["member"], binary)
+        if cancel is not None and cancel():
+            raise CliInstallError("cancelled")
+        if sys.platform != "win32":
+            os.chmod(binary, 0o755)
+        else:
+            # Authenticode 확인은 확장자로 파일 종류를 고른다 — 난수 이름 그대로면 서명을 읽지 못한다.
+            os.rename(binary, binary + ".exe")
+            binary += ".exe"
+            made.append(binary)
+        try:
+            signed = cli_signature_ok(provider, binary) is True
+        except Exception as e:
+            _dbg("cli install: signature check raised", type(e).__name__)
+            signed = False
+        if not signed:
+            _dbg("cli install: signature refused", provider)
+            raise CliInstallError("signature")
+        if cancel is not None and cancel():
+            raise CliInstallError("cancelled")
+        final = app_cli_path(provider)
+        try:
+            if os.path.islink(final) or os.path.isdir(final) or \
+                    (sys.platform == "win32" and (_is_reparse_point(final)
+                                                  or _is_reparse_point(os.path.dirname(final)))):
+                raise CliInstallError("locked")
+            os.replace(binary, final)         # 같은 볼륨(staging → bin) — 반쪽 파일이 보이지 않는다
+        except PermissionError:
+            raise CliInstallError("locked") from None     # Windows: 실행 중인 파일
+        return final
+    except CliInstallError:
+        raise
+    except OSError as e:
+        _dbg("cli install: file error", type(e).__name__)
+        raise CliInstallError("locked") from None
+    finally:
+        for path in made:
+            _cli_unlink(path)
+
+
+def install_cli(provider, http_get=None, opener=None, system=None, machine=None, progress=None,
+                cancel=None):
+    """그 제공자의 공식 CLI 를 앱 전용 bin 에 깐다 → (True, 경로) | (False, kind). 예외를 내지 않는다.
+
+    사용자가 이미 깐 것이 있으면 서버에 묻지도 않고 그 경로를 돌려준다. 아무것도 실행하지 않는다
+    (서명 확인의 codesign 만 뜬다)."""
+    try:
+        if provider not in CLI_PROVIDERS:
+            return False, "unsupported"
+        user = _find_user_cli(provider)
+        if user:
+            return True, user
+        info = cli_release_info(provider, http_get or _cli_http_get, system=system, machine=machine)
+        final = _install_app_cli(provider, info, opener or _cli_open, progress, cancel)
+        _write_app_cli_meta(provider, info["version"], time.time())
+        _dbg("cli install: done", provider)
+        return True, final
+    except CliInstallError as e:
+        _dbg("cli install: failed", provider, e.kind)
+        return False, e.kind
+    except Exception as e:
+        _dbg("cli install: failed", provider, type(e).__name__)
+        return False, "network"
+
+
+def app_cli_update_due(provider, now):
+    """앱이 깐 그 CLI 의 새 버전을 지금 확인할 차례인가 — 앱이 깐 것이고(메타 + 앱 bin 의 파일), 사용자가
+    따로 깐 것이 없고, 마지막 확인에서 하루가 지났을 때만."""
+    meta = read_app_cli_meta(provider)
+    if meta is None or _app_cli(provider) is None or _find_user_cli(provider):
+        return False
+    return not (0 <= now - meta["checked"] < CLI_UPDATE_SEC)
+
+
+def update_app_cli(provider, http_get=None, opener=None, now=None, system=None, machine=None,
+                   cancel=None):
+    """앱이 깐 CLI 를 공식 최신 버전으로 바꾼다 → 바꿨으면 True. 예외를 내지 않는다.
+
+    하루에 한 번 이하(app_cli_update_due), 버전이 메타와 다를 때만 설치와 같은 받기·확인으로 교체한다.
+    사용자가 깐 CLI 는 건드리지 않는다. 바꿔 넣을 수 없으면(Windows 에서 실행 중 — 잠금) 그 주기는 조용히
+    건너뛴다. 확인한 시각은 결과와 상관없이 남긴다 — 실패를 하루 안에 되풀이하지 않는다."""
+    try:
+        now = time.time() if now is None else now
+        if provider not in CLI_PROVIDERS or not app_cli_update_due(provider, now):
+            return False
+        meta = read_app_cli_meta(provider)
+        version, changed = meta["version"], False
+        try:
+            info = cli_release_info(provider, http_get or _cli_http_get, system=system, machine=machine)
+            if info["version"] != meta["version"]:
+                _install_app_cli(provider, info, opener or _cli_open, None, cancel)
+                version, changed = info["version"], True
+        except CliInstallError as e:
+            _dbg("cli update: skipped", provider, e.kind)
+        _write_app_cli_meta(provider, version, now)
+        return changed
+    except Exception as e:
+        _dbg("cli update: failed", provider, type(e).__name__)
+        return False
+
+
+_cli_update_busy = {"on": False}
+
+
+def start_app_cli_updates():
+    """앱이 깐 CLI 들의 하루 한 번 갱신을 자기 데몬 스레드에서 돌린다(새로고침 워커가 부른다). 확인할
+    차례인 것이 없으면 아무것도 띄우지 않는다. 한 번에 하나만."""
+    if _cli_update_busy["on"]:
+        return False
+    now = time.time()
+    due = [p for p in CLI_PROVIDERS if app_cli_update_due(p, now)]
+    if not due:
+        return False
+    _cli_update_busy["on"] = True
+
+    def work():
+        try:
+            for p in due:
+                update_app_cli(p)
+        finally:
+            _cli_update_busy["on"] = False
+
+    threading.Thread(target=work, daemon=True).start()
+    return True
+
+
+# ── 로그인 ──
+
+def cli_login_argv(provider, path):
+    """그 CLI 의 공식 로그인 명령. Gemini 는 보이는 창에서 `agy -p /usage --output-format json` 을 띄운다
+    (start_gemini_login) — 로그인이 없으면 그 명령이 브라우저를 열고, 브라우저가 보여 준 코드를 진짜
+    터미널에 붙여 넣어야 끝난다(Windows 실측 2026-11-19). 인자 없는 `agy`(TUI)는 대체 화면으로 바뀌어
+    창 맨 위의 안내를 가린다."""
+    if provider == "claude":
+        return login_spawn_argv(path)
+    if provider == "codex":
+        return [path, "login"]
+    return [path] + list(GEMINI_AGY_ARGS)
+
+
+def cli_env(provider, path, base_env=None):
+    """그 CLI 를 띄울 환경 — base_env(없으면 os.environ)의 **사본**. 앱의 환경은 바꾸지 않는다.
+
+      · gemini: SSH_* 를 지운다(있으면 agy 가 토큰을 파일에 둔다), AGY_CLI_DISABLE_AUTO_UPDATE=1.
+        조회용 env(_agy_env)와 달리 가짜 open 을 PATH 에 넣지 않는다 — 로그인에서는 브라우저가 떠야 한다.
+      · 앱 전용 bin 의 claude: DISABLE_AUTOUPDATER=1, DISABLE_INSTALLATION_CHECKS=1 — 앱이 깐 것은 앱이
+        갱신한다(update_app_cli). 사용자가 깐 claude 에는 넣지 않는다."""
+    env = dict(os.environ if base_env is None else base_env)
+    if provider == "gemini":
+        for key in [k for k in env if k.upper() in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION")]:
+            env.pop(key, None)
+        env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "1"
+    elif provider == "claude":
+        try:
+            ours = os.path.normcase(os.path.abspath(str(path))) == \
+                os.path.normcase(os.path.abspath(app_cli_path("claude")))
+        except (OSError, ValueError, TypeError):
+            ours = False
+        if ours:
+            env["DISABLE_AUTOUPDATER"] = "1"
+            env["DISABLE_INSTALLATION_CHECKS"] = "1"
+    return env
+
+
+def cli_logged_in(provider):
+    """그 제공자에 로그인돼 있는가 = **지금 사용량을 읽을 수 있는가** — 창이 뜰 수 없는 확인만.
+    로그인 정보가 남아 있어도 서버가 거절한 상태(auth_error)면 아니다: 그때는 [로그인] 이 떠야 한다.
+
+    claude: claude_token_present. codex: auth.json 의 토큰. gemini: 마지막 조회가 성공했고 로그인 요구가
+    없을 때 — agy 는 로그아웃해도 키체인 항목을 남기므로 항목이 있다는 것만으로는 알 수 없다."""
+    try:
+        if provider == "claude":
+            return bool(claude_token_present()) and not OAUTH_STATUS.get("auth_error")
+        if provider == "codex":
+            # 토큰 파일이 있어도 서버가 거절했으면(만료) 연결된 것이 아니다 — 사용량을 읽을 수 없다.
+            return bool(read_codex_token(codex_auth_path())) and not CODEX_STATUS.get("auth_error")
+        if provider == "gemini":
+            return bool(_gemini_cache.get("ok_t") is not None and not GEMINI_STATUS.get("auth_error"))
+    except Exception as e:
+        _dbg("cli login: state unknown", provider, type(e).__name__)
+    return False
+
+
+def _cli_login_cwd():
+    """로그인 CLI 가 뜰 빈 전용 폴더(복구 스폰과 같은 자리)."""
+    path = recovery_cli_cwd()
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _cli_kill_tree(proc):
+    """우리가 띄운 로그인 CLI 와 그 자식들을 끝내고 거둔다."""
+    try:
+        if proc.poll() is None:
+            if sys.platform == "win32":
+                subprocess.run([_windows_system32("taskkill.exe"), "/PID", str(proc.pid), "/T", "/F"],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=15,
+                               creationflags=_spawn_no_window_flags())
+            else:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except OSError:
+                    proc.kill()
+    except Exception as e:
+        _dbg("cli login: kill failed", type(e).__name__)
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        try:
+            proc.kill()
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+
+
+def _run_codex_login(path, cancel):
+    """`codex login` 을 터미널 없이 띄워 끝까지 지켜본다. 브라우저는 codex 가 연다."""
+    if cli_logged_in("codex"):
+        return "already"          # 그 명령은 시작하자마자 기존 토큰을 지운다 — **유효한** 로그인만 지킨다
+    try:
+        how = ({"creationflags": _spawn_no_window_flags()} if sys.platform == "win32"
+               else {"start_new_session": True})
+        proc = subprocess.Popen(cli_login_argv("codex", path), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                cwd=_cli_login_cwd(), env=cli_env("codex", path), **how)
+    except Exception as e:
+        _dbg("cli login: codex did not run", type(e).__name__)
+        return "failed"
+    deadline = time.monotonic() + CLI_LOGIN_TIMEOUT_SEC["codex"]
+    ended = None
+    while proc.poll() is None:
+        if cancel is not None and cancel():
+            ended = "cancelled"
+            break
+        if time.monotonic() >= deadline:
+            ended = "timeout"
+            break
+        time.sleep(0.1)
+    if ended is not None:
+        # 먼저 codex 에게 끝내라고 한다(로컬 콜백 서버의 /cancel), 그 뒤에 트리를 끝낸다.
+        try:
+            with urllib.request.urlopen(CODEX_LOGIN_CANCEL_URL, timeout=2):
+                pass
+        except Exception:
+            pass
+        _cli_kill_tree(proc)
+        _dbg("cli login: codex", ended)
+        return ended
+    rc = proc.returncode
+    _dbg("cli login: codex rc", rc)
+    if rc != 0:
+        return "denied"
+    # 여기서는 토큰만 본다 — 직전의 거절 표시(auth_error)는 run_ai_connect 가 성공 뒤에 지운다.
+    return "ok" if read_codex_token(codex_auth_path()) else "failed"
+
+
+def _claude_login_marker():
+    """Claude Code 로그인 저장소의 지문 (키체인 항목이 있는가, 그 mdat, 자격증명 파일의 서명) — 비밀값을
+    읽지 않는다(`-w`·`-g` 없는 find-generic-password, 파일은 stat 만). 모르는 것은 None 으로 둔다."""
+    present, mdat = None, None
+    if sys.platform == "darwin":
+        try:
+            r = subprocess.run(["security", "find-generic-password", "-s", "Claude Code-credentials"],
+                               capture_output=True, text=True, timeout=GEMINI_SECURITY_TIMEOUT)
+            if r.returncode == 0:
+                m = _GEMINI_MDAT_RE.search(r.stdout or "")
+                present, mdat = True, (m.group(1) if m else None)
+            elif r.returncode == 44:
+                present = False
+        except Exception as e:
+            _dbg("cli login: claude marker unknown", type(e).__name__)
+    try:
+        sig = _credentials_sig()
+    except Exception:
+        sig = None
+    return (present, mdat, sig)
+
+
+def _run_claude_login(path, cancel=None):
+    """Claude 는 기존의 떼어 낸 job 경로로 — CLI 가 우리 자식이 아니다(_run_refresh_job).
+    [취소]는 바로 먹는다: 대기 루프가 cancel 을 보고 job 을 내린다("cancelled"). 기한을 넘기면 "timeout"."""
+    if cli_logged_in("claude"):
+        return "already"
+    before = _claude_login_marker()
+    outcome = {}
+    out = _run_refresh_job(login_spawn_argv(path), LOGIN_JOB_LABEL, "login",
+                           CLI_LOGIN_TIMEOUT_SEC["claude"], cancel=cancel, outcome=outcome)
+    if outcome.get("ended") == "cancelled":
+        return "cancelled"
+    if claude_token_present():
+        return "ok"
+    after = _claude_login_marker()
+    if after != before and (after[0] or after[2]):
+        return "ok"               # 키체인 사용자: 토큰은 아직 읽지 않았지만 CLI 가 항목을 다시 썼다
+    if outcome.get("ended") == "timeout":
+        return "timeout"
+    _dbg("cli login: claude left no token; spawned", out is not None)
+    return "failed"
+
+
+def _run_gemini_login(cancel):
+    """보이는 창에서 agy 를 띄우고(start_gemini_login) 로그인 지문이 **바뀔 때까지** 기다린다.
+
+    앱은 agy 를 직접 띄우지 않고, 창을 닫지 않고, 코드를 다루지 않는다. 끝나는 길은 셋: 지문이 바뀌었다
+    ("ok"), 사용자가 취소했다("cancelled"), GEMINI_LOGIN_HINT_SEC 이 지났다("timeout" — "다시 시도" 안내로
+    바뀔 뿐 창은 그대로 둔다; 그 뒤에 로그인을 마치면 조회 경로의 지문 확인이 알아챈다)."""
+    rules = _gemini_edge_rules()
+    before = _gemini_login_marker(rules)
+    start_gemini_login()
+    start = time.monotonic()
+    next_check = start + min(GEMINI_LOGIN_POLL_SEC, 0.5)
+    while True:
+        if cancel is not None and cancel():
+            return "cancelled"
+        now = time.monotonic()
+        if now - start >= GEMINI_LOGIN_HINT_SEC:
+            return "timeout"
+        if now >= next_check:
+            next_check = now + GEMINI_LOGIN_POLL_SEC
+            marker = _gemini_login_marker(rules)
+            if marker is not None:
+                if before is None:
+                    before = marker           # 처음에는 몰랐다 — 지금 본 것을 기준으로 삼는다
+                elif marker != before and _gemini_marker_logged_in(marker):
+                    return "ok"
+        time.sleep(0.1)
+
+
+def run_cli_login(provider, cancel=None):
+    """그 제공자의 공식 로그인을 한 번 → "ok" | "already" | "denied" | "timeout" | "cancelled" | "failed" |
+    "not_installed". 끝날 때까지 막힌다 — 메인 스레드에서 부르지 않는다. 예외를 내지 않는다."""
+    try:
+        path = find_cli(provider)
+        if not path:
+            return "not_installed"
+        if provider == "claude":
+            return _run_claude_login(path, cancel)
+        if provider == "codex":
+            return _run_codex_login(path, cancel)
+        if provider == "gemini":
+            return _run_gemini_login(cancel)
+    except Exception as e:
+        _dbg("cli login: failed", provider, type(e).__name__)
+    return "failed"
+
+
+# ── 설정 "AI 연결" ──
+
+_AI_FAIL_REASONS = ("unsupported", "manifest", "network", "hash", "archive", "signature", "locked",
+                    "denied", "timeout", "failed")
+
+
+def new_ai_job():
+    """한 제공자의 설치·로그인 진행 상태. phase: None | "download" | "verify" | "login" | "failed"."""
+    return {"phase": None, "pct": None, "reason": None}
+
+
+def ai_connect_row(provider, installed, logged_in, job=None):
+    """설정 "AI 연결" 의 한 줄 → {"status", "button", "pct", "hint"} (모두 TR 키, 버튼은 없으면 None). 순수.
+
+    쉬는 상태: 설치 안 됨 [설치] → 로그인 필요 [로그인] → 연결됨(버튼 없음 — Codex 는 로그인 명령이 기존
+    토큰을 지운다). 진행 중: 받는 중 n% / 확인 중 / 로그인 안내 + [취소]. 실패: 짧은 이유 + [다시 시도]."""
+    row = {"status": None, "button": None, "pct": None, "hint": "ai_hint_" + provider}
+    phase = (job or {}).get("phase")
+    if logged_in:
+        row["status"] = "ai_connected"
+    elif phase == "download":
+        row.update(status="ai_downloading", button="ai_btn_cancel", pct=(job or {}).get("pct"))
+    elif phase == "verify":
+        row.update(status="ai_verifying", button="ai_btn_cancel")
+    elif phase == "login":
+        if provider == "gemini":
+            row.update(status="ai_login_paste", button="ai_btn_cancel", hint="ai_gemini_guide")
+        else:
+            row.update(status="ai_login_browser", button="ai_btn_cancel")
+    elif phase == "failed":
+        reason = (job or {}).get("reason")
+        row.update(status="ai_fail_" + (reason if reason in _AI_FAIL_REASONS else "failed"),
+                   button="ai_btn_retry")
+    elif installed:
+        row.update(status="ai_need_login", button="ai_btn_login")
+    else:
+        row.update(status="ai_not_installed", button="ai_btn_install")
+    return row
+
+
+def ai_connect_text(row):
+    """ai_connect_row 의 줄 → (상태 글자, 버튼 글자 또는 None, 안내 글자) — 지금 언어로."""
+    status = t(row["status"])
+    if row["status"] == "ai_downloading":
+        pct = row.get("pct")
+        status = status.replace("{pct}", "%d" % pct if isinstance(pct, (int, float)) else "…")
+    return status, (t(row["button"]) if row.get("button") else None), t(row["hint"])
+
+
+def run_ai_connect(provider, job, cancel=None):
+    """[설치]/[로그인] 한 번: 없으면 받고, 이어서 로그인 창까지 → 결과 문자열. 메인 스레드 밖에서 부른다.
+
+    job(dict)에 진행 상태를 적는다 — 화면이 그것을 읽는다. 실패하면 거기서 멈추고 이유를 남긴다(로그인을
+    스스로 다시 띄우지 않는다). 취소는 실패가 아니다 — 원래 상태로 돌아간다. 성공하면 세 제공자의
+    사용량을 바로 다시 받게 한다."""
+    def finish(result, failed=None):
+        if failed:
+            job.update(phase="failed", pct=None, reason=failed)
+        else:
+            job.update(phase=None, pct=None, reason=None)
+        return result
+
+    try:
+        if not find_cli(provider):
+            job.update(phase="download", pct=None, reason=None)
+
+            def progress(done, total):
+                if total:
+                    pct = int(done * 100 // total)
+                    job.update(phase="verify" if done >= total else "download", pct=min(100, pct))
+
+            ok, res = install_cli(provider, progress=progress, cancel=cancel)
+            if not ok:
+                return finish(res, None if res == "cancelled" else res)
+        if cli_logged_in(provider):
+            return finish("already")
+        job.update(phase="login", pct=None, reason=None)
+        res = run_cli_login(provider, cancel=cancel)
+        if res in ("ok", "already"):
+            _oauth_cache["t"] = 0.0
+            _codex_cache["t"] = 0.0
+            _gemini_cache["auth_failed_marker"] = None
+            request_gemini_refresh()
+            stale_claude = False
+            if res == "ok":
+                # 방금 로그인했다 — 직전 실패가 남긴 표시를 지워 줄이 바로 "연결됨"이 되고 바로 읽게 한다.
+                if provider == "gemini":
+                    _gemini_cache["t"] = 0
+                    _gemini_cache["ok_t"] = time.time()
+                    GEMINI_STATUS["auth_error"] = False
+                elif provider == "codex":
+                    CODEX_STATUS["auth_error"] = False
+                elif provider == "claude":
+                    stale_claude = bool(_oauth_token_cache.get("next_retry") or _oauth_token_cache.get("declined")
+                                        or OAUTH_STATUS.get("auth_error"))
+                    _oauth_token_cache["next_retry"] = 0
+                    _oauth_token_cache["declined"] = False
+                    OAUTH_STATUS["auth_error"] = False
+            out = finish(res)
+            if stale_claude:
+                # 직전 401 의 쿨다운·거절 표시가 새 토큰 읽기를 막고 있었다 — 여기서 한 번 읽어 푼다.
+                # (막힌 것이 없었으면 다음 새로고침이 읽는다. 호출자가 끝나자마자 새로고침을 건다.)
+                try:
+                    fetch_exact_usage()
+                except Exception as e:
+                    _dbg("ai connect: read after login failed", type(e).__name__)
+            return out
+        if res == "cancelled":
+            return finish(res)
+        return finish(res, res if res in _AI_FAIL_REASONS else "failed")
+    except Exception as e:
+        _dbg("ai connect: failed", provider, type(e).__name__)
+        return finish("failed", "failed")
+
+
+def start_ai_connect(provider, job, cancel=None, done=None):
+    """run_ai_connect 를 데몬 스레드에서 돌린다 → 시작했으면 True. 그 제공자의 일이 이미 돌고 있으면
+    (받는 중·확인 중·로그인 중) 아무것도 하지 않는다 — 두 번 눌러도 한 번만 받는다."""
+    if job.get("phase") in ("download", "verify", "login"):
+        return False
+    job.update(phase="login" if find_cli(provider) else "download", pct=None, reason=None)
+
+    def work():
+        result = run_ai_connect(provider, job, cancel=cancel)
+        if done is not None:
+            try:
+                done(result)
+            except Exception as e:
+                _dbg("ai connect: callback failed", type(e).__name__)
+
+    threading.Thread(target=work, daemon=True).start()
+    return True
 
 
 # ─────────────── Codex 세션 로그 (급증 감지 전용) ───────────────
@@ -6808,6 +9083,9 @@ UNINSTALL_PATHS = (
     # 생기고(_update_lock_path 의 주석이 경계하는 바로 그것), 시험이 그 상수를
     # 임시 폴더로 바꿔 끼워도 이쪽만 사용자의 진짜 홈을 가리키게 된다.
     UPDATE_LOCK_DIR,
+    # 앱 전용 bin(앱이 받은 CLI)·staging 이 사는 폴더(계약 v7-I7). 사용자가 깐 CLI 와 각 CLI 의 로그인
+    # 정보(~/.claude, ~/.codex, ~/.gemini)는 여기에 없다 — 그대로 둔다.
+    CLI_APP_BIN_MACOS,
 )
 
 
@@ -7188,10 +9466,11 @@ def worst_pct(rows):
     return max(vals) if vals else None
 
 
-def mood_for(stats, rows=None, runtime=None, codex_rows=None):
+def mood_for(stats, rows=None, runtime=None, codex_rows=None, gemini_rows=None):
     """펫 기분. 어느 제공자든 로그 급증이면 failed, 아니면 서버 사용률로 — 서버 행이 없으면 idle.
 
-    rows 는 Claude 서버 행, codex_rows 는 Codex 행. **필에 보이는 제공자의 고른 게이지만** 센다
+    rows 는 Claude 서버 행, codex_rows 는 Codex 행, gemini_rows 는 Gemini 행(급증 감지는 없다 —
+    사용률만 든다). **필에 보이는 제공자의 고른 게이지만** 센다
     (2026-10-05 2차) — 숨긴 90% 세션 행이 펫을 겁먹게 하면 이유가 화면에 없다.
     로그는 사용률을 말하지 않는다(사양 §1). 그래서 서버 행이 없을 때 로그에서 기분을 만들지 않는다.
     """
@@ -7203,6 +9482,8 @@ def mood_for(stats, rows=None, runtime=None, codex_rows=None):
         shown += filter_claude_rows(list(rows), provider_gauges(rt, "claude")) or []
     if codex_rows and provider_shown(rt, "codex"):
         shown += filter_codex_rows(list(codex_rows), provider_gauges(rt, "codex")) or []
+    if gemini_rows and provider_shown(rt, "gemini"):
+        shown += filter_gemini_rows(list(gemini_rows), provider_gauges(rt, "gemini")) or []
     pct = worst_pct(shown)
     if pct is None:
         return "idle"
@@ -8091,15 +10372,15 @@ def provider_gauges(runtime, provider):
     """이 제공자의 고른 게이지 목록. 목록이 아닌 값(손으로 고친 설정)은 기본값으로 — 숨기지 않는다.
     빈 목록은 유효하다(= 표시 꺼짐)."""
     rt = RUNTIME if runtime is None else runtime
-    allowed = CLAUDE_GAUGES if provider == "claude" else CODEX_GAUGES
+    allowed = {"claude": CLAUDE_GAUGES, "gemini": GEMINI_GAUGES}.get(provider, CODEX_GAUGES)
     value = rt.get(provider + "_gauges", None)
     if not isinstance(value, (list, tuple)):
-        return list(allowed)
+        return list(PROVIDER_GAUGE_DEFAULTS.get(provider, allowed))
     return _gauge_list(value, allowed)
 
 
 def provider_shown(runtime, provider):
-    """이 제공자("claude"|"codex")를 필에 보이는가. 게이지를 하나도 고르지 않았으면 꺼짐과 같다."""
+    """이 제공자("claude"|"codex"|"gemini")를 필에 보이는가. 게이지를 하나도 고르지 않았으면 꺼짐과 같다."""
     rt = RUNTIME if runtime is None else runtime
     return config_bool(rt.get("show_" + provider, True)) and bool(provider_gauges(rt, provider))
 
@@ -8200,6 +10481,76 @@ def codex_summary_segment(runtime, rows, spiking=False, cost_today=None, cost_mo
     if rows:
         return roam_summary_codex(rows, spiking=spiking)
     return ("status", "codex_token_expired") if auth_error else None
+
+
+def gemini_gauge_class(label, buckets=None):
+    """Gemini 행 라벨 → 게이지 이름("gemini" | "limits" | "group"), 모르는 라벨이면 None.
+
+    "gemini" 는 대표 행, "gemini_group:<bucket id>" 는 그 버킷이 Gemini 묶음이면 "limits", 아니면
+    "group". 소속은 버킷 표(buckets — 주지 않으면 GEMINI_BUCKETS)에서 읽고, id 의 모양에서 짐작하지
+    않는다. 표에 없는 버킷은 "group" 이다."""
+    if label == "gemini":
+        return "gemini"
+    if isinstance(label, str) and label.startswith("gemini_group:"):
+        table = GEMINI_BUCKETS if buckets is None else buckets
+        entry = table.get(label[len("gemini_group:"):])
+        return "limits" if entry and entry[1] else "group"
+    return None
+
+
+def filter_gemini_rows(rows, gauges, buckets=None):
+    """고른 게이지의 Gemini 행만, 행 순서 그대로. None 은 None, 모르는 라벨은 버린다."""
+    if rows is None:
+        return None
+    chosen = set(gauges or ())
+    return [r for r in rows if gemini_gauge_class(r[0], buckets) in chosen]
+
+
+def gemini_row_label(label, buckets=None):
+    """Gemini 행 라벨 → 필에 보일 글자. 창(window)은 버킷 표에서 읽는다 — bucket id 의 모양은 읽지 않는다.
+
+      · "gemini" → t("gemini") ("Gemini", 모든 로케일 같음).
+      · Gemini 묶음의 "gemini_group:<bucket id>" → 창이 "5h" 면 t("gemini_5h"), "weekly" 면 t("weekly"),
+        모르는 창이면 t("gemini").
+      · 나머지 묶음의 "gemini_group:<bucket id>" → t("gemini_group_5h") / t("gemini_group_weekly"),
+        모르는 창이면 t("gemini_group").
+    """
+    if label == "gemini":
+        return t("gemini")
+    if label.startswith("gemini_group:"):
+        table = GEMINI_BUCKETS if buckets is None else buckets
+        window, is_gemini = table.get(label[len("gemini_group:"):]) or (None, False)
+        if is_gemini:
+            return t({"5h": "gemini_5h", "weekly": "weekly"}.get(window, "gemini"))
+        return t({"5h": "gemini_group_5h", "weekly": "gemini_group_weekly"}.get(window, "gemini_group"))
+    return label
+
+
+def gemini_summary_segment(runtime, rows, auth_error=False, last_error=None, buckets=None):
+    """Gemini 구간 하나(표시 설정·게이지 선택 반영). 보일 게 없으면 None — codex_summary_segment 의 짝.
+
+    어댑터의 gemini_summary 훅이 부른다(RUNTIME, state["gemini"], GEMINI_STATUS, GEMINI_BUCKETS —
+    buckets 를 주지 않으면 모듈 표). 고른 게이지의 행을 **행 순서대로**(서버 순서 — 게이지 순서로 다시
+    묶지 않는다), 라벨은 gemini_row_label 로, 리셋은 지금 기준 카운트다운으로. Gemini 에는 급증 감지가
+    없으므로 ▲ 칸은 언제나 False 다. **Gemini 에는 상태 구간이 없다**: 행이 없으면 — 로그인 안 됨
+    (auth_error), agy 없음, 일시 실패, 아직 안 받음, 무엇이든 — None 이다. 로그인은 우클릭 메뉴가
+    안내한다(대표님: "로그인 안 하면 표시 안 하면 되는 거야"). 0% 블록을 지어내지 않는다. auth_error 와
+    last_error 는 부르는 쪽의 모양을 지키려고 받기만 한다.
+    """
+    rt = RUNTIME if runtime is None else runtime
+    if not provider_shown(rt, "gemini"):
+        return None
+    picked = filter_gemini_rows(rows if isinstance(rows, list) else None,
+                                provider_gauges(rt, "gemini"), buckets)
+    if picked:
+        now_utc = datetime.now(timezone.utc)
+        out = []
+        for row in picked:
+            label, pct, reset_dt, reset_text = (list(row) + [None, None])[:4]
+            shown = fmt_countdown(reset_dt, now_utc) if reset_dt is not None else (reset_text or None)
+            out.append((gemini_row_label(label, buckets), float(pct), False, shown))
+        return ("exact", out)
+    return None
 
 
 def settings_cache_resets(prev, new):
@@ -8618,7 +10969,7 @@ SUMMARY_LOGO_W = SUMMARY_LOGO_MARK + SUMMARY_LOGO_GAP
 # 셋 중 하나라도 빠지면 소스 실행은 멀쩡한데 번들에서만 로고가 사라진다. fonts/ 가 정확히
 # 그 실패를 한 적이 있다.
 SUMMARY_LOGO_DIR = "logos"
-SUMMARY_LOGO_FILES = {"claude": "claude.svg", "codex": "openai.svg"}
+SUMMARY_LOGO_FILES = {"claude": "claude.svg", "codex": "openai.svg", "gemini": "gemini.svg"}
 # openai.svg 는 fill="currentColor" 라 색을 우리가 정해야 한다 — 안 정하면 검게 칠해져
 # 어두운 필 배경에서 사라진다. Claude 마크는 자체 컬러를 갖고 있어 이 비대칭이 생긴다.
 # 필 본문 글자색과 같은 값을 준다: 두 마크의 시각적 무게가 맞고, 어느 배경에서도 보인다.
@@ -8934,6 +11285,9 @@ def run_gui():
              # codex: Codex(OpenAI) 사용량 행 또는 None. None 이면 구간 자체를 안 붙인다 —
              # Codex 를 안 쓰는 사용자에게 0% 행을 보여 주지 않기 위해서다.
              "codex": None,
+             # gemini: Gemini(agy) 사용량 행 또는 None — Codex 와 같은 규칙. 주 새로고침과 따로
+             # start_gemini_refresh 가 자기 스레드에서 채운다.
+             "gemini": None,
              # api_error / api_stale: 마지막 비용 조회가 어떻게 실패했는가(새로고침 워커가
              # api_error_kind 로 갈라 세운다). 비어 있는 숫자를 'loading' 이라 부를지,
              # '키가 거부됨' 이라 부를지, '일시적으로 못 가져옴' 이라 부를지를 가른다.
@@ -8969,6 +11323,9 @@ def run_gui():
              # Codex 를 필에 보이는데 토큰이 없을 때: None|'install'|'login'
              # (compute_codex_onboard_state). 우클릭 메뉴가 읽는다.
              "codex_onboard": None,
+             # Gemini 를 필에 보이는데 agy 에 로그인이 안 돼 있을 때: None|'login'
+             # (compute_gemini_onboard_state — start_gemini_refresh 가 맞춘다). 우클릭 메뉴가 읽는다.
+             "gemini_onboard": None,
              # Codex API 모드의 오늘·이달 비용과 마지막 조회 실패 종류(키 거부/일시 실패).
              "codex_cost": None, "codex_cost_month": None,
              "codex_api_error": False, "codex_api_stale": False,
@@ -8999,6 +11356,12 @@ def run_gui():
         state.get("codex_cost"), state.get("codex_cost_month"),
         bool(state.get("codex_api_error")), bool(state.get("codex_api_stale")),
         auth_error=bool(CODEX_STATUS.get("auth_error")))
+    # Gemini 구간 훅 — Codex 의 짝. 급증 감지가 없으므로 provider_spiking 을 넘기지 않는다.
+    # GEMINI_BUCKETS(버킷의 창과 Gemini 묶음 소속)가 게이지와 라벨을 고른다. 행이 없으면 구간도 없다 —
+    # 로그인 안 됨(GEMINI_STATUS)은 필이 아니라 우클릭 메뉴(state["gemini_onboard"])가 알린다.
+    state["gemini_summary"] = lambda: gemini_summary_segment(
+        RUNTIME, state.get("gemini"), auth_error=bool(GEMINI_STATUS.get("auth_error")),
+        last_error=GEMINI_STATUS.get("last_error"), buckets=GEMINI_BUCKETS)
     sticky = {"on": False}
     ui = {}   # 설정 창 위젯 참조 (GC 방지)
     def _run_update_check():
@@ -9058,7 +11421,8 @@ def run_gui():
         # 서버 %가 기준이다(Claude·Codex 중 보이는 쪽). 서버 행이 없으면 idle —
         # 로그에서 기분을 만들지 않는다(사양 §1).
         # 제공자별로 따로 넘긴다 — 각자 자기 게이지 선택으로 걸러진다(mood_for).
-        return mood_for(None, state["oauth"], codex_rows=state.get("codex"))
+        return mood_for(None, state["oauth"], codex_rows=state.get("codex"),
+                        gemini_rows=state.get("gemini"))
 
     # ── 필 그리기 헬퍼 (클래스 밖: PyObjC 셀렉터 변환 회피) ──
     class PetView(NSView):
@@ -9368,6 +11732,13 @@ def run_gui():
             # Codex 도 Claude 와 같은 모양(사양 §7). 먼저 넣어서 Claude 항목 **아래**에 놓인다 —
             # 둘 다 맨 위(0)에 끼워 넣으므로 나중에 넣은 쪽이 위로 간다. Pets 서브메뉴 인덱스는
             # 이미 위에서 끼워 넣었으니 영향이 없다.
+            # Gemini 로그인 — 가장 먼저 넣어서 Codex·Claude 항목 아래에 놓인다.
+            if state.get("gemini_onboard") == "login":
+                top = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                    t("menu_gemini_login"), "loginGemini:", "")
+                top.setTarget_(handler)
+                menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 0)
+                menu.insertItem_atIndex_(top, 0)
             cob = state.get("codex_onboard")
             if cob:
                 title, action = ((t("menu_install_codex"), "installCodex:")
@@ -9641,6 +12012,7 @@ def run_gui():
         oauth = state["oauth"]
         show_claude = provider_shown(RUNTIME, "claude")
         show_codex = provider_shown(RUNTIME, "codex")
+        show_gemini = provider_shown(RUNTIME, "gemini")
         key = (RUNTIME["mode"], L["lang"], state.get("onboard"), id(stats), id(oauth), state["cost"],
                state["cost_month"], RUNTIME.get("api_budget"), bool(OAUTH_STATUS.get("auth_error")),
                bool(state.get("api_error")), bool(state.get("api_stale")),
@@ -9651,6 +12023,8 @@ def run_gui():
                state.get("codex_cost"), state.get("codex_cost_month"),
                bool(state.get("codex_api_error")), bool(state.get("codex_api_stale")),
                bool(CODEX_STATUS.get("auth_error")),
+               id(state.get("gemini")), show_gemini, tuple(RUNTIME.get("gemini_gauges") or ()),
+               bool(GEMINI_STATUS.get("auth_error")), GEMINI_STATUS.get("last_error"),
                int(_time.time() / 5))
         if _summary_memo["key"] == key:
             return _summary_memo["value"]
@@ -9682,7 +12056,9 @@ def run_gui():
         # 범위가 그대로 유지된다. 훅이 없거나 읽을 게 없으면 구간 자체가 없다 — 0% 를 지어내지 않는다.
         codex_hook = state.get("codex_summary")
         codex_seg = codex_hook() if codex_hook else None
-        # Codex 만 쓰는 사용자에게 "Claude Code 미설치/로그인 필요"를 계속 들이밀지 않는다 —
+        gemini_hook = state.get("gemini_summary")
+        gemini_seg = gemini_hook() if gemini_hook else None
+        # Codex(또는 Gemini)만 쓰는 사용자에게 "Claude Code 미설치/로그인 필요"를 계속 들이밀지 않는다 —
         # Codex 행이 실제로 뜬다면(= 그 제공자를 켜서 쓰고 있다는 뜻) 온보딩 안내는 그 사람에게
         # 할 일이 없는 문구다(설치 버튼을 눌러도 되는 건 여전하지만, 강요할 이유가 없다).
         # 토큰 만료·조회 중 같은 다른 status 는 그대로 둔다 — 저건 "Claude Code 를 쓰다가
@@ -9690,7 +12066,8 @@ def run_gui():
         claude_onboarding_suppressed = (
             segment is not None
             and segment[0] == "status" and segment[1] in ("onb_install", "onb_login")
-            and bool(codex_seg) and codex_seg[0] != "status"
+            and ((bool(codex_seg) and codex_seg[0] != "status")
+                 or (bool(gemini_seg) and gemini_seg[0] != "status"))
         )
         # 지금 떠 있는 상태 키를 남긴다 — mouseUp_ 이 클릭의 뜻을 고를 때 쓴다.
         # 상태 문구가 아니면 None 이라, 숫자가 떠 있는 필의 클릭은 아무 뜻도 갖지 않는다.
@@ -9719,13 +12096,15 @@ def run_gui():
         # 필요해진다 — 그때는 이 한 줄이 갈라져야 한다.)
         fetched = isinstance(state.get("stats"), dict)
         kinds = {}
-        for pid, seg in (("claude", segment), ("codex", codex_seg)):
+        for pid, seg in (("claude", segment), ("codex", codex_seg), ("gemini", gemini_seg)):
             if not seg:
                 continue                    # 꺼졌거나 보일 게 없는 제공자 — 블록이 없다
             # Codex 의 API 모드 상태(codex_need_admin_key 등)는 그 제공자의 할 일이라 Codex
             # 블록으로 보인다. 그 밖의 Codex 상태(조회 중 등)는 블록을 만들지 않는다.
-            codex_own = pid == "codex" and seg[0] == "status" and str(seg[1]).startswith("codex_")
-            if seg[0] != "status" or codex_own:
+            # Gemini 는 지금 상태 구간을 내지 않지만(gemini_summary_segment) 낸다면 같은 규칙이다.
+            own_status = (pid in ("codex", "gemini") and seg[0] == "status"
+                         and str(seg[1]).startswith(pid + "_"))
+            if seg[0] != "status" or own_status:
                 kinds[pid] = ("ready", seg)
             elif not fetched:
                 kinds[pid] = ("loading", ("status", "loading"))
@@ -9734,7 +12113,7 @@ def run_gui():
         if not kinds:
             # 보일 제공자가 없다. 둘 다 꺼 두었으면 그렇다고 말하고(설정으로 가는 클릭),
             # 켜 둔 쪽이 아직 아무것도 못 냈으면 기다리는 중이다.
-            key_ = "no_providers" if not (show_claude or show_codex) else (
+            key_ = "no_providers" if not (show_claude or show_codex or show_gemini) else (
                 "scanning" if fetched else "loading")
             groups = [(None, [("status", key_)])]
             if key_ == "no_providers":
@@ -9744,7 +12123,7 @@ def run_gui():
             groups = [(None, [("status", "loading")])]
         else:
             groups = []
-            for pid in ("claude", "codex"):
+            for pid in ("claude", "codex", "gemini"):
                 kind, seg = kinds.get(pid, ("absent", None))
                 if kind == "ready":
                     groups.append((pid, [seg]))
@@ -10138,6 +12517,46 @@ def run_gui():
         subprocess.Popen(["/usr/bin/open", USER_PETS_DIR])
 
     # ── 설정 창 ──
+    # ── AI 연결: 세 CLI 의 설치·로그인(계약 v7-I). 진행 상태는 제공자마다 job 하나, 취소는 Event 하나 ──
+    ai_jobs = {p: new_ai_job() for p in CLI_PROVIDERS}
+    ai_cancel = {p: threading.Event() for p in CLI_PROVIDERS}
+
+    def ai_done(_result):
+        """설치·로그인이 끝났다(워커 스레드) — 바로 사용량을 다시 받고 화면을 고친다."""
+        state["repaint"] = True
+        try:
+            ticker.performSelectorOnMainThread_withObject_waitUntilDone_("refresh:", None, False)
+        except Exception as e:
+            _dbg("ai connect: refresh not requested", type(e).__name__)
+
+    def ai_idle(provider):
+        """그 제공자의 설치·로그인이 돌고 있지 않은가. 도는 중에는 취소 깃발을 지우지 않는다 — 방금 누른
+        [취소]가 지워져 받기·로그인이 계속된다."""
+        return ai_jobs[provider].get("phase") not in ("download", "verify", "login")
+
+    def ai_connect_click(provider):
+        """"AI 연결" 줄의 버튼 — 돌고 있으면 [취소], 아니면 [설치]/[로그인]/[다시 시도]."""
+        if not ai_idle(provider):
+            ai_cancel[provider].set()
+            return
+        ai_cancel[provider].clear()
+        start_ai_connect(provider, ai_jobs[provider], cancel=ai_cancel[provider].is_set, done=ai_done)
+        ai_rows_refresh()
+
+    def ai_rows_refresh():
+        """열려 있는 설정 창의 "AI 연결" 세 줄을 지금 상태로 고친다(메인 스레드)."""
+        rows = ui.get("ai_rows")
+        if not rows or not ui.get("panel"):
+            return
+        for p, w in rows.items():
+            row = ai_connect_row(p, bool(find_cli(p)), cli_logged_in(p), ai_jobs[p])
+            status, button, hint = ai_connect_text(row)
+            w["status"].setStringValue_(status)
+            w["hint"].setStringValue_(hint)
+            w["button"].setHidden_(button is None)
+            if button is not None:
+                w["button"].setTitle_(button)
+
     def open_settings():
         interrupt = state.get("roam_interrupt")   # 설정 창은 명시적 중단: 요약 래치 해제
         if interrupt is not None:
@@ -10148,9 +12567,11 @@ def run_gui():
             return
         # 높이 예산: 1366x768 이 최소 지원 화면이고, 메뉴 바(25)와 Dock 을 빼면
         # 세로로 쓸 수 있는 것은 약 673 이다. 타이틀 바까지 더해도 안전하도록
-        # 내용 높이는 **656 을 넘기지 않는다.** 제공자 두 구역(Claude Code·Codex)이
-        # 같은 모양으로 들어가고, 보정·한도·고급 창은 2026-10-05 에 없어졌다.
-        PWID, PHT = 420, 568   # 맨 아래 체크(인사)가 y=72 — 저장 버튼(12..42) 위
+        # 내용 높이는 **656 을 넘기지 않는다.** 제공자 세 구역(Claude Code·Codex·Gemini)이
+        # 들어가고(Gemini 는 표시와 게이지만), 보정·한도·고급 창은 2026-10-05 에 없어졌다.
+        # 폭: 왼쪽 420 은 예전 그대로(제공자 구역·공통), 오른쪽 400 이 "AI 연결" 구역이다 — 높이 예산을
+        # 다 썼기 때문에 아래가 아니라 옆에 둔다.
+        PWID, PHT = 820, 652   # 맨 아래 체크(인사)가 y=72 — 저장 버튼(12..42) 위
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, PWID, PHT),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
@@ -10264,8 +12685,22 @@ def run_gui():
         label(t("s_codex_budget"), 20, y)
         f_cbud = field(180, y - 2, 90, RUNTIME.get("codex_budget") or 0)
 
-        # ── 공통 ──
+        # ── Gemini 구역 (표시 + 게이지 셋 — 데이터 출처·키는 없다: agy 에게 묻는다) ──
         y -= 42
+        show_gemini = section(t("s_sec_gemini"), "show_gemini", y)
+        y -= 30
+        label(t("s_gauges"), 20, y)
+        gemini_title = {"gemini": t("s_gauge_gemini"), "limits": t("s_gauge_limits"),
+                        "group": t("s_gauge_group")}
+        chosen = set(provider_gauges(RUNTIME, "gemini"))
+        gemini_g = {}
+        for n, g in enumerate(GEMINI_GAUGES):
+            # Claude 게이지와 같은 2열 격자 — 셋째 칸은 둘째 줄 왼쪽
+            gx, gy = 180 + (n % 2) * 120, y - (n // 2) * 24
+            gemini_g[g] = check(gemini_title[g], gx, gy, 116, g in chosen)
+
+        # ── 공통 ──
+        y -= 54
         label(t("s_spike_sens"), 20, y)
         m = RUNTIME.get("spike_mult", 1.0)
         sens = popup(180, y, 220, [t("s_sens_high"), t("s_sens_normal"), t("s_sens_low")],
@@ -10273,11 +12708,37 @@ def run_gui():
         y -= 32
         greet = check(t("s_greet"), 20, y, 380, RUNTIME.get("greet"))
 
+        # ── AI 연결 (오른쪽 칸) — 줄마다 이름·상태·버튼 하나·안내 한 줄. 글자와 버튼은 ai_connect_row 가
+        #    정하고 ai_rows_refresh 가 1초마다 고친다. ──
+        ax = 440
+        head = label(t("ai_sec"), ax, PHT - 40, 300)
+        head.setFont_(NSFont.boldSystemFontOfSize_(13))
+        ai_rows = {}
+        for n, p in enumerate(CLI_PROVIDERS):
+            top = PHT - 78 - n * AI_ROW_PITCH
+            name = label(AI_PROVIDER_NAMES[p], ax, top, 230)
+            name.setFont_(NSFont.boldSystemFontOfSize_(12))
+            status_l = label("", ax, top - 24, 240)
+            btn = NSButton.alloc().initWithFrame_(NSMakeRect(PWID - 130, top - 16, 110, 30))
+            btn.setBezelStyle_(1)
+            btn.setTag_(n)
+            btn.setTarget_(handler)
+            btn.setAction_("aiConnect:")
+            cv.addSubview_(btn)
+            hint_l = label("", ax, top - 76, 360, 46)
+            hint_l.setFont_(NSFont.systemFontOfSize_(11))
+            hint_l.setTextColor_(NSColor.secondaryLabelColor())
+            hint_l.cell().setWraps_(True)
+            # 한글을 낱말 단위로 끊는다(기본은 글자 단위라 "받습니/다" 처럼 갈린다). macOS 11 이상.
+            if hint_l.respondsToSelector_("setLineBreakStrategy:"):
+                hint_l.setLineBreakStrategy_(0xFFFF)      # NSLineBreakStrategyStandard — 한글 낱말 우선 포함
+            ai_rows[p] = {"status": status_l, "button": btn, "hint": hint_l}
+
         vl = label(f"ClaudePet v{APP_VERSION}", 20, 18, 200)
         vl.setTextColor_(NSColor.secondaryLabelColor())
 
         save_btn = NSButton.alloc().initWithFrame_(
-            NSMakeRect(PWID - 110, 12, 90, 30))
+            NSMakeRect(420 - 110, 12, 90, 30))   # 왼쪽 칸의 오른쪽 끝 — 예전 자리 그대로
         save_btn.setTitle_(t("s_save"))
         save_btn.setBezelStyle_(1)
         save_btn.setTarget_(handler)
@@ -10289,7 +12750,10 @@ def run_gui():
                    "show_claude": show_claude, "claude_g": claude_g,
                    "show_codex": show_codex, "codex_mode": codex_mode, "codex_g": codex_g,
                    "okey": f_okey, "cbud": f_cbud,
+                   "show_gemini": show_gemini, "gemini_g": gemini_g,
+                   "ai_rows": ai_rows,
                    "pet": pet_pop, "pet_ids": pet_ids})
+        ai_rows_refresh()
         panel.makeKeyAndOrderFront_(None)
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
 
@@ -10300,6 +12764,7 @@ def run_gui():
             p.setDelegate_(None)
             p.orderOut_(None)
         ui["panel"] = None        # 다음에 열 때 새 언어로 재구성
+        ui["ai_rows"] = None
 
     def settings_error(msg):
         """저장 실패 안내. 패널은 열어 둔 채, 설정/RUNTIME/state 는 그대로 둔다."""
@@ -10336,6 +12801,12 @@ def run_gui():
             "openai_admin_key": str(ui["okey"].stringValue()).strip(),
             "codex_budget": ui["cbud"].stringValue(),
         }
+        # Gemini 위젯은 있을 때만 읽는다 — 없으면 키를 싣지 않고, plan_settings_save 가 저장된 값을
+        # 그대로 둔다(창 없는 시험이 만든 가짜 ui 에는 Gemini 위젯이 없다).
+        if ui.get("show_gemini") is not None:
+            form["show_gemini"] = bool(ui["show_gemini"].state())
+        if ui.get("gemini_g"):
+            form["gemini_gauges"] = [g for g, b in ui["gemini_g"].items() if b.state()]
         plan, err = plan_settings_save(cfg, form)
         if err:
             settings_error(err)     # 창은 열어 둔 채, 아무것도 바뀌지 않았다
@@ -10460,19 +12931,45 @@ def run_gui():
         def quitApp_(self, sender):
             NSApplication.sharedApplication().terminate_(None)
 
+        # 설치·로그인 다섯 항목은 Terminal 을 열지 않는다(계약 v7-I1) — 설정의 "AI 연결"과 같은 흐름을
+        # 시작하고, 진행 상황과 [취소]가 보이게 설정 창을 연다.
         def installClaude_(self, sender):
-            # Terminal 에서 설치+로그인. 끝나면 다음 refresh 가 자동으로 감지한다.
-            start_claude_install()
+            if ai_idle("claude"):
+                ai_cancel["claude"].clear()
+                start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set, done=ai_done)
+            open_settings()
 
         def loginClaude_(self, sender):
-            start_claude_login()
+            if ai_idle("claude"):
+                ai_cancel["claude"].clear()
+                start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set, done=ai_done)
+            open_settings()
 
         def installCodex_(self, sender):
-            # Terminal 에서 npm 설치 + codex login. 끝나면 다음 refresh 가 토큰을 감지한다.
-            start_codex_install()
+            if ai_idle("codex"):
+                ai_cancel["codex"].clear()
+                start_ai_connect("codex", ai_jobs["codex"], cancel=ai_cancel["codex"].is_set, done=ai_done)
+            open_settings()
 
         def loginCodex_(self, sender):
-            start_codex_login()
+            if ai_idle("codex"):
+                ai_cancel["codex"].clear()
+                start_ai_connect("codex", ai_jobs["codex"], cancel=ai_cancel["codex"].is_set, done=ai_done)
+            open_settings()
+
+        def loginGemini_(self, sender):
+            # 보이는 창에서 agy 가 뜬다(run_cli_login → start_gemini_login). 설정 창의 Gemini 줄이 할 일을
+            # 안내하고, 로그인이 끝나면 지문 변화로 알아챈다.
+            if ai_idle("gemini"):
+                ai_cancel["gemini"].clear()
+                start_ai_connect("gemini", ai_jobs["gemini"], cancel=ai_cancel["gemini"].is_set, done=ai_done)
+            open_settings()
+
+        def aiConnect_(self, sender):
+            # 설정 "AI 연결" 줄의 버튼. 태그가 제공자의 차례다.
+            n = int(sender.tag())
+            if 0 <= n < len(CLI_PROVIDERS):
+                ai_connect_click(CLI_PROVIDERS[n])
 
         def uninstallApp_(self, sender):
             app = app_bundle_path()
@@ -10615,25 +13112,22 @@ def run_gui():
     def _summary_click_work(act):
         """필 클릭이 고른 일을 실제로 한다(백그라운드 스레드).
 
-        login 은 터미널 없는 경로를 먼저 쓰고, launchd 가 받아 주지 않으면 예전의
-        터미널 창 경로로 내려간다 — 눌렀는데 아무 일도 안 일어나는 것보다는 창이 낫다.
-        install 은 그대로 터미널이다: curl | bash 는 사용자가 보고 있어야 하는 일이다.
+        login·install 은 설정의 "AI 연결"과 같은 흐름이다(계약 v7-I1) — Terminal 을 열지 않는다. 없으면
+        공식 CLI 를 받아 확인하고, 이어서 브라우저 로그인까지 간다. 진행 상황이 보이게 설정 창을 연다.
 
-        recover 도 같은 원칙이다. 복구가 'claude 를 못 찾겠다'로 끝나면 그대로 조용히
-        끝내지 않고 설치 경로를 연다 — 누른 사람에게는 그게 유일하게 남은 길이다.
-        이 분기가 실제로 닿는 사용자는 claude 를 _find_claude_cli() 가 보는 다섯 자리
-        밖에 둔 사람들이다(nvm·fnm·volta·asdf, 커스텀 npm prefix). Finder 로 띄운
-        LSUIElement 앱은 PATH 가 빈약해 shutil.which 가 그들을 못 본다.
+        recover 도 같은 원칙이다. 복구가 'claude 를 못 찾겠다'로 끝나면 그대로 조용히 끝내지 않고
+        같은 흐름을 시작한다 — 누른 사람에게는 그게 유일하게 남은 길이다.
         """
         allow_keychain_prompt()   # 사용자가 필을 눌렀다 — 이 직후에만 키체인 창이 뜰 수 있다
         try:
-            if act == "recover":
-                if _recovery_step(force=True) == "onboard_install":
-                    start_claude_install()
-            elif act == "install":
-                start_claude_install()
-            elif act == "login" and not start_claude_login_background():
-                start_claude_login()
+            if act == "recover" and _recovery_step(force=True) != "onboard_install":
+                return
+            if act in ("recover", "install", "login"):
+                if ai_idle("claude"):
+                    ai_cancel["claude"].clear()
+                    start_ai_connect("claude", ai_jobs["claude"], cancel=ai_cancel["claude"].is_set,
+                                     done=ai_done)
+                handler.performSelectorOnMainThread_withObject_waitUntilDone_("openSettings:", None, False)
         except Exception as e:
             _dbg("summary click: failed", act, type(e).__name__)
 
@@ -10722,6 +13216,11 @@ def run_gui():
             if state["repaint"]:
                 state["repaint"] = False
                 dirty = True
+            # 설정 창이 열려 있으면 "AI 연결" 줄을 1초에 한 번 고친다(받는 중 n%·로그인 안내).
+            if ui.get("ai_rows"):
+                ui["ai_tick"] = ui.get("ai_tick", 0) + 1
+                if ui["ai_tick"] % 20 == 0:
+                    ai_rows_refresh()
             # 필 폭이 바뀌었으면 논리 창을 먼저 맞춘다 — 요약 경로는 기록만 하고
             # 창은 건드리지 않으므로(그쪽은 창 없이 시험된다) 반영은 여기가 한다.
             if _regeom():
@@ -10733,6 +13232,11 @@ def run_gui():
             # 이 요청의 세대 번호. 다 계산한 뒤 여전히 최신 세대일 때만 state 에
             # 넣는다 — 느린 옛 요청이 새 요청의 결과를 덮어쓰지 않도록.
             gen = begin_refresh_generation(state)
+            # Gemini 는 이 패스 밖에서, 자기 스레드로 받는다(보일 때만) — 멈춘 agy 가
+            # Claude·Codex 값을 붙들지 않게(start_gemini_refresh).
+            start_gemini_refresh(state)
+            # 앱이 깐 CLI 의 하루 한 번 갱신 — 확인할 차례가 아니면 아무것도 하지 않는다.
+            start_app_cli_updates()
 
             def work():
                 try:

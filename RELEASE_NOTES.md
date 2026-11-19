@@ -79,6 +79,12 @@ macOS 12+ (Apple Silicon · Intel con el zip universal) · autocontenido
      단가·창·중복 제거를 실제로 건드리는 릴리즈에서는 CLAUDE.md 의 Danger zone 대로
      반드시 ⚠️ 다시 보정 안내를 넣으세요. -->
 
+**v1.2.0**
+
+- 설정 창 "AI 연결"에서 Claude Code·Codex·Gemini CLI를 [설치] 한 번으로 받고 로그인 창까지 이어집니다. 공식 서버에서 받아 서명을 확인한 뒤 앱 전용 폴더에 두고 PATH는 바꾸지 않습니다.
+- Gemini (Antigravity) 사용량을 macOS와 Windows 필에 표시합니다. 로그인하지 않았으면 표시하지 않고, 앱이 브라우저를 멋대로 열지 않습니다.
+- Gemini 로그인은 열린 창에 브라우저에서 받은 코드를 붙여 넣으면 끝납니다. Gemini를 API 키로 보는 방식은 아직 없습니다.
+
 **v1.1.2**
 
 - macOS에서 사용량 표시에 게이지가 하나뿐이면 끝(리셋까지 남은 시간)이 잘리던 문제를 고쳤습니다. 이제 표시가 내용에 맞춰 넓어집니다.
