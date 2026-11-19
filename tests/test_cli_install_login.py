@@ -1348,6 +1348,18 @@ class GeminiLoginTests(LoginCase):
         self.windows = []
         self._window_patch = mock.patch.object(claude_pet, "start_gemini_login", self._window)
         self._patch(self._window_patch)
+        for d in (claude_pet._gemini_cache, claude_pet.GEMINI_STATUS):
+            snap = dict(d)
+            self.addCleanup(lambda d=d, snap=snap: (d.clear(), d.update(snap)))
+        claude_pet._gemini_cache.update(auth_failed_marker=None, login=None, ok_t=None, rows=None)
+        claude_pet.GEMINI_STATUS.update(auth_error=False, last_error=None)
+
+    def demanded(self):
+        """TOK-61: 로그인 정보(옛 지문)가 있으면 agy 가 **로그인을 요구한 뒤**에만 창이 뜬다. 그 상태를 만든다 —
+        agy 가 지금 지문에서 로그인을 요구해 자동 실행이 멈춰 있다."""
+        marker = claude_pet._gemini_login_marker(claude_pet._gemini_edge_rules())
+        claude_pet._gemini_cache.update(login=True, marker=marker, auth_failed_marker=marker)
+        claude_pet.GEMINI_STATUS.update(auth_error=True, last_error="login")
 
     def _window(self, *a, **k):
         self.windows.append((a, k))
@@ -1380,7 +1392,9 @@ class GeminiLoginTests(LoginCase):
     def test_login_opens_the_visible_window_and_succeeds_when_the_marker_changes(self):
         """I5(대표님 결정 2026-11-19): Gemini [로그인] = **보이는 창**(`start_gemini_login`)을 열고, 지문(키체인
         mdat)이 **바뀌면** 바로 "ok". 앱은 agy 를 직접 띄우지 않고, 창을 죽이지 않고, 코드를 다루지 않는다.
-        지문이 이미 있어도(agy 는 로그아웃해도 항목을 남긴다) 바뀌기 전에는 성공이 아니다.
+        지문이 이미 있어도(agy 는 로그아웃해도 항목을 남긴다) 바뀌기 전에는 성공이 아니다. 옛 지문이 있는
+        경우는 agy 가 로그인을 요구한 뒤다(TOK-61 — 요구가 없으면 창을 띄우지 않는다:
+        tests/test_gemini_login_check.py).
         Rivals: 파이프 90초 실행기(코드를 붙여 넣을 곳이 없다); 지문이 "있으면" 성공(누르자마자 연결됨);
         창을 안 엶; 지문이 바뀐 뒤에도 끝까지 기다림."""
         for name, before in (("처음 로그인(지문 없음)", None), ("다시 로그인(옛 지문 있음)", "20261101000000Z")):
@@ -1391,6 +1405,7 @@ class GeminiLoginTests(LoginCase):
                         os.unlink(self.kc)
                 else:
                     self.marker(before)
+                    self.demanded()
                 self.later(0.7, "20261119010203Z")
                 got, took = self.timed_login()
                 self.assertEqual(got, "ok")
@@ -1404,6 +1419,7 @@ class GeminiLoginTests(LoginCase):
         ("다시 시도" 안내 — 표시용)을 돌려줄 뿐, 창도 프로세스도 건드리지 않는다. 취소는 오류가 아니다.
         Rivals: 90초에 끊음; 시간이 지나면 창을 닫음/agy 를 죽임; 취소를 눌러도 기다림; 취소를 실패로."""
         self.marker("20261101000000Z")
+        self.demanded()
         flag = threading.Event()
         timer = threading.Timer(0.5, flag.set)
         timer.daemon = True
@@ -1699,7 +1715,8 @@ class RunAiConnectTests(unittest.TestCase):
                 self.assertEqual(self.connect(p), "ok")
                 self.assertEqual([(w, pp) for w, pp, _ph in self.log], [("install", p), ("login", p)])
                 self.assertEqual(self.log[0][2], "download")
-                self.assertEqual(self.log[1][2], "login")
+                # TOK-61: Gemini 는 창을 띄우기 전에 로그인돼 있는지부터 본다 — 그동안은 "verify"(확인 중).
+                self.assertEqual(self.log[1][2], "verify" if p == "gemini" else "login")
                 self.assertEqual(self.phases[0], ("download", 25))
                 self.assertIn(self.phases[1][0], ("download", "verify"))
                 self.assertIsNone(self.job.get("phase"), "끝났는데 job 이 진행 중으로 남았다")
