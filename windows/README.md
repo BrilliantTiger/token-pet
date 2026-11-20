@@ -231,7 +231,7 @@ python windows\build_win.py
 | `store` | `/sha1 <지문>` | `CLAUDE_PET_WIN_CERT_SHA1` | 인증서 저장소·USB 토큰의 OV/EV 인증서. 토큰 PIN 프롬프트가 뜨므로 무인 실행이 아니다 |
 | `trusted` | `/dlib <dll> /dmdf <json>` | `CLAUDE_PET_WIN_DLIB`, `CLAUDE_PET_WIN_DMDF` (+ Azure 자격 증명은 signtool 이 환경에서 읽음) | Azure Trusted Signing |
 
-**사용자가 직접 얻어야 하는 것** — 에이전트는 어느 것도 얻거나 보관하거나 쓸 수 없다(macOS 의 서명·공증과 같은 `[ASK-OP]` 분리):
+**사용자가 직접 얻어야 하는 것** — 에이전트는 어느 것도 얻거나 보관하거나 쓸 수 없다(macOS 의 서명·공증과 마찬가지로 손으로 하지 않는다 — 릴리스는 `release.yml` 이 한다):
 OV 코드 서명 인증서(USB 토큰, 개인 신원 확인, SmartScreen 평판은 서서히 쌓임) 또는 EV 인증서(조직, 평판이 빨리 쌓임) 또는
 Azure Trusted Signing(구독 + 신원 확인, 한국 가용성은 확인 필요). 어느 경로든 사용자의 법적 신원과 결제, 그리고 개인 키·PIN·Azure
 자격 증명이 필요하다. 그것이 준비되면 위 변수를 채우고 `python windows\build_win.py` 를 돌리면 된다 — 코드는 바뀌지 않는다.
