@@ -42,6 +42,7 @@
 
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -123,10 +124,11 @@ if name == "security":
 
 if name == "agy":
     mode = beh.get("window" if window else "bg", "x509")
-    payload = {"status": "SUCCESS", "command": {"name": "usage", "data": {"groups": [
+    groups = beh.get("groups") or [
         {"name": "Gemini Models", "buckets": [
             {"id": "gemini-5h", "window": "5h", "remaining_fraction": 0.58,
-             "reset_time": "2099-01-01T00:00:00Z"}]}]}}}
+             "reset_time": "2099-01-01T00:00:00Z"}]}]
+    payload = {"status": "SUCCESS", "command": {"name": "usage", "data": {"groups": groups}}}
     if mode == "ok":
         print(json.dumps(payload))
         sys.exit(0)
@@ -734,6 +736,172 @@ class SignedOutNeverRunsTest(MatrixCase):
                     refresh("codex")
                     let_time_pass("codex")
                 self.assertEqual(login_runs(self.box, "codex"), 0)
+
+
+# ── TOK-63: Gemini 줄은 Claude 와 같은 모양 — 세션 → 주간, 같은 값 두 번 없음 ──
+# 대표님(2026-11-20): "gemini에서 gemini 랑, 주간/5 시간이 왜 따로 있어? … claude 처럼 5시간, 주간 순으로
+# 나와야지", "그리고 5시간이 세션이잖아! 용어 통일좀 해".
+#   · 화면의 Gemini 구간: Gemini 묶음의 세션 → 주간, 그 아래 Claude·GPT 묶음의 세션 → 주간.
+#   · 라벨의 창 이름은 TR 의 session·weekly 뿐이다(Claude·Codex 와 같은 글자).
+#   · 버킷 하나에 행 하나 — 대표 "Gemini" 행이 같은 값을 한 번 더 보이지 않는다.
+#   · 서버가 버킷·묶음을 어떤 순서로 보내도 화면은 같다(창 길이로 정렬).
+# 값은 버킷마다 다르고(쓴 비율 30·66·10·80), id 는 창을 말하지 않는다(g-a 가 주간) — id 를 읽는 구현을 가른다.
+
+def _gb(bucket_id, window, remaining):
+    return {"id": bucket_id, "window": window, "remaining_fraction": remaining,
+            "reset_time": "2099-01-01T00:00:00Z"}
+
+
+G_WEEK, G_SESSION = _gb("g-a", "weekly", 0.70), _gb("g-b", "5h", 0.34)
+P_WEEK, P_SESSION = _gb("p-a", "weekly", 0.90), _gb("p-b", "5h", 0.20)
+
+
+def _groups(gemini, third, gemini_first=True):
+    pair = [{"name": "Gemini Models", "buckets": gemini},
+            {"name": "Claude and GPT models", "buckets": third}]
+    return pair if gemini_first else pair[::-1]
+
+
+SERVER_ORDERS = {
+    "observed": _groups([G_WEEK, G_SESSION], [P_WEEK, P_SESSION]),          # agy 가 실제로 주는 순서
+    "session_first": _groups([G_SESSION, G_WEEK], [P_SESSION, P_WEEK]),
+    "groups_swapped": _groups([G_WEEK, G_SESSION], [P_SESSION, P_WEEK], gemini_first=False),
+    "mixed": _groups([G_SESSION, G_WEEK], [P_WEEK, P_SESSION], gemini_first=False),
+}
+ALL_GEMINI_GAUGES = ["session", "weekly", "group"]
+# 사용자에게 보이는 글자에 있으면 안 되는 "5시간" 표기(4개 언어). 그 창의 이름은 "세션" 하나다.
+FIVE_HOUR_WORDS = re.compile(
+    r"5\s*시간|5\s*時間|(?<![\w.])5\s*-?\s*(h|hr|hrs|hours?|horas?)\b|five[\s-]*hours?|cinco\s+horas",
+    re.IGNORECASE)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _visible_html_text(html):
+    """HTML 에서 화면에 보이는 글자만 — 스크립트·스타일·SVG(경로 데이터에 "5h" 가 흔하다)와 태그를 뺀다."""
+    html = re.sub(r"(?is)<(script|style|svg)\b.*?</\1>", " ", html)
+    return re.sub(r"(?s)<[^>]*>", " ", html)
+
+
+class GeminiLikeClaudeTest(MatrixCase):
+    """Gemini 구간의 모양 — 서버 순서 × 언어. 가짜 agy 를 진짜 프로세스로 띄워 읽은 행으로 본다."""
+
+    def screen(self, order, gauges=None, lang="ko"):
+        claude_pet.set_lang(lang)
+        self.box.arrange("gemini", "logged_in_ok")
+        self.box.behave("agy", groups=SERVER_ORDERS[order])
+        rows = refresh("gemini")
+        self.assertTrue(rows, "값이 없다")
+        runtime = dict(claude_pet.RUNTIME, show_gemini=True)
+        if gauges is not None:
+            runtime["gemini_gauges"] = list(gauges)
+        else:
+            runtime.pop("gemini_gauges", None)
+        seg = claude_pet.gemini_summary_segment(runtime, rows, buckets=claude_pet.GEMINI_BUCKETS)
+        self.assertIsNotNone(seg, "Gemini 구간이 없다")
+        self.assertEqual(seg[0], "exact")
+        return rows, [(r[0], round(r[1], 6)) for r in seg[1]]
+
+    def check_order(self, order, lang):
+        tr = claude_pet.TR[lang]
+        _rows, shown = self.screen(order, ALL_GEMINI_GAUGES, lang)
+        group = tr["gemini_group"]
+        self.assertEqual(shown, [(tr["session"], 66.0), (tr["weekly"], 30.0),
+                                 (group + " " + tr["session"], 80.0), (group + " " + tr["weekly"], 10.0)],
+                         "%s/%s: 세션 → 주간, 그 아래 Claude·GPT 세션 → 주간" % (order, lang))
+
+    def check_no_duplicate(self, order):
+        rows, shown = self.screen(order, ALL_GEMINI_GAUGES)
+        self.assertEqual(len(rows), 4, "%s: 버킷 넷에 행 넷 — 대표 행이 같은 값을 한 번 더 낸다" % order)
+        self.assertEqual(sorted(round(r[1], 6) for r in rows), [10.0, 30.0, 66.0, 80.0], order)
+        self.assertEqual(len({v for _l, v in shown}), len(shown), "%s: 같은 값이 화면에 두 번" % order)
+        self.assertEqual(len({l for l, _v in shown}), len(shown), "%s: 같은 라벨이 화면에 두 번" % order)
+        self.assertNotIn(claude_pet.t("gemini"), [l for l, _v in shown], "%s: 대표 Gemini 행" % order)
+
+    def test_default_gauges_are_session_then_weekly(self):
+        """설정을 건드리지 않은 사용자: Claude 와 같은 두 칸(세션 → 주간), Claude·GPT 묶음은 없다."""
+        self.assertEqual(claude_pet.provider_gauges({}, "gemini"), ["session", "weekly"])
+        self.assertEqual(claude_pet.provider_gauges({"gemini_gauges": "broken"}, "gemini"), ["session", "weekly"])
+        _rows, shown = self.screen("observed", None)
+        self.assertEqual(shown, [("세션", 66.0), ("주간", 30.0)])
+
+    def test_old_saved_gauges_still_show_gemini(self):
+        """1.2.1 까지의 저장값("gemini"·"limits")은 세션 + 주간으로 읽는다 — 업데이트 뒤 줄이 사라지지 않게."""
+        for old, want in ((["gemini"], ["session", "weekly"]), (["limits"], ["session", "weekly"]),
+                          (["gemini", "limits", "group"], ALL_GEMINI_GAUGES), (["group"], ["group"]),
+                          ([], [])):
+            with self.subTest(old=old):
+                self.assertEqual(claude_pet.provider_gauges({"gemini_gauges": old}, "gemini"), want)
+
+    def test_one_gauge_at_a_time(self):
+        for gauge, want in (("session", [("세션", 66.0)]), ("weekly", [("주간", 30.0)]),
+                            ("group", [("Claude·GPT 세션", 80.0), ("Claude·GPT 주간", 10.0)])):
+            with self.subTest(gauge=gauge):
+                _rows, shown = self.screen("observed", [gauge])
+                self.assertEqual(shown, want)
+
+    def test_mood_reads_the_shown_gemini_rows(self):
+        """펫 기분은 보이는 Gemini 행에서 — 대표 행이 없어져도 80% 대(Claude·GPT 세션)·66%(세션)를 읽는다."""
+        rows, _shown = self.screen("observed", ALL_GEMINI_GAUGES)
+
+        def mood(gauges):
+            runtime = dict(claude_pet.RUNTIME, show_gemini=True, show_claude=False, show_codex=False,
+                           gemini_gauges=gauges)
+            return claude_pet.mood_for(None, None, runtime=runtime, gemini_rows=rows)
+
+        calm = claude_pet.mood_for(None, None, runtime=dict(claude_pet.RUNTIME, show_gemini=False,
+                                                            show_claude=False, show_codex=False))
+        self.assertNotEqual(mood(["session"]), calm, "세션 66% 를 읽지 않았다")
+        self.assertEqual(mood(["weekly"]), calm, "주간 30% 인데 기분이 바뀌었다")
+        self.assertNotEqual(mood(["group"]), mood(["weekly"]), "Claude·GPT 80% 를 읽지 않았다")
+
+
+for _o in SERVER_ORDERS:
+    _add(GeminiLikeClaudeTest, "test_no_value_twice__%s" % _o, GeminiLikeClaudeTest.check_no_duplicate, _o)
+    for _l in LANGS:
+        _add(GeminiLikeClaudeTest, "test_session_then_weekly__%s__%s" % (_o, _l),
+             GeminiLikeClaudeTest.check_order, _o, _l)
+
+
+class NoFiveHourWordingTest(unittest.TestCase):
+    """사용자에게 보이는 글자에 "5시간"·"5h"·"5-hour"·"5 horas" 가 없다 — 그 창의 이름은 세션이다."""
+
+    def test_app_strings(self):
+        for lang in LANGS:
+            for key, text in sorted(claude_pet.TR[lang].items()):
+                if isinstance(text, str):
+                    self.assertIsNone(FIVE_HOUR_WORDS.search(text), "TR[%s][%s] = %r" % (lang, key, text))
+
+    def test_no_five_hour_keys(self):
+        for lang in LANGS:
+            self.assertEqual([k for k in claude_pet.TR[lang] if "5h" in k], [], lang)
+
+    def test_gemini_setting_titles_are_the_shared_words(self):
+        """설정의 Gemini 게이지 칸: Claude·Codex 와 같은 세션·주간 글자, 그리고 Claude·GPT."""
+        self.assertEqual(tuple(claude_pet.GEMINI_GAUGES), ("session", "weekly", "group"))
+        for lang in LANGS:
+            tr = claude_pet.TR[lang]
+            self.assertEqual(tr["s_gauge_session"], tr["session"], lang)
+            self.assertEqual(tr["s_gauge_weekly"], tr["weekly"], lang)
+            self.assertNotIn("s_gauge_limits", tr, lang)
+            self.assertNotIn("s_gauge_gemini", tr, lang)
+
+    def test_docs_and_site(self):
+        files = ["README.md", "README.ko.md", "README.ja.md", "README.es.md", "RELEASE_NOTES.md",
+                 os.path.join("docs", "index.html")]
+        for leaf in files:
+            with open(os.path.join(ROOT, leaf), encoding="utf-8") as f:
+                text = f.read()
+            if leaf.endswith(".html"):
+                text = _visible_html_text(text)
+            hit = FIVE_HOUR_WORDS.search(text)
+            self.assertIsNone(hit, "%s: %r" % (leaf, hit and text[max(0, hit.start() - 30):hit.end() + 30]))
+
+    def test_the_check_itself_catches_the_words(self):
+        for bad in ("5시간", "5 시간", "5時間", "5h", "(5h)", "5-hour", "5 hours", "Five Hour", "5 horas",
+                    "Claude·GPT 5h"):
+            self.assertIsNotNone(FIVE_HOUR_WORDS.search(bad), bad)
+        for fine in ("15h", "2.5h", "5%", "3h 43m", "25 horas", "45h"):
+            self.assertIsNone(FIVE_HOUR_WORDS.search(fine), fine)
 
 
 class CliEnvProbeTest(MatrixCase):
