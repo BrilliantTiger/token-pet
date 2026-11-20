@@ -1328,7 +1328,8 @@ class ReleaseNotesPolicyTests(unittest.TestCase):
     def test_claude_has_durable_user_facing_release_note_policy(self):
         text = CLAUDE_POLICY.read_text(encoding="utf-8")
         step2 = "2. **Add a section to the top of the changelog"
-        step3 = "3. **Build, sign, notarize.**"
+        # TOK-60: 3단계는 이제 손으로 하는 빌드·서명이 아니라 main 머지다(그 뒤는 release.yml).
+        step3 = "3. **Merge the release commit to `main`"
         self.assertEqual(text.count(step2), 1)
         self.assertEqual(text.count(step3), 1)
         policy = text.split(step2, 1)[1].split(step3, 1)[0]

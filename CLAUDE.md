@@ -7,15 +7,14 @@ The process rules that govern how agents work here — roles, Developer–Verifi
 separation, red-before-green, evidence standards, the merge checklist, the release gate,
 commit trailers — are in [AGENTS.md](AGENTS.md) and are not repeated here. Read both.
 
-Rules below carry one of three tags, all defined in
+Rules below carry one of two tags, both defined in
 [AGENTS.md §0](AGENTS.md#0-how-to-read-the-prohibitions):
 
 - **[NEVER]** — no path exists; do not ask.
 - **[ASK]** — permitted only with explicit authorization from the party named.
-- **[ASK-OP]** — everything [ASK] requires, **plus** all gates recorded first **plus**
-  execution by a release operator (§1) who held no other role on the release. That last
-  condition is absolute and no authorization lifts it. **`[ASK-OP]` is a single tag** —
-  reading it as a plain [ASK] with a trailing comment drops the part that matters.
+
+(A third tag, `[ASK-OP]`, marked hand-run signing until TOK-60. Signing, notarization and
+publication now happen only in the release workflow and are `[NEVER]` by hand.)
 
 Untagged text is guidance, or a correctness fact (see §0) — the tags govern permission,
 never whether a number comes out right.
@@ -91,9 +90,11 @@ invites the reader to reason from it.
 | `verify_pet_payload.py` | Build gate: checks that the bundled `.claude_pet` payload actually landed in an artifact and matches the repo source byte for byte. It reads the expected file list out of `claude_pet.py`'s `BUNDLED_PET_README` / `BUNDLED_PET_IDS` / `BUNDLED_PET_FILES` via AST rather than importing it, so adding a pet cannot leave a hardcoded count checking the wrong number. Called by `release.sh` (`build`, and per-artifact before upload) and by `build_app.sh`. |
 | `verify_release_artifact.py` | Release gate: inspects the zip/dmg **that will be uploaded**, not a build directory. `scan` checks archive safety before any byte is extracted, `app` checks that the bundle's `Contents/Resources/claude_pet.py` is byte-identical to this checkout's and then hands the bundle to the updater's own preflight, `assets` checks the upload list against the updater's asset-name table. The code-hash check is the one the updater cannot do — it has no original to compare against, and a signature says *who built it*, never *what is inside*: a stale bundle re-signed today passes every other check. It **calls** `claude_pet`'s `_zip_members_are_safe` and `validate_update_app` rather than reimplementing them — which is why its diagnostics carry an `[update]` prefix. |
 | `ci/bundle_cli_env_check.py` | CI check run against the **built artifact**, not the source (`macos-bundle` / `windows-bundle` jobs): starts the unsigned `.app` / PyInstaller exe with the hidden `--cli-env-probe <out.json> --agy <fake>` argument (`cli_env_probe_main()`), then requires that `cli_env()` for all three providers, `_agy_env()` and the Gemini sign-in window's script hand the CLI no `SSL_CERT_FILE` / `SSL_CERT_DIR`, and that `curl https://www.google.com` succeeds in each. py2app's boot script sets both variables to a path that does not exist; a source run never has them, which is how 1.2.0 passed CI and failed on a real Mac. |
-| `ci/real_machine_check.py`, `ci/SELF_HOSTED_RUNNERS.md` | The self-hosted jobs (`real-macos` / `real-windows`): the machine's real CLIs and real sign-in state — signed in means usage values are read, the row offers no [Sign in], and nothing opens. They are blocking gates: they run on same-repository pull requests, `main`/`dev` pushes, tags and manual runs (never on a fork's pull request), a release is published only when both are green on `main`, and a machine with no provider signed in fails rather than passing with nothing verified. The runners are the two existing organization runners in the `token-pet` runner group (`token-pet-mac-1`, `token-pet-win-1`); the macOS one must run without `SessionCreate` in its LaunchAgent, or the login keychain reads as locked and nothing can be verified. |
+| `ci/real_machine_check.py`, `ci/SELF_HOSTED_RUNNERS.md` | The self-hosted jobs (`real-macos` / `real-windows`): the machine's real CLIs and real sign-in state — signed in means usage values are read, the row offers no [Sign in], and nothing opens. They are blocking gates: they run on same-repository pull requests, `main`/`dev` pushes and manual runs (never on a fork's pull request, and not again on a tag push), a release is published only when both are green on `main` for the tagged commit — `release.yml`'s `gate` job checks exactly that — and a machine with no provider signed in fails rather than passing with nothing verified. The runners are the two existing organization runners in the `token-pet` runner group (`token-pet-mac-1`, `token-pet-win-1`); the macOS one must run without `SessionCreate` in its LaunchAgent, or the login keychain reads as locked and nothing can be verified. |
+| `.github/workflows/release.yml`, `ci/release_ci.py`, `ci/release_mac_gate.zsh` | The release, run by CI (TOK-60): a pushed `vX.Y.Z` tag → `gate` (tag == version, notes section, commit on `main`, that commit's `main` CI all green) → `mac` (`release.sh` step by step on `token-pet-mac-1`, then the upload gate) and `win` (`build_win.py` on `token-pet-win-1`) → `publish` (draft, six assets, size and SHA-256 compared, then public). `workflow_dispatch` is a dry run that publishes nothing. `release_mac_gate.zsh` *sources* `release.sh` — inert because of the source guard — to reuse `verify_upload_artifact` and `gen_release_notes` instead of copying them. See [Release procedure](#release-procedure). |
+| `tests/test_release_workflow.py` | Static gates for the two workflow files and the pure decisions in `ci/release_ci.py`: `release.yml` runs on version tags and manual runs only, never on `pull_request`; signing waits for `gate`; `release.sh` is called one subcommand per step and never as `publish` / `all` / `ship`; no repository secret; write permission in `publish` only; no input can turn a manual run into a publication; every self-hosted job in a workflow that runs on pull requests carries the same-repository condition; and what counts as a green `main` run and as identical uploaded assets. No YAML parser — the suite is stdlib only. |
 | `build_app.sh` | Fast local build: assembles `ClaudePet.app` from `claude_pet.py` + `frames/` + `.claude_pet/`. **It does sign** — `sign_app` uses the Developer ID when one is present, ad-hoc otherwise. `build` / `install` / `update` subcommands; anything else prints usage and exits 1. |
-| `release.sh` | Real release: py2app build → Developer ID sign → notarize → staple → zip/dmg. |
+| `release.sh` | Real release: py2app build → Developer ID sign → notarize → staple → zip/dmg. Beyond `build`, its subcommands are run by `release.yml` only. |
 | `setup.py` | py2app configuration. |
 | `launcher.c` | Tiny Mach-O launcher — the bundle executable must be Mach-O to be code-signable. |
 | `entitlements.plist` | Hardened-runtime entitlements for signing. |
@@ -265,42 +266,31 @@ ad-hoc), so "unsigned and local" describes its *artifact's destination*, not its
 mechanism — it is local because it installs to your own machine, not because it skips
 `codesign`.
 
-**[NEVER] run bare `./release.sh`.** **The ban is not about signing** — an authorized
-release operator may run those same actions individually. It is that a combined command
-destroys the per-step recording and stop-on-failure the authorization is conditioned on,
-so it stays forbidden for everyone, operator included. Same ground as `all` and `ship`
-below.
+**[NEVER] run bare `./release.sh`.** It prints usage now, but the rule does not lean on
+that — same ground as `all` and `ship` below.
 
 **The bare form no longer defaults to `all`** — with no argument the script now prints
 usage and exits 1, the same as an unrecognized argument (`case "${1:-}"`, with `""|*)`
 sharing the usage branch). It used to default to `all` and run build, sign, notarize,
 universal and dmg from one wordless invocation. **The rule above stands anyway, and the
-default must not be restored**: the prohibition is what keeps the steps separately
-recorded, and a future edit that reinstates `${1:-all}` would silently re-arm a command
-no rule would then forbid. A default that only serves a forbidden path is not a
+default must not be restored**: a future edit that reinstates `${1:-all}` would silently
+re-arm a command that signs and notarizes from a typo. A default that only serves a forbidden path is not a
 convenience.
 
-The subcommands are **not** uniformly forbidden. Four tiers, with full effects and the
-exact conditions under [Release procedure](#release-procedure) step 3:
+The subcommands are **not** uniformly forbidden. Three tiers, with the full table under
+[Release procedure](#release-procedure) step 5:
 
-- **`build`** — unsigned local build. Ordinary work for development, run it freely. As
-  *the release's* artifact build (step 3) it is still ordinary work by tag, but it sits in
-  the execution phase and waits for the gate like everything else there.
-- **`publish`** — **[ASK]**. Writes to the user's GitHub releases via their `gh` auth and
-  performs no signing, so the user can authorize it, per-instance. It is not a bare upload:
-  it runs the artifact gate first (see [Release procedure](#release-procedure) step 3) and
-  uploads nothing if any check fails.
-- **`sign`, `notarize`, `universal`, `dmg`** — **[ASK-OP]**. Each
-  reaches a `codesign` or notarization step, so all three conditions apply: user
-  authorization for this artifact, every §6 gate recorded first, and **[NEVER]** run by an
-  agent that held any other role on this release — Developer, Verifier, Reviewer, or
-  Coordinator.
-- **`all`, `ship`, bare `./release.sh`** — **[NEVER]**, for everyone including the release
-  operator. They collapse several gated steps into one invocation and destroy the per-step
-  recording the authorization depends on. **`ship` is the worst**: it pushes a commit and
-  tag to GitHub *before it builds anything*.
-
-Read step 3 before invoking anything from `release.sh`.
+- **`build`** — unsigned local build. Ordinary work, run it freely. CI runs it too
+  (`tests.yml`'s `macos-bundle` job, and the release workflow's first step).
+- **`sign`, `notarize`, `universal`, `dmg`** — **run by `release.yml` only**, on the
+  macOS runner, one step each. **[NEVER]** by hand from an agent session: each reaches a
+  `codesign` or notarization step under the user's Developer ID, and the workflow is what
+  guarantees the gate ran first.
+- **`publish`, `all`, `ship`, bare `./release.sh`** — **[NEVER]**. `publish` creates a
+  public release at once, before the Windows assets exist; the workflow publishes through
+  a verified draft instead (`ci/release_ci.py`). `all` and `ship` collapse the steps, and
+  **`ship` is the worst**: it pushes a commit and tag to GitHub *before it builds
+  anything*.
 
 ### These scripts are entry points, not libraries — a guard is what keeps `source` inert
 
@@ -1551,94 +1541,40 @@ shapes ("42 rows, 3 files"), never contents.
 
 ## Release procedure
 
-> **[ASK] Stop. Every step below is separately authorized.**
+> **A release is: `main`'s CI green → the tag pushed → `release.yml` to the end.**
 >
-> This is a reference for what the steps *are*, not a runbook to execute on being told
-> "release it". Being asked to release is not authorization for these steps; each one is
-> requested individually — by the user, or by the Coordinator **for the local and
-> reversible steps only** (bump, commit, local tag); everything outward-facing takes the
-> user's own authorization — and you stop after each. A human
-> may lift the per-step asking in advance, but only under the four guards in
-> [AGENTS.md](AGENTS.md#blanket-authorization-of-the-release-sequence) — and doing so
-> changes nothing about the gate below.
+> Since TOK-60 nothing after the tag push is done by a person or an agent. The process
+> rule is [AGENTS.md §6](AGENTS.md#6-release-gate); this section is what the steps are in
+> this repository.
 >
-> **The steps below run in two phases, and the gate sits between them.** The gate is
-> [AGENTS.md §6](AGENTS.md#6-release-gate), which states the boundary in these same
-> words:
+> - **Steps 1–3 are preparation** — the bump, the notes, the release commit, the pull
+>   request to `main`. Ordinary work, gated like any merge.
+> - **Step 4, the tag push, is [ASK]** — the user's own, per-instance decision. It is the
+>   only human decision in a release, and being asked to *prepare* a release is not it.
+> - **Step 5 is `.github/workflows/release.yml`**: gate → build → sign → notarize →
+>   draft → verify → publish. **[NEVER] do any of step 5 by hand** — not `release.sh
+>   sign` / `notarize` / `universal` / `dmg` / `publish`, not `gh release`, not an upload
+>   of a Windows build. If the workflow is wrong, fix the workflow.
 >
-> > **The release commit is the phase boundary.**
-> >
-> > - **Preparation.** The version bump, the release notes, the named-path staging, and the
-> >   release commit itself. These run *before* the gate is evaluated, because they are what
-> >   produces the thing the gate judges. The release commit carries the `Developer:` and
-> >   `Verifier:` trailers, so the merge checklist becomes evaluable the moment that commit
-> >   exists — and not one step earlier.
-> > - **Execution gate.** Evaluated *after* the release commit, when the tracked tree is
-> >   clean: the Verifier re-runs the full suite from that clean tree and records the command
-> >   and its output, the release notes are checked, the Coordinator's sign-off is recorded,
-> >   and an eligible release operator is named with their eligibility stated.
-> > - **Only once the execution gate is GREEN** may the release's artifact build, signing,
-> >   notarization, local tag, push, and publication run. No preparation step waits on the
-> >   gate; no step after it begins before the gate is GREEN.
->
-> Mapped onto the numbered steps below: **steps 1 and 2 are preparation** — the bump, the
-> notes, the staging, and the release commit that carries the trailers. **Steps 3, 4 and
-> 5 are the execution phase** — build, sign, notarize, universal, dmg, tag, push,
-> publish — and none of them starts until the execution gate is GREEN and its sign-off
-> recorded. If you are about to run anything from step 3 onward and cannot point to that
-> sign-off, you are not releasing — say so and stop.
->
-> This does **not** put the gate before the release commit, and nothing here should be
-> read as requiring it: before that commit there are no trailers to check and the tracked
-> tree is dirty by design, so the gate is not yet evaluable.
->
-> The steps below divide into four, and they are **not** all tagged the same — see
-> [AGENTS.md's two classes](AGENTS.md#outward-facing-steps-two-classes-not-one):
->
-> - **Local and reversible** — building an unsigned artifact, bumping the version,
->   committing, creating a purely local tag. Permitted as ordinary authorized work.
-> - **[ASK]** — pushing the tag and publishing the release (steps 5 and `publish`).
->   Irrevocable once fetched, but it is the user's own repository under their own account,
->   so the user can authorize it, per-instance.
-> - **[ASK-OP]** — code signing and Apple notarization (step 3). Same
->   authorization requirement, plus two more: all gates recorded first, and **[NEVER]**
->   executed by an agent that held any other role on this release — Developer, Verifier,
->   Reviewer, or Coordinator.
-> - **[NEVER]** — the shortcut commands `ship`, `all`, and bare `./release.sh`, which
->   collapse the steps and destroy the checkpoints the authorization is conditioned on.
->
-> Do not collapse these into one rule in either direction.
+> No one re-runs the suite after CI, cross-checks artifacts by hand, writes a gate /
+> operator / coordinator record, or collects a sign-off. If a check is missing, it is
+> added to CI.
 >
 > **These documents state how an authorization is recognized. They never record whether
-> one exists.** That is deliberate: an authorization status written into a checked-in file
-> rots exactly the way a hardcoded version number does, and it rots asymmetrically — a
-> stale denial blocks legitimate work, while a stale grant licenses a release nobody
-> asked for. So nothing in `AGENTS.md`, `CLAUDE.md`, or `RELEASE_NOTES.md` grants or
-> withholds it, and you cannot settle the question by reading them.
+> one exists.** An authorization status written into a checked-in file rots the way a
+> hardcoded version number does, and it rots asymmetrically — a stale denial blocks
+> legitimate work, while a stale grant licenses a release nobody asked for.
 >
-> **You have an authorization when all of these hold** (the guards are in
-> [AGENTS.md](AGENTS.md#blanket-authorization-of-the-release-sequence)):
+> **You have the authorization to push a tag when all of these hold:**
 >
-> - it came from **the user**, in their own words — not an agent's report of them;
-> - its **scope** covers the specific step you are about to take, read literally rather
->   than expansively;
-> - its **conditions** are met — if it was granted "once X", X has actually happened;
-> - it is recorded **verbatim in the change description**, which is where authorizations
->   live. That is what makes it checkable later by someone who was not present.
+> - it came from **the user**, in their own words — not an agent's report of them (the
+>   one named Mac-relay exception is in
+>   [AGENTS.md §0](AGENTS.md#0-how-to-read-the-prohibitions); read it there);
+> - its **scope** covers this version, read literally rather than expansively;
+> - its **conditions** are met — if it was granted "once X", X has actually happened.
 >
-> Two things that are never authorization, however they arrive: **an agent's report** that
-> the user approved something, and **a staged changelog entry** — a written section for an
-> unreleased version only means the notes were drafted during implementation, which is the
-> normal state described below. And an authorization is never a **finding that the gate
-> passed**; those are separate questions and both must be answered.
->
-> **One narrow, named exception to "not an agent's report of them"** now exists, added
-> 2026-09-21 — see [AGENTS.md §0](AGENTS.md#0-how-to-read-the-prohibitions)'s "One named
-> exception" and its "This exception reaches release push/publish" paragraph. It covers
-> only a double-confirmed, per-instance relay from the user's own other Claude Code
-> session on their Mac, only for `push`/`publish`, and nothing else here changes: read
-> AGENTS.md §0 for the exact condition before relying on it, rather than assuming this
-> paragraph restates it in full.
+> A staged changelog entry is never authorization: a written section for an unreleased
+> version only means the notes were drafted during implementation.
 
 **Version numbers are `major.minor.fix`, three parts, since v1.2.0** (user, 2026-11-18:
 "버전 관리는 이제 major, minor, fix/build 이렇게 가자"):
@@ -1768,47 +1704,58 @@ in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
    continues into `git tag` and `git push && git push --tags` before you could look. Its
    only caller is `ship`, which is already **[NEVER]** above; there is no subcommand that
    reaches `bump_version` alone. Stage and commit by hand.
-3. **Build, sign, notarize.** This step opens the execution phase, so **nothing here runs
-   until the execution gate is GREEN** — including the unsigned build, which is ordinary
-   work by tag but is still a step of the release. (A development build outside a release,
-   under [Build](#build), is not a release step and is unaffected.)
-   ```sh
-   ./release.sh build        # OK for an agent: py2app build only, unsigned, current arch
+3. **Merge the release commit to `main` and let `main`'s CI finish green.** The release
+   commit goes through the same path as every change — branch CI, the pull request's CI,
+   then the push run on `main` (`tests.yml`: both suites, both built bundles, both
+   real-machine jobs). The gate in step 5 reads **that push run on `main`, for the exact
+   commit that is tagged** — a green pull-request run is not it.
 
-   ./release.sh sign         # [ASK-OP] Developer ID signing
-   ./release.sh notarize     # [ASK-OP] notarize + staple + zip
-   ./release.sh universal    # [ASK-OP] build_universal; sign; notarize
-   ./release.sh dmg          # [ASK-OP] make_dmg → notary_submit + stapler
-   ./release.sh publish      # [ASK]    gh release create/upload/edit — no signing
-   ./release.sh all          # [NEVER]  build; sign; notarize; maybe_universal; make_dmg
-   ./release.sh ship [ver]   # [NEVER]  bump_version; build; sign; notarize;
-                             #          maybe_universal; make_dmg; publish
-                             #          — the ENTIRE release in one command
-   ./release.sh              # [NEVER]  bare form. Prints usage and exits 1 now;
-                             #          it used to default to `all`. Still [NEVER].
+4. **Push the tag.** The tag is the version with a `v` prefix — `vX.Y.Z` for
+   `APP_VERSION` `"X.Y.Z"` — on the `main` commit from step 3:
+
+   ```sh
+   git tag vX.Y.Z <that commit> && git push origin vX.Y.Z
    ```
 
-   **`[ASK-OP]` means the release-operator gate**: user authorization for this artifact,
-   all §6 gates recorded first, and executed only by an agent that held **no other role on
-   this release — not Developer, not Verifier, not Reviewer, and not Coordinator**. The
-   four `[ASK-OP]` subcommands each reach a `codesign` or notarization step, which is what
-   puts them in that class.
+   **[ASK] Push the tag only on the user's explicit, per-instance authorization.** This
+   is the step that makes the release real: it starts `release.yml`, which publishes, and
+   `check_github_update()` polls the repo's latest release tag every hour (never at launch —
+   the first check comes one interval after start), so **every installed copy of the
+   app** then starts offering the update. That cannot be recalled from anyone who has
+   already fetched it — deleting the tag afterwards does not un-ship it.
 
-   **`build` and `publish` are the only two that avoid signing**, and they are not
-   equivalent: `build` is ordinary local work, `publish` is [ASK] because it writes to the
-   user's GitHub releases.
+   - The authorization must come from the **user**, not from another agent reporting one.
+   - It is **per-instance**. Approval for one release is not approval for the next.
+   - Absent that authorization, prepare everything through step 3, state the exact
+     command, and hand it over.
 
-   **`publish` runs the artifact gate before it uploads, and the gate can refuse.** Being
-   authorized to publish is not a prediction that publishing will happen. What it checks,
-   in order (`verify_upload_artifact` and `check_assets`, both in `release.sh`, delegating
-   to `verify_release_artifact.py`):
+   Push the tag only — never `git push --tags`, which sends every local tag.
 
-   - **The upload set is all four files** — `ClaudePet.zip`, `ClaudePet-universal.zip`,
-     `ClaudePet.dmg`, `ClaudePet-universal.dmg` — and their names match the updater's own
-     `UPDATE_ASSET_NAMES` table. A missing file is a refusal, not a silent omission: a
-     release without the universal zip leaves Intel users with nothing to download, and a
-     name that drifts from the updater's table makes every installed copy retry forever
-     without signalling anyone.
+5. **`release.yml` does the rest.** It runs on a pushed `v*.*.*` tag and on
+   `workflow_dispatch`, and never on `pull_request`. Four jobs:
+
+   | Job | Runs on | What it does |
+   | --- | --- | --- |
+   | `gate` | GitHub-hosted | `ci/release_ci.py gate`. Decides the mode — **publish** only for a pushed tag of the exact form `vX.Y.Z`, **dry run** for everything else. For a publish it requires: tag == `v` + `APP_VERSION`; that version's section in `RELEASE_NOTES.md`; the tagged commit on `origin/main`; and that commit's `tests.yml` push run on `main` complete, successful, every job `success`, both real-machine jobs among them. Otherwise the run ends here and nothing is signed. |
+   | `mac` | `token-pet-mac-1` | `./release.sh build`, `sign`, `notarize`, `universal`, `dmg` — one step each, so a failure stops the job at that step and shows which. Then `ci/release_mac_gate.zsh`: the upload-name check and `verify_upload_artifact` on each of the four files, and the release body (`gen_release_notes`). |
+   | `win` | `token-pet-win-1` | `windows\build_win.py` in a fresh venv: PyInstaller build, version marker, layout check, zip, Inno Setup installer, `verify_win_artifact` gate. Unsigned, as before (`CLAUDE_PET_WIN_SIGN` is not set). |
+   | `publish` | GitHub-hosted | `ci/release_ci.py publish`. Creates a **draft** release with the six assets, compares each uploaded asset's size and SHA-256 with what the runners built (the sums travel as job outputs, apart from the files), and only then makes it public and latest. A dry run stops before that and deletes the draft. Any failure deletes the draft. |
+
+   **The credentials never leave the Mac.** Signing uses the
+   `Developer ID Application: Yeongyu Yang (RXGNVSLYF5)` identity with `entitlements.plist`
+   and notarization the stored `claudepet-notary` profile, both from that Mac's login
+   keychain, read by `codesign` and `notarytool` themselves. The workflow uses no
+   repository secret; its only token is `GITHUB_TOKEN`, with write permission in `publish`
+   alone. **[NEVER] move the certificate, its key or the notarization credentials into
+   repository or organization secrets, or print them.**
+
+   **What the `mac` job's artifact check holds** (`verify_upload_artifact` and the
+   `assets` check, both `release.sh`'s own, delegating to `verify_release_artifact.py`):
+
+   - **The names match the updater's own `UPDATE_ASSET_NAMES` table**, and all four files
+     exist. A release without the universal zip leaves Intel users with nothing to
+     download, and a name that drifts from the updater's table makes every installed copy
+     retry forever without signalling anyone.
    - **Each file is opened as a file**, not as the build directory it came from — the
      archive is scanned for unsafe members *before* extraction, must contain exactly one
      top-level `ClaudePet.app` and no other `.app` anywhere inside, and the bundle inside
@@ -1817,126 +1764,52 @@ in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
    - **The architecture requirement comes from the artifact's filename, never from this
      machine.** `-universal` means `arm64,x86_64`, the plain name means `arm64`, and an
      artifact whose name settles neither is refused rather than measured against
-     `uname -m`. Asking the build machine is how a universal artifact that lost its
-     `x86_64` slice passes on the maintainer's Mac and fails only for Intel users.
+     `uname -m`.
 
-   The same asymmetry applies as everywhere else here: the gate refusing costs a rerun,
-   the gate passing something wrong reaches every user the updater serves.
+   **A published release is never overwritten.** `publish` refuses when a public release
+   already exists for the tag; only a leftover *draft* from a failed attempt is replaced.
+   A fix after publication is a new version, with its own tag.
 
-   **`all`, `ship`, and bare stay [NEVER] even for the release operator.** They are not
-   forbidden because of what they touch — the operator may run those same actions
-   individually — but because they run several gated steps in one invocation, which
-   destroys the per-step recording and stop-on-failure the authorization is conditioned
-   on. A shortcut through an authorized sequence is not authorized.
+   **When the workflow fails**, read the failed step, fix the cause, and run it again —
+   re-run the failed jobs of that run when the cause was outside the code (a notarization
+   outage, a runner that was offline), or merge the fix to `main` and release from the
+   new commit when it was not. A tag whose run never published can be deleted and
+   re-pushed by whoever holds the step-4 authorization for that version. Do not finish
+   the remaining steps by hand.
 
-   **Against an existing release, `publish` overwrites rather than creates — and it
-   replaces the downloads, not just the text.** Both halves, from the `gh release view`
-   branch of `publish()`:
+   **Dry run — [ASK].** `gh workflow run release.yml --ref <branch>` runs every job on
+   that ref — the real signing and notarization included — uploads to a draft named
+   `dry-run-<run id>`, verifies it, and deletes it. Nothing is published and no tag is
+   created; there is no input that turns a manual run into a publication. Use it when the
+   release workflow itself changed. It signs and notarizes under the user's Developer ID,
+   which is why it is asked for rather than run at will.
 
-   - `gh release upload "$TAG" "${files[@]}" **--clobber**` — **replaces the published
-     assets**: the `.zip` and `.dmg` files users actually download, including the ones the
-     in-app updater fetches. This is the user-visible half.
-   - `gh release edit "$TAG" --notes-file` — replaces the release **body** with freshly
-     generated notes.
+   **`release.sh`'s subcommands, by who may run them:**
 
-   So re-running `publish` on an already-published release is a *rewrite of published
-   material*, not a fresh publication. It needs **two** authorizations, not one — both
-   [ASK] and per-instance, so neither implies the other:
+   ```sh
+   ./release.sh build        # OK for an agent: py2app build only, unsigned, current arch
+   ./release.sh sign         # release.yml only — [NEVER] by hand
+   ./release.sh notarize     # release.yml only — [NEVER] by hand
+   ./release.sh universal    # release.yml only — [NEVER] by hand
+   ./release.sh dmg          # release.yml only — [NEVER] by hand
+   ./release.sh publish      # [NEVER] — creates a public release at once, without the
+                             #           Windows assets and without a draft. Not used.
+   ./release.sh all          # [NEVER]
+   ./release.sh ship [ver]   # [NEVER] — pushes a commit and tag BEFORE building anything
+   ./release.sh              # [NEVER] — bare form. Prints usage and exits 1 now; it
+                             #           used to default to `all`. Do not restore that.
+   ```
 
-   1. to rewrite the published entry (step 2's freeze), and
-   2. to publish.
+   `ship` deserves singling out: `bump_version()` ends with `git push && git push --tags`
+   and it is the **first** call in the chain, so `ship` puts the commit and tag on GitHub
+   before a single line has been compiled — and since TOK-60 a pushed `vX.Y.Z` tag starts
+   the release workflow. `release.sh`'s own comments still describe the earlier
+   hand-run procedure and its `[ASK-OP]` tag; read them as history. The script is the
+   authority on what each function does, so check its `case` statement before assuming
+   anything about an undocumented subcommand.
 
-   Keep the objects distinct when reasoning about this. The **frozen** object is the
-   v-section in `RELEASE_NOTES.md`. The **overwritten** objects are the GitHub release
-   body — a published copy derived from it by `gen_release_notes` — and the release
-   assets, which have no local counterpart at all. Editing the local file touches neither
-   of them, and replacing an asset users have already downloaded does not recall the copy
-   they have.
-
-   Two of these deserve singling out:
-
-   - **[NEVER] run `ship`.** It bumps `APP_VERSION`, builds, signs, notarizes, builds the
-     dmg, and publishes to GitHub — every separately authorized step in this document, in
-     one invocation, with no pause between them. It is the single most dangerous command
-     in this repository.
-
-     **It publishes before it builds.** `bump_version()` ends with
-     `git push && git push --tags`, and it is the **first** call in the chain — so `ship`
-     puts the commit and tag on GitHub before a single line has been compiled. If the
-     build then fails, the tag is already public and the updater is already offering a
-     version that does not exist. The checkpoints are not merely collapsed here; they run
-     in the wrong order.
-
-     **This prohibition does not relax when the individual steps are authorized — that is
-     precisely when it matters.** Every action `ship` performs is now reachable by an
-     authorized release operator running the steps individually, which makes `ship` the
-     command such an operator would plausibly reach for, and the one that must still be
-     refused. The authorization is conditioned on the checkpoints *between* the steps:
-     seeing the build succeed before it is signed, seeing the right version tagged before
-     it is pushed, recording each outcome, stopping on the first failure. `ship` deletes
-     every one of those while appearing to do the same work. **What the user authorizes is
-     the sequence, not a shortcut through it** — so "I was authorized to do all of these"
-     is not authorization to do them this way. See
-     [AGENTS.md](AGENTS.md#sequencing-is-part-of-the-authorization).
-   - **Bare `./release.sh` prints usage and exits 1** — no argument and an unrecognized
-     argument share the same branch (`case "${1:-}"` … `""|*)`). It did **not** always:
-     the dispatch was `case "${1:-all}"`, so omitting the argument ran `all` — build,
-     sign, notarize, universal, dmg — from a command that looked like it did nothing.
-     The `[NEVER]` above is unchanged by the safer default, and **the default must not be
-     put back**; see [Run, test, build](#run-test-build).
-
-   Do not treat this list as closed. `release.sh` is the authority on what these do;
-   check its `case` statement before running anything from it, and assume an
-   undocumented subcommand is prohibited until you have read its function body.
-   Signing uses the `Developer ID Application: Yeongyu Yang (RXGNVSLYF5)` identity with
-   `entitlements.plist`; notarization uses the stored `claudepet-notary` credential
-   profile.
-
-   **[ASK-OP] Signing and notarization.** Signing binds **Yeongyu
-   Yang's Developer ID** to a binary and notarization submits it to **Apple under their
-   account**. The artifact then carries that assertion permanently — anyone inspecting it
-   later is told this person vouched for these contents — which is why this step is gated
-   harder than pushing the tag, even though the push reaches users faster. All three
-   conditions must hold, per
-   [AGENTS.md's second class](AGENTS.md#outward-facing-steps-two-classes-not-one):
-
-   1. **The user has explicitly authorized signing this artifact**, per-instance.
-   2. **Every gate in [AGENTS.md §6](AGENTS.md#6-release-gate) has passed and been
-      recorded** — before this step, not alongside it.
-   3. **[NEVER] performed by an agent that held any other role on this release —
-      Developer, Verifier, Reviewer, or Coordinator.** Only a dedicated release operator,
-      and no authorization lifts this — it is separation of duties, not permission. The
-      Coordinator is excluded because §6 makes its sign-off the certification that the
-      release is ready; certifying and signing must be different parties.
-
-   The operator records the result of each step as it completes and **stops on the first
-   failure**. Succeeding at a command is not evidence you were the right party to run it.
-
-   If any condition is unmet: build the unsigned artifact if asked, then stop and hand it
-   to the maintainer, saying plainly what remains.
-4. **Both release builds need the `universal2` Python** from python.org (pyenv's Python
-   is single-architecture, and its deployment target is this Mac's macOS). `release.sh`
+   **Both release builds need the `universal2` Python** from python.org (pyenv's Python
+   is single-architecture, and its deployment target is that Mac's macOS). `release.sh`
    checks the universal one with `lipo -archs`, and both builds' deployment target against
-   12.0, and refuses otherwise.
-5. **Tag and push.** The tag is the version with a `v` prefix — `vX.Y.Z` for `APP_VERSION`
-   `"X.Y.Z"` — since the tag is what the updater compares against.
-
-   **[ASK] Push the tag or publish the release only on the user's explicit, per-instance
-   authorization.** This is the step that makes the release real: `check_github_update()`
-   polls the repo's latest release tag every hour (never at launch — the first check
-   comes one interval after start), so pushing it causes **every
-   installed copy of the app** to start offering the update. That reaches users directly
-   and cannot be recalled from anyone who has already fetched it — deleting the tag
-   afterwards does not un-ship it.
-
-   It is [ASK] rather than [NEVER] because it is a push to the user's own repository under
-   their own account, which is theirs to authorize —
-   [AGENTS.md's first class](AGENTS.md#outward-facing-steps-two-classes-not-one). The
-   irreversibility is unchanged; what the tag settles is only *who can lift it*. So:
-
-   - The authorization must come from the **user**, not from another agent reporting one.
-   - It is **per-instance**. Approval for one release is not approval for the next.
-   - It does not license skipping or reordering any gate — see
-     [AGENTS.md §6](AGENTS.md#6-release-gate). An authorization is not a finding that the
-     gate has passed.
-   - Absent that authorization, prepare it, state the exact command, and hand it over.
+   12.0, and refuses otherwise. What else the two runners must have is listed in
+   `ci/SELF_HOSTED_RUNNERS.md`.
