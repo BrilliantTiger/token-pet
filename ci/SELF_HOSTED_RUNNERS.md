@@ -57,7 +57,23 @@ gh api repos/BrilliantTiger/token-pet/actions/permissions/fork-pr-contributor-ap
 
 ## 언제 도는가
 
-같은 저장소의 PR, `main`·`dev` push, `v*` 태그, `workflow_dispatch`. 포크의 PR 에서는 돌지 않는다.
+같은 저장소의 PR, `main`·`dev` push, `workflow_dispatch`. 포크의 PR 에서는 돌지 않는다. 태그 push 로는 돌지
+않는다 — 태그는 `main` 에서 이미 초록인 커밋에 붙고, 그 초록은 `release.yml` 의 gate 잡이 확인한다.
+
+## 릴리스도 이 두 러너에서 돈다
+
+`release.yml`(TOK-60)의 `mac` 잡은 `token-pet-mac-1` 에서 서명·공증하고, `win` 잡은 `token-pet-win-1` 에서
+zip 과 설치 파일을 만든다. 그 워크플로는 `vX.Y.Z` 태그 push 와 `workflow_dispatch`(시험 — 게시하지 않는다)로만
+돌고 `pull_request` 로는 돌지 않는다. 러너에 있어야 하는 것:
+
+| 러너 | 있어야 하는 것 |
+| --- | --- |
+| `token-pet-mac-1` | 로그인 키체인의 `Developer ID Application: Yeongyu Yang (RXGNVSLYF5)` 인증서와 키, `xcrun notarytool store-credentials claudepet-notary` 로 저장한 공증 프로필, python.org universal2 Python(`/Library/Frameworks/Python.framework/Versions/Current/bin/python3`)과 그 위의 `py2app`·`pyobjc`·`certifi` |
+| `token-pet-win-1` | `PATH` 의 Python 3.13, Inno Setup 6(`ISCC.exe`) |
+
+인증서·공증 프로필은 그 Mac 의 키체인에만 있다. 저장소 시크릿으로 옮기지 않고, 워크플로는 그것을 읽거나
+찍지 않는다 — `codesign` 과 `notarytool` 이 키체인에서 직접 쓴다. 그래서 러너가 로그인한 사용자의 세션에서
+돌아야 한다는 위 조건은 릴리스에도 그대로 필요하다.
 
 ## 잡이 하지 않는 것
 

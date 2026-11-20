@@ -1,0 +1,173 @@
+name: release
+
+# 릴리스는 CI 가 한다(TOK-60). main 의 CI 가 초록인 커밋에 vX.Y.Z 태그를 push 하면 이 워크플로가
+# 빌드 → 서명 → 공증 → 게시까지 끝낸다. 사람·에이전트가 손으로 release.sh 를 돌리거나, 결과를 맞춰 보거나,
+# 기록 문서를 쓰는 단계는 없다(대표님, 2026-11-19: "CI에서 이미 다 쳐해야하는걸 왜 너가 계속 쳐 맞추고
+# 기록한다 지랄인데?! 제대로 CI가 돌아서 끝나야지").
+#
+#   gate     게시해도 되는가 — 태그 == v + APP_VERSION, 릴리스 노트에 그 절, 태그 커밋이 origin/main 에 있고
+#            그 커밋의 tests.yml main push 실행이 실기기 잡 둘을 포함해 전부 success. 아니면 여기서 끝난다.
+#   mac      집 Mac mini(token-pet-mac-1). 그 Mac 의 키체인에 있는 Developer ID 인증서와 notarytool 프로필로
+#            ./release.sh build → sign → notarize → universal → dmg, 한 단계씩. 이어서 올릴 네 파일을 연다.
+#   win      Windows PC(token-pet-win-1). windows\build_win.py — zip 과 설치 파일.
+#   publish  초안 릴리스에 여섯 파일을 올리고, 크기·SHA-256 이 만든 것과 같을 때만 공개한다.
+#
+# 게시는 **push 된 vX.Y.Z 태그**에서만 나간다. workflow_dispatch(와 v0.0.0-test 같은 태그)는 시험이다 —
+# 서명·공증·초안 업로드·확인까지 똑같이 하고, 공개하지 않고 초안을 지운다. 게시 여부를 고르는 입력은 없다.
+#
+# 비밀값은 저장소에도 로그에도 없다: 인증서와 공증 프로필은 러너의 키체인에만 있고, 이 파일이 쓰는 토큰은
+# GITHUB_TOKEN 뿐이다(쓰기 권한은 publish 잡에만).
+#
+# pull_request 로는 돌지 않는다 — 서명 인증서가 있는 기기에서 남의 코드가 돌면 안 된다. 포크는 워크플로
+# 파일도 고칠 수 있으므로 저장소 설정(외부 기여자의 워크플로는 전부 승인 필요)이 함께 막는다
+# (ci/SELF_HOSTED_RUNNERS.md).
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Gate — tag, version, main CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.gate.outputs.mode }}
+      version: ${{ steps.gate.outputs.version }}
+      name: ${{ steps.gate.outputs.name }}
+      title: ${{ steps.gate.outputs.title }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - name: May this be published
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 ci/release_ci.py gate --event "${{ github.event_name }}" --ref "${{ github.ref }}"
+          --sha "${{ github.sha }}" --repo "${{ github.repository }}" --run-id "${{ github.run_id }}"
+
+  mac:
+    name: macOS — build, sign, notarize
+    needs: gate
+    runs-on: [self-hosted, macOS, token-pet]
+    timeout-minutes: 120
+    outputs:
+      sums: ${{ steps.sums.outputs.sums }}
+    steps:
+      - uses: actions/checkout@v4
+      # release.sh 는 한 단계에 하나씩 부른다. all·ship 은 쓰지 않는다 — 어느 단계가 실패했는지가 잡 화면에
+      # 그대로 남고, 실패한 단계 뒤는 돌지 않는다.
+      - name: Build (arm64)
+        run: ./release.sh build
+      - name: Show py2app log on failure
+        if: failure()
+        run: tail -60 /tmp/py2app.log /tmp/py2app-universal.log || true
+      - name: Sign (arm64)
+        run: ./release.sh sign
+      - name: Notarize and staple (arm64)
+        run: ./release.sh notarize
+      - name: Build, sign, notarize (universal)
+        run: ./release.sh universal
+      - name: Disk images
+        run: ./release.sh dmg
+      # 올릴 파일 그 자체를 연다(빌드 폴더가 아니라) + 릴리스 본문.
+      - name: Open the four files that will be uploaded
+        run: zsh ci/release_mac_gate.zsh release/release-notes.md
+      - name: Sizes and SHA-256
+        id: sums
+        run: >-
+          python3 ci/release_ci.py sums release/ClaudePet.zip release/ClaudePet-universal.zip
+          release/ClaudePet.dmg release/ClaudePet-universal.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-mac
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            release/ClaudePet.zip
+            release/ClaudePet-universal.zip
+            release/ClaudePet.dmg
+            release/ClaudePet-universal.dmg
+            release/release-notes.md
+
+  win:
+    name: Windows — build zip and installer
+    needs: gate
+    runs-on: [self-hosted, Windows, token-pet]
+    timeout-minutes: 60
+    # 이 PC 의 콘솔은 cp949 다. build_win.py 가 찍는 줄표(—)·✅ 를 쓰지 못해 첫 줄에서 죽는다(첫 시험 실행).
+    env:
+      PYTHONIOENCODING: utf-8
+    outputs:
+      sums: ${{ steps.sums.outputs.sums }}
+    steps:
+      - uses: actions/checkout@v4
+      # 한 단계에 명령 하나 — cmd 는 중간 줄의 실패를 다음 줄로 넘긴다.
+      - name: Show environment
+        shell: cmd
+        run: python -VV
+      - name: Build environment
+        shell: cmd
+        run: python -m venv "%RUNNER_TEMP%\release-venv"
+      - name: Install build dependencies
+        shell: cmd
+        run: '"%RUNNER_TEMP%\release-venv\Scripts\python.exe" -m pip install -r windows\requirements.txt'
+      # build → 버전 마커 → 레이아웃 검사 → zip → 설치 파일(Inno Setup) → verify_win_artifact 게이트.
+      - name: Build zip and installer
+        shell: cmd
+        run: '"%RUNNER_TEMP%\release-venv\Scripts\python.exe" windows\build_win.py'
+      - name: Sizes and SHA-256
+        id: sums
+        shell: cmd
+        run: python ci\release_ci.py sums release\claude-pet-win.zip release\claude-pet-win-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-win
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            release/claude-pet-win.zip
+            release/claude-pet-win-setup.exe
+
+  publish:
+    name: Publish — draft, verify, release
+    needs: [gate, mac, win]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: upload
+      # 초안으로 올리고, GitHub 이 받은 여섯 파일의 크기·SHA-256 이 러너에서 만든 것과 같을 때만 공개한다.
+      # 시험(dry-run)이면 공개하지 않고 초안을 지운다.
+      - name: Upload as a draft, verify, then release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ needs.gate.outputs.mode }}
+          NAME: ${{ needs.gate.outputs.name }}
+          TITLE: ${{ needs.gate.outputs.title }}
+          MAC_SUMS: ${{ needs.mac.outputs.sums }}
+          WIN_SUMS: ${{ needs.win.outputs.sums }}
+        run: >-
+          python3 ci/release_ci.py publish --mode "$MODE" --repo "${{ github.repository }}"
+          --sha "${{ github.sha }}" --name "$NAME" --title "$TITLE"
+          --notes upload/release-notes.md --dir upload --expect "$MAC_SUMS" --expect "$WIN_SUMS"
