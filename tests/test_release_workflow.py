@@ -394,7 +394,9 @@ class AutoTagWorkflowShape(unittest.TestCase):
     def test_tests_yml_cannot_tag(self):
         """PR 로도 도는 tests.yml 에는 쓰기 권한도 태그·릴리스 명령도 없다."""
         code = _code(TESTS_YML.read_text(encoding="utf-8"))
-        for word in ("write", "git tag", "git push", "gh release", "release_ci.py"):
+        self.assertNotRegex(code, r":\s*write\b")
+        self.assertNotIn("permissions", code)
+        for word in ("git tag", "git push", "gh release", "gh api", "release_ci.py"):
             self.assertNotIn(word, code)
 
 

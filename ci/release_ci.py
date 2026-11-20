@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""릴리스 워크플로(.github/workflows/release.yml)의 판정과 게시 — stdlib 만 쓴다.
+"""릴리스 워크플로(.github/workflows/release.yml, auto-tag.yml)의 판정과 게시 — stdlib 만 쓴다.
 
+    python3 ci/release_ci.py auto-tag --repo <owner/name> --sha <sha>
     python3 ci/release_ci.py gate    --event push --ref refs/tags/v1.2.2 --sha <sha> --repo <owner/name> --run-id <id>
     python3 ci/release_ci.py sums    <file>...
     python3 ci/release_ci.py publish --mode publish|dry-run --repo <owner/name> --sha <sha> --name <tag>
                                      --title <title> --notes <file> --dir <folder> --expect <json> [--expect <json>]
 
-gate     게시해도 되는가. 게시(publish)는 **push 된 vX.Y.Z 태그** 하나뿐이고 나머지는 전부 시험(dry-run)이다.
+auto-tag main 의 CI 가 끝난 커밋에 태그를 달 것인가(TOK-64). 그 커밋의 tests.yml main push 실행이 실기기 잡
+         둘을 포함해 전부 success 이고, APP_VERSION 이 공개된 최신 릴리스보다 크고, 그 vX.Y.Z 태그가 아직
+         없을 때만 태그를 달고 release.yml 을 그 태그에서 깨운다. 버전을 올리지 않은 머지는 아무것도 하지
+         않는다. 사람이 태그를 미는 단계는 없다 — 릴리스 결정은 버전을 올린 PR 을 main 에 머지하는 것이다.
+gate     게시해도 되는가. 게시(publish)는 **vX.Y.Z 태그 ref 에서 도는 실행**뿐이고 나머지는 전부 시험(dry-run)이다.
          게시라면: 태그 == "v" + APP_VERSION, RELEASE_NOTES.md 에 그 버전 절이 있음, 태그 커밋이 origin/main 에
          있음, 그 커밋의 tests.yml **main push 실행**이 실기기 잡 둘을 포함해 전부 success. 하나라도 아니면 실패.
 sums     만든 파일의 크기·SHA-256 을 잡 출력(sums)으로 낸다. 파일과 다른 길로 게시 잡에 간다.
@@ -28,15 +33,73 @@ ASSETS = ("ClaudePet.zip", "ClaudePet-universal.zip", "ClaudePet.dmg", "ClaudePe
 # tests.yml 의 실기기 잡 이름(앞부분). 이 둘이 success 로 '있어야' 한다 — 없거나 건너뛴 것은 통과가 아니다.
 REAL_JOB_PREFIXES = ("Real Mac", "Real Windows")
 TESTS_WORKFLOW = "tests.yml"
+RELEASE_WORKFLOW = "release.yml"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # ───────────────────────────── 판정 (순수) ─────────────────────────────
 def release_mode(event, ref):
-    """'publish' 는 push 된 refs/tags/vX.Y.Z 뿐. 그 밖의 모든 것은 'dry-run'."""
-    if event == "push" and re.fullmatch(r"refs/tags/v[0-9]+\.[0-9]+\.[0-9]+", str(ref or "")):
+    """'publish' 는 refs/tags/vX.Y.Z 에서 도는 실행뿐 — auto-tag.yml 이 태그를 달고 workflow_dispatch 로 깨운
+    것(GITHUB_TOKEN 으로 만든 태그는 push 이벤트를 내지 않는다)과 push 된 태그. 그 밖의 모든 것은 'dry-run'.
+    어느 쪽이든 gate 의 나머지 조건(버전·노트·main·main 의 CI)을 똑같이 지난다."""
+    if event in ("push", "workflow_dispatch") and re.fullmatch(r"refs/tags/v[0-9]+\.[0-9]+\.[0-9]+",
+                                                               str(ref or "")):
         return "publish"
     return "dry-run"
+
+
+_VERSION_RE = r"[0-9]+\.[0-9]+\.[0-9]+"
+
+
+def _vtuple(version):
+    return tuple(int(x) for x in version.split("."))
+
+
+def latest_release_version(releases):
+    """공개된 vX.Y.Z 릴리스 가운데 가장 큰 버전(없으면 None). 초안·프리릴리스·다른 모양의 태그는 세지 않는다."""
+    found = []
+    for r in releases or ():
+        m = re.fullmatch("v(" + _VERSION_RE + ")", str(r.get("tag_name") or ""))
+        if m and not r.get("draft") and not r.get("prerelease"):
+            found.append(m.group(1))
+    return max(found, key=_vtuple) if found else None
+
+
+def auto_tag_decision(app_version, latest, tag_exists, run, jobs, notes_text):
+    """main 의 CI 가 끝난 커밋에 태그를 달 것인가 → ('tag' | 'skip' | 'fail', 이유들).
+
+    skip 은 아무것도 하지 않는 초록이다(버전을 올리지 않은 머지). fail 은 버전은 올렸는데 릴리스할 수 없는
+    모양 — 태그를 달면 release.yml 의 gate 에서 죽고 태그만 남으므로, 달기 전에 빨갛게 끝낸다."""
+    red = ci_problems(run, jobs)
+    if red:
+        return "skip", red
+    version = str(app_version or "")
+    if not re.fullmatch(_VERSION_RE, version):
+        return "fail", [f"APP_VERSION 이 major.minor.fix 가 아니다: {app_version!r}"]
+    if latest is not None and _vtuple(version) <= _vtuple(latest):
+        return "skip", [f"버전이 올라가지 않았다: 앱 {version}, 최신 릴리스 {latest}"]
+    if tag_exists:
+        return "skip", [f"v{version} 태그가 이미 있다 — 있는 태그는 옮기지도 다시 게시하지도 않는다"]
+    missing = notes_problems(notes_text, version)
+    if missing:
+        return "fail", missing
+    return "tag", [f"앱 {version} > 최신 릴리스 {latest} — v{version} 태그를 달고 release.yml 을 깨운다"]
+
+
+def tag_and_dispatch(repo, tag, sha, api):
+    """그 커밋에 태그를 달고 release.yml 을 그 태그에서 깨운다 → 문제 목록. api(method, path, fields) → (ok, text).
+
+    깨우지 못하면 방금 단 태그를 지운다: 태그만 남으면 다음 실행이 '이미 있는 태그'로 건너뛴다."""
+    ok, text = api("POST", f"repos/{repo}/git/refs", {"ref": f"refs/tags/{tag}", "sha": sha})
+    if not ok:
+        return [f"{tag} 태그를 달지 못했다: {text}"]
+    ok, text = api("POST", f"repos/{repo}/actions/workflows/{RELEASE_WORKFLOW}/dispatches", {"ref": tag})
+    if ok:
+        return []
+    out = [f"release.yml 을 깨우지 못했다: {text}"]
+    gone, why = api("DELETE", f"repos/{repo}/git/refs/tags/{tag}", {})
+    out.append(f"방금 단 {tag} 태그를 지웠다" if gone else f"방금 단 {tag} 태그를 지우지 못했다: {why}")
+    return out
 
 
 def version_problems(tag, app_version):
@@ -125,6 +188,30 @@ def gh_json(*args):
     return json.loads(r.stdout) if r.stdout.strip() else None
 
 
+def gh_call(method, path, fields=None):
+    """(ok, 짧은 오류 글) — 실패해도 끝내지 않는다. 호출한 쪽이 뒷정리를 정한다."""
+    args = ["gh", "api", "-X", method, path]
+    for k, v in (fields or {}).items():
+        args += ["-f", f"{k}={v}"]
+    r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8")
+    return r.returncode == 0, r.stderr.strip()[:300]
+
+
+def main_ci(repo, sha):
+    """그 커밋의 tests.yml main push 실행과 그 잡들 → (run 또는 None, jobs)."""
+    runs = gh_json(f"repos/{repo}/actions/workflows/{TESTS_WORKFLOW}/runs"
+                   f"?head_sha={sha}&event=push&branch=main&per_page=100")
+    run = pick_main_run((runs or {}).get("workflow_runs"), sha)
+    jobs = []
+    if run:
+        jobs = (gh_json(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")
+                or {}).get("jobs") or []
+        print(f"tests.yml main 실행 {run['id']}: {run.get('status')}/{run.get('conclusion')}")
+        for j in jobs:
+            print(f"  {j.get('conclusion')}: {j.get('name')}")
+    return run, jobs
+
+
 def set_outputs(**kv):
     path = os.environ.get("GITHUB_OUTPUT")
     for k, v in kv.items():
@@ -141,6 +228,37 @@ def fail(problems):
     raise SystemExit(1)
 
 
+# ───────────────────────────── auto-tag ─────────────────────────────
+def cmd_auto_tag(a):
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    if head != a.sha:
+        fail(["체크아웃한 커밋이 시험한 커밋이 아니다"])
+    if subprocess.run(["git", "merge-base", "--is-ancestor", a.sha, "origin/main"], cwd=ROOT).returncode != 0:
+        fail(["이 커밋이 origin/main 에 없다"])
+    version = app_version()
+    with open(os.path.join(ROOT, "RELEASE_NOTES.md"), encoding="utf-8") as f:
+        notes = f.read()
+    run, jobs = main_ci(a.repo, a.sha)
+    latest = latest_release_version(_releases(a.repo))
+    tag = "v" + version
+    refs = gh_json(f"repos/{a.repo}/git/matching-refs/tags/{tag}") or []
+    exists = any(r.get("ref") == f"refs/tags/{tag}" for r in refs)
+    action, why = auto_tag_decision(version, latest, exists, run, jobs, notes)
+    print(f"앱 버전 {version} · 최신 릴리스 {latest} · {tag} 태그 {'있음' if exists else '없음'}")
+    if action == "fail":
+        fail(why)
+    for line in why:
+        print("  " + line)
+    if action == "tag":
+        problems = tag_and_dispatch(a.repo, tag, a.sha, gh_call)
+        if problems:
+            fail(problems)
+        print(f"🏷  {tag} → release.yml 을 깨웠다")
+    else:
+        print("태그·릴리스 없음.")
+    set_outputs(action=action, tag=tag if action == "tag" else "")
+
+
 # ───────────────────────────── gate ─────────────────────────────
 def cmd_gate(a):
     mode = release_mode(a.event, a.ref)
@@ -153,16 +271,7 @@ def cmd_gate(a):
         on_main = subprocess.run(["git", "merge-base", "--is-ancestor", a.sha, "origin/main"], cwd=ROOT)
         if on_main.returncode != 0:
             problems.append("태그 커밋이 origin/main 에 없다")
-        runs = gh_json(f"repos/{a.repo}/actions/workflows/{TESTS_WORKFLOW}/runs"
-                       f"?head_sha={a.sha}&event=push&branch=main&per_page=100")
-        run = pick_main_run((runs or {}).get("workflow_runs"), a.sha)
-        jobs = []
-        if run:
-            jobs = (gh_json(f"repos/{a.repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")
-                    or {}).get("jobs") or []
-            print(f"tests.yml main 실행 {run['id']}: {run.get('status')}/{run.get('conclusion')}")
-            for j in jobs:
-                print(f"  {j.get('conclusion')}: {j.get('name')}")
+        run, jobs = main_ci(a.repo, a.sha)
         problems += ci_problems(run, jobs)
         name, title = tag, f"Token Pet {tag}"
     else:
@@ -268,6 +377,10 @@ def main(argv=None):
             stream.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
+    t = sub.add_parser("auto-tag")
+    for name in ("repo", "sha"):
+        t.add_argument("--" + name, required=True)
+    t.set_defaults(fn=cmd_auto_tag)
     g = sub.add_parser("gate")
     for name in ("event", "ref", "sha", "repo", "run-id"):
         g.add_argument("--" + name, required=True)
