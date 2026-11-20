@@ -79,6 +79,12 @@ macOS 12+ (Apple Silicon · Intel con el zip universal) · autocontenido
      단가·창·중복 제거를 실제로 건드리는 릴리즈에서는 CLAUDE.md 의 Danger zone 대로
      반드시 ⚠️ 다시 보정 안내를 넣으세요. -->
 
+**v1.2.2**
+
+- Gemini 줄이 Claude와 같은 모양이 됩니다. 세션 다음에 주간 순서로 나오고, 같은 값을 한 번 더 보여 주던 "Gemini" 줄은 없어졌습니다.
+- 짧은 창의 이름을 Claude·Codex·Gemini 모두 "세션"으로 통일했습니다. 설정의 Gemini 게이지도 "세션"·"주간"·"Claude·GPT"로 바뀌고, 전에 고른 값은 그대로 이어지니 할 일은 없습니다.
+- macOS와 Windows가 같은 1.2.2로 나옵니다.
+
 **v1.2.1**
 
 - 앱 이름이 Token Pet으로 바뀌었습니다. 메뉴·설정·설치 화면에 새 이름이 보이고, 설정과 로그인은 그대로라 업데이트만 받으면 됩니다.

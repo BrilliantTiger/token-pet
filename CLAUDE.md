@@ -85,7 +85,7 @@ invites the reader to reason from it.
 | `tests/test_cli_install_login.py` | Gates for installing and signing in to the three CLIs from the app: release lookup, staged download and hash, single-entry extraction, signature check, the app-private bin, the daily update, each provider's sign-in, the "AI connections" rows, and the macOS wiring (by AST). Every server, archive and CLI is a stand-in under a temp directory; nothing is downloaded or run for real. |
 | `tests/test_gemini_login_check.py` | TOK-61: a signed-in Gemini is never offered [Sign in] (`gemini_link_state`, `ai_connect_detail`, the check before the sign-in window), a failed read is retried soon, and `child_env()` keeps the bundle's `SSL_CERT_FILE` / `SSL_CERT_DIR` away from every child. In the Windows CI job's list. |
 | `tests/test_gemini_windows.py` | The Windows side of Gemini reading, run on macOS by switching `sys.platform` and on real Windows in CI: where `agy.exe` is looked for, the credential probe's answer format, the `rundll32.exe` stand-in, `taskkill`. |
-| `tests/test_cli_state_matrix.py` | The provider × state × action scenario table (TOK-62): Claude Code / Codex / Gemini × not installed, installed only, signed in and readable, signed in with a certificate / network / server error, sign-in demanded — and for each, the settings row, what starting the flow launches, and whether values show. Fake CLIs run as real processes, and the Gemini sign-in window's script is actually executed (bash, PowerShell on Windows) per language and per `agy` ending. It is in the Windows CI job's list. The standard it pins: with sign-in data present the app never offers or opens a sign-in — it reads; a failed read is retried, not turned into [Sign in]. |
+| `tests/test_cli_state_matrix.py` | The provider × state × action scenario table (TOK-62): Claude Code / Codex / Gemini × not installed, installed only, signed in and readable, signed in with a certificate / network / server error, sign-in demanded — and for each, the settings row, what starting the flow launches, and whether values show. Fake CLIs run as real processes, and the Gemini sign-in window's script is actually executed (bash, PowerShell on Windows) per language and per `agy` ending. It is in the Windows CI job's list. The standard it pins: with sign-in data present the app never offers or opens a sign-in — it reads; a failed read is retried, not turned into [Sign in]. Since TOK-63 it also holds the shape of the line for all three providers and both adapters: session then weekly whatever order the server sends, no value shown twice, and no "5 hours" wording in anything a user reads. |
 | `windows/tests/test_win_ai_connect.py`, `windows/tests/test_win_gemini.py` | The port's wiring for the two above, by AST (PySide6 is not needed to run them). |
 | `verify_pet_payload.py` | Build gate: checks that the bundled `.claude_pet` payload actually landed in an artifact and matches the repo source byte for byte. It reads the expected file list out of `claude_pet.py`'s `BUNDLED_PET_README` / `BUNDLED_PET_IDS` / `BUNDLED_PET_FILES` via AST rather than importing it, so adding a pet cannot leave a hardcoded count checking the wrong number. Called by `release.sh` (`build`, and per-artifact before upload) and by `build_app.sh`. |
 | `verify_release_artifact.py` | Release gate: inspects the zip/dmg **that will be uploaded**, not a build directory. `scan` checks archive safety before any byte is extracted, `app` checks that the bundle's `Contents/Resources/claude_pet.py` is byte-identical to this checkout's and then hands the bundle to the updater's own preflight, `assets` checks the upload list against the updater's asset-name table. The code-hash check is the one the updater cannot do — it has no original to compare against, and a signature says *who built it*, never *what is inside*: a stale bundle re-signed today passes every other check. It **calls** `claude_pet`'s `_zip_members_are_safe` and `validate_update_app` rather than reimplementing them — which is why its diagnostics carry an `[update]` prefix. |
@@ -1038,9 +1038,21 @@ Gemini (since v1.2.0, macOS and Windows — `fetch_gemini_usage()` returns at on
 platform) is read by running the Antigravity CLI:
 `agy -p /usage --output-format json`, no shell, in the private folder `gemini_cli_cwd()`,
 under `GEMINI_AGY_TIMEOUT`. `parse_agy_usage()` turns the answer into rows of the usual shape
-`(label, pct_used, reset_dt, None)`: row 0 is `"gemini"` (the most-used Gemini bucket), then
-one `gemini_group:<bucket id>` per bucket; a bucket marked `"disabled": true` is left out.
-The gauges are `GEMINI_GAUGES = ("gemini", "limits", "group")`, filtered by
+`(label, pct_used, reset_dt, None)`: one `gemini_group:<bucket id>` per bucket and nothing
+else; a bucket marked `"disabled": true` is left out. **The Gemini line has Claude's shape
+(since v1.2.2, TOK-63)**: the Gemini bundle's session row, then its weekly row, and below
+them the Claude·GPT bundle's session and weekly rows. The order is made by the parser from
+the bucket's `window` (`gemini_window_seconds()`, shortest first, unknown windows last), never
+from the server's order — `agy` sends weekly first — and never from the bucket id. There is no
+`"gemini"` summary row any more: it showed one bucket's value a second time. The window names
+are the shared ones — `t("session")` / `t("weekly")`, and `gemini_group_session` /
+`gemini_group_weekly` (derived as `gemini_group` + that word) for the other bundle; no
+user-visible string calls the short window "5 hours" in any language, and
+`tests/test_cli_state_matrix.py` holds that for the app's strings, the READMEs, the release
+notes and the site.
+The gauges are `GEMINI_GAUGES = ("session", "weekly", "group")` (default session + weekly;
+the pre-1.2.2 names `"gemini"` and `"limits"` are read as session + weekly through
+`GEMINI_GAUGE_LEGACY`), filtered by
 `filter_gemini_rows()` against `gemini_gauges`, and `gemini_summary_segment()` returns the
 pill segment — **or nothing**. Gemini has no status segment: without rows its line is absent.
 

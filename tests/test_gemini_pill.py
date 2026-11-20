@@ -8,9 +8,13 @@ v2(2026-11-18): 사용량은 `agy -p "/usage" --output-format json` 에서 온�
 
 ── 계약 (Coordinator, TOK-47 v2) ────────────────────────────────────────────────────
 
-1. 설정: RUNTIME 기본값 `"show_gemini": True`, `"gemini_gauges": ["gemini"]`;
-   `GEMINI_GAUGES = ("gemini", "limits", "group")`; codex_gauges 처럼 `_gauge_list` 로 검증·저장,
-   망가진 값(목록이 아님) → ["gemini"].
+1. 설정: RUNTIME 기본값 `"show_gemini": True`, `"gemini_gauges": ["session", "weekly"]`;
+   `GEMINI_GAUGES = ("session", "weekly", "group")`; codex_gauges 처럼 검증·저장,
+   망가진 값(목록이 아님) → ["session", "weekly"]. 1.2.1 까지의 "gemini"·"limits" 는 세션 + 주간으로 읽는다.
+   **TOK-63(1.2.2, 대표님 2026-11-20)**: Gemini 줄은 Claude 와 같은 모양 — 세션 → 주간, 대표 "Gemini"
+   행(같은 값을 한 번 더 보이던 줄)은 없다, 짧은 창의 이름은 어느 제공자든 "세션"이다. 아래 3 은 그
+   전 계약이고 이 파일의 단언은 새 계약을 따른다: 행은 버킷마다 하나, Gemini 묶음 먼저, 묶음 안에서는
+   창이 짧은 것부터; 라벨은 t("session")·t("weekly"), 나머지 묶음은 "Claude·GPT " + 그 글자.
 2. `provider_shown(runtime, "gemini")` 는 `show_gemini` 를 따른다.
 3. 행(TOK-44 v2): 0행 `("gemini", …)`, 이어 모든 묶음의 버킷 `gemini_group:<bucket id>`, 서버 순서.
    게이지 "gemini" → 0행, 라벨 "Gemini"; "limits" → **Gemini 묶음**의 행, 라벨은 버킷 window 에 따라
@@ -96,7 +100,9 @@ R_FLASH = T_NOW + timedelta(hours=1, minutes=10, seconds=30)
 R_WEEK = T_NOW + timedelta(days=3, hours=4, minutes=20, seconds=30)
 R_5H = T_NOW + timedelta(hours=4, minutes=5, seconds=30)
 
-HEAD = ("gemini", 75.0, R_HEAD, None)
+HEAD = ("gemini_group:gemini-5h", 75.0, R_HEAD, None)      # Gemini 묶음의 세션 창
+# gemini_summary_segment 를 직접 부르는 테스트가 쓰는 버킷 표(조회 경로가 적는 GEMINI_BUCKETS 의 대역).
+SEGMENT_BUCKETS = {"gemini-5h": ("5h", True), "gemini-weekly": ("weekly", True), "3p-5h": ("5h", False)}
 # v1 의 모델 행 — v2 에는 그런 행도 게이지도 없다. 남은 것이 있으면 어느 게이지에서도 보이지 않아야 한다.
 STALE_MODEL = ("gemini:gemini-2.5-flash", 60.0, R_FLASH, None)
 
@@ -136,7 +142,7 @@ G_OTHER_SMALL = {"name": "Claude and GPT models", "description": "synthetic", "b
 def _rt(**over):
     rt = {"show_claude": True, "claude_gauges": ["session", "weekly"],
           "show_codex": True, "codex_mode": "sub", "codex_gauges": ["session", "weekly"],
-          "show_gemini": True, "gemini_gauges": ["gemini"]}
+          "show_gemini": True, "gemini_gauges": ["session", "weekly"]}
     rt.update(over)
     return rt
 
@@ -146,7 +152,8 @@ def _segment(test, rt, rows, auth_error=False, last_error=None, lang="en"):
     fn = _require("gemini_summary_segment")
     claude_pet.L["lang"] = lang
     status = {"auth_error": bool(auth_error), "last_error": last_error}
-    with mock.patch.object(claude_pet, "GEMINI_STATUS", status, create=True):
+    with mock.patch.object(claude_pet, "GEMINI_STATUS", status, create=True), \
+            mock.patch.dict(claude_pet.GEMINI_BUCKETS, SEGMENT_BUCKETS, clear=True):
         return fn(rt, rows, auth_error=auth_error)
 
 
@@ -156,14 +163,14 @@ def _tr(lang, key):
 
 def _group_label(lang, window):
     """나머지 묶음 라벨의 기대값 — 주간은 그 로케일의 t("weekly") 표기를 그대로 품는다."""
-    return {"5h": _tr(lang, "gemini_group_5h"),
+    return {"5h": "Claude·GPT " + claude_pet.TR[lang]["session"],
             "weekly": "Claude·GPT " + claude_pet.TR[lang]["weekly"],
             None: "Claude·GPT"}[window]
 
 
 def _limit_label(lang, window):
-    """Gemini 묶음 라벨의 기대값 — 5시간은 새 TR 키 gemini_5h, 주간은 그 로케일의 t("weekly")."""
-    return {"5h": _tr(lang, "gemini_5h"), "weekly": claude_pet.TR[lang]["weekly"]}[window]
+    """Gemini 묶음 라벨의 기대값 — Claude·Codex 와 같은 글자: 세션은 t("session"), 주간은 t("weekly")."""
+    return {"5h": claude_pet.TR[lang]["session"], "weekly": claude_pet.TR[lang]["weekly"]}[window]
 
 
 def _labels(seg):
@@ -199,10 +206,10 @@ class GeminiConfigTests(_Guard):
         """기본값: 보이고, 게이지는 0행 하나(TOK-43 사용자 결정 — 기본은 Gemini 한 줄).
         Rivals: 세 게이지를 다 켬; show_gemini 기본 False; 90fd32b 의 ("gemini", "models", "group")
         — v2 에는 모델별 줄이 없다; 순서·이름이 다름(체크박스와 필터가 같은 이름을 써야 한다)."""
-        self.assertEqual(_require("GEMINI_GAUGES"), ("gemini", "limits", "group"))
+        self.assertEqual(_require("GEMINI_GAUGES"), ("session", "weekly", "group"))
         d = _runtime_literal_defaults()
         self.assertIs(d.get("show_gemini"), True)
-        self.assertEqual(d.get("gemini_gauges"), ["gemini"])
+        self.assertEqual(d.get("gemini_gauges"), ["session", "weekly"])
 
     def test_the_keys_are_loaded_owned_and_normalised_like_codex(self):
         """apply_config 가 두 키를 읽고, 손으로 고친 값을 Codex 처럼 정규화한다("false" → False,
@@ -218,7 +225,10 @@ class GeminiConfigTests(_Guard):
                                  "gemini_gauges": ["group", "nope", "models", "limits"],
                                  "lang": claude_pet.L["lang"]})
         self.assertIs(claude_pet.RUNTIME.get("show_gemini"), False)
-        self.assertEqual(claude_pet.RUNTIME.get("gemini_gauges"), ["limits", "group"])
+        self.assertEqual(claude_pet.RUNTIME.get("gemini_gauges"), ["session", "weekly", "group"])
+        claude_pet.apply_config({"gemini_gauges": ["group", "nope", "models", "weekly"],
+                                 "lang": claude_pet.L["lang"]})
+        self.assertEqual(claude_pet.RUNTIME.get("gemini_gauges"), ["weekly", "group"])
 
     def test_the_settings_plan_validates_gemini_like_codex(self):
         """plan_settings_save 가 show_gemini 를 bool 로, gemini_gauges 를 GEMINI_GAUGES 순서로 거른다.
@@ -232,8 +242,10 @@ class GeminiConfigTests(_Guard):
                 "codex_gauges": ["weekly"], "openai_admin_key": "", "codex_budget": "0"}
         cases = (
             ("filtered", {"show_gemini": 1,
-                          "gemini_gauges": ["group", "bogus", "limits", "models", "gemini"]},
-             True, ["gemini", "limits", "group"]),
+                          "gemini_gauges": ["group", "bogus", "weekly", "models", "session"]},
+             True, ["session", "weekly", "group"]),
+            ("legacy names", {"show_gemini": 1, "gemini_gauges": ["gemini"]}, True, ["session", "weekly"]),
+            ("one", {"show_gemini": 1, "gemini_gauges": ["weekly"]}, True, ["weekly"]),
             ("empty", {"show_gemini": 0, "gemini_gauges": []}, False, []),
         )
         for name, extra, show, gauges in cases:
@@ -242,11 +254,11 @@ class GeminiConfigTests(_Guard):
                 self.assertIsNone(err)
                 self.assertIs(plan["updates"].get("show_gemini"), show)
                 self.assertEqual(plan["updates"].get("gemini_gauges"), gauges)
-        base = {"show_gemini": False, "gemini_gauges": ["limits"]}
+        base = {"show_gemini": False, "gemini_gauges": ["weekly"]}
         plan, err = claude_pet.plan_settings_save(base, form)
         self.assertIsNone(err)
         self.assertIs(plan["updates"].get("show_gemini"), False)
-        self.assertEqual(plan["updates"].get("gemini_gauges"), ["limits"])
+        self.assertEqual(plan["updates"].get("gemini_gauges"), ["weekly"])
 
     def test_provider_shown_honours_show_gemini_and_its_gauges(self):
         """Rivals: provider_gauges 가 claude 가 아니면 CODEX_GAUGES 로 거름(그러면 "limits"·"group"
@@ -255,7 +267,8 @@ class GeminiConfigTests(_Guard):
         _require("GEMINI_GAUGES")
         shown = claude_pet.provider_shown
         self.assertTrue(shown(_rt(), "gemini"))
-        self.assertTrue(shown(_rt(gemini_gauges=["limits"]), "gemini"))
+        self.assertTrue(shown(_rt(gemini_gauges=["weekly"]), "gemini"))
+        self.assertTrue(shown(_rt(gemini_gauges=["gemini"]), "gemini"), "1.2.1 의 저장값이 숨겨졌다")
         self.assertTrue(shown(_rt(gemini_gauges=["group"]), "gemini"))
         self.assertFalse(shown(_rt(show_gemini=False), "gemini"))
         self.assertFalse(shown(_rt(show_gemini="false"), "gemini"))
@@ -263,9 +276,9 @@ class GeminiConfigTests(_Guard):
         self.assertTrue(shown(_rt(gemini_gauges="broken"), "gemini"),
                         "목록이 아닌 값은 기본값으로 — 숨기지 않는다(provider_gauges 규칙)")
         self.assertEqual(claude_pet.provider_gauges(_rt(gemini_gauges="broken"), "gemini"),
-                         ["gemini"], "망가진 gemini_gauges 는 기본값 [\"gemini\"] 로(Coordinator 결정 6)")
+                         ["session", "weekly"], "망가진 gemini_gauges 는 기본값(세션 + 주간)으로")
         claude_pet.apply_config({"gemini_gauges": {"x": 1}, "lang": claude_pet.L["lang"]})
-        self.assertEqual(claude_pet.RUNTIME.get("gemini_gauges"), ["gemini"])
+        self.assertEqual(claude_pet.RUNTIME.get("gemini_gauges"), ["session", "weekly"])
 
 
 # ═════════════════════════════ 3·4·8. 구간 ═════════════════════════════
@@ -277,14 +290,14 @@ class GeminiSegmentTests(_Guard):
     def test_the_headline_gauge_shows_only_row_zero(self):
         """"gemini" 게이지는 0행만, 라벨 "Gemini". 묶음 행·모르는 라벨·v1 모델 행은 내지 않는다.
         Rivals: 묶음 행까지 냄; 모르는 라벨(gemini_other)을 살림; v1 모델 행을 살림."""
-        rows = [HEAD, STALE_MODEL, ("gemini_group:gemini-5h", 75.0, R_HEAD, None),
+        rows = [HEAD, STALE_MODEL, ("gemini", 75.0, R_HEAD, None),
                 ("gemini_group:3p-5h", 10.0, R_5H, None), ("gemini_other", 5.0, None, None)]
-        for gauges in (["gemini"], "broken"):
+        for gauges in (["session"], ["gemini"], "broken"):
             with self.subTest(gauges=gauges):
                 seg = _segment(self, _rt(gemini_gauges=gauges), list(rows))
                 self.assertIsNotNone(seg)
                 self.assertEqual(seg[0], "exact")
-                self.assertEqual(_labels(seg), ["Gemini"])
+                self.assertEqual(_labels(seg), ["Session"], "세션 한 줄 — 옛 대표 행(\"gemini\")은 버린다")
 
     def test_there_is_no_per_model_line_any_more(self):
         """v2: 모델별 줄은 없다. v1 의 `gemini:<modelId>` 행이 남아 있어도 어느 게이지에서도 보이지 않고,
@@ -308,7 +321,7 @@ class GeminiSegmentTests(_Guard):
         payload = seg[1]
         now = datetime.now(UTC)
         want = [(75.0, claude_pet.fmt_countdown(R_HEAD, now))]
-        seg2 = _segment(self, _rt(gemini_gauges=["gemini"]), [("gemini", 33.5, None, None)])
+        seg2 = _segment(self, _rt(gemini_gauges=["gemini"]), [("gemini_group:gemini-5h", 33.5, None, None)])
         payload = payload + seg2[1]
         want.append((33.5, None))
         self.assertEqual(len(payload), len(want))
@@ -327,7 +340,7 @@ class GeminiSegmentTests(_Guard):
         _require("parse_agy_usage")
         cases = (("None", None, ["gemini"], None),
                  ("empty", [], ["gemini"], None),
-                 ("filtered away", [HEAD], ["limits", "group"], None),
+                 ("filtered away", [HEAD], ["weekly", "group"], None),
                  ("unknown labels", [("gemini_other", 5.0, None, None)], ["gemini"], None),
                  ("timeout", None, ["gemini"], "timeout"),
                  ("agy failed", None, ["gemini"], "agy_failed"),
@@ -395,69 +408,74 @@ class GeminiLimitsAndGroupTests(AgyCase):
         return seg[1]
 
     def test_limits_are_the_gemini_group_rows_labelled_by_their_window(self):
-        """"limits" → Gemini 묶음의 버킷만, 서버 순서, 라벨은 버킷의 window 로: 5h → t("gemini_5h"),
-        weekly → t("weekly"). ko 는 "주간"/"5시간". 값은 쓴 비율. Gemini 묶음은 응답의 **둘째** 묶음이다.
-        Rivals: 첫 묶음을 Gemini 로(Claude·GPT 행이 나옴); 모든 묶음 행; id 접미사로 window 를 읽음
-        (gemini-a 를 모름, gemini-weekly 를 주간으로); 서버 순서로 라벨(첫째 = 5h); "Claude·GPT …" 라벨을
-        Gemini 묶음에도; 0행을 섞음; 남은 비율을 그대로."""
+        """"session"·"weekly" → Gemini 묶음의 버킷만, **창이 짧은 것부터**(세션 → 주간, 같은 창끼리는 서버
+        순서), 라벨은 버킷의 window 로: 5h → t("session"), weekly → t("weekly"). ko 는 "세션"/"주간". 값은 쓴
+        비율. Gemini 묶음은 응답의 **둘째** 묶음이고 서버는 주간을 먼저 준다.
+        Rivals: 서버 순서 그대로(주간이 먼저); 첫 묶음을 Gemini 로(Claude·GPT 행이 나옴); 모든 묶음 행; id
+        접미사로 window 를 읽음(gemini-a 를 모름, gemini-weekly 를 주간으로); "Claude·GPT …" 라벨을 Gemini
+        묶음에도; 대표 행을 섞음; 남은 비율을 그대로; "5시간" 같은 다른 이름."""
         for lang in ("ko", "en"):
             with self.subTest(lang=lang):
-                got = self.labels([G_OTHER, G_GEMINI], ["limits"], lang)
-                self.assertIsNotNone(got, "limits 게이지에 보일 줄이 없다")
+                got = self.labels([G_OTHER, G_GEMINI], ["session", "weekly"], lang)
+                self.assertIsNotNone(got, "세션·주간 게이지에 보일 줄이 없다")
                 self.assertEqual([r[0] for r in got],
-                                 [_limit_label(lang, "weekly"), _limit_label(lang, "5h"),
+                                 [_limit_label(lang, "5h"), _limit_label(lang, "weekly"),
                                   _limit_label(lang, "weekly")])
-                self.assertEqual([round(r[1], 6) for r in got], [40.0, 75.0, 50.0])
+                self.assertEqual([round(r[1], 6) for r in got], [75.0, 40.0, 50.0])
                 self.assertTrue(all(r[2] is False for r in got), "Gemini 행에 급증 표식")
-        self.assertEqual((_limit_label("ko", "weekly"), _limit_label("ko", "5h")), ("주간", "5시간"))
+                only = self.labels([G_OTHER, G_GEMINI], ["session"], lang)
+                self.assertEqual([(r[0], round(r[1], 6)) for r in only], [(_limit_label(lang, "5h"), 75.0)])
+                only = self.labels([G_OTHER, G_GEMINI], ["weekly"], lang)
+                self.assertEqual([round(r[1], 6) for r in only], [40.0, 50.0])
+        self.assertEqual((_limit_label("ko", "5h"), _limit_label("ko", "weekly")), ("세션", "주간"))
 
     def test_group_is_the_other_groups_rows_with_the_claude_gpt_labels(self):
-        """"group" → Gemini 묶음이 **아닌** 묶음의 버킷만, 서버 순서. 라벨은 window 로 "Claude·GPT 주간"/
-        "Claude·GPT 5시간", window 가 없거나 모르는 값이면 "Claude·GPT". en 주간은 t("weekly") 표기 그대로.
+        """"group" → Gemini 묶음이 **아닌** 묶음의 버킷만, 창이 짧은 것부터, 창을 모르는 버킷은 끝. 라벨은
+        window 로 "Claude·GPT 세션"/"Claude·GPT 주간", 세션도 주간도 아닌 창(monthly)이나 window 가 없으면
+        "Claude·GPT". 창의 글자는 그 로케일의 t("session")·t("weekly") 그대로.
         Rivals: 90fd32b(모든 gemini_group: 행 — Gemini 묶음까지); id 접미사 파싱(3p-a 를 모름, x-weekly 를
-        주간으로, y-5h 를 5h 로); 서버 순서로 라벨; en 소문자 "weekly"."""
+        주간으로, y-5h 를 세션으로); 서버 순서; monthly 에 "주간"; en 소문자 "weekly"."""
         for lang in ("ko", "en"):
             with self.subTest(lang=lang):
                 got = self.labels([G_OTHER, G_GEMINI], ["group"], lang)
                 self.assertIsNotNone(got, "group 게이지에 보일 줄이 없다")
                 self.assertEqual([r[0] for r in got],
-                                 [_group_label(lang, "weekly"), _group_label(lang, "5h"),
+                                 [_group_label(lang, "5h"), _group_label(lang, "weekly"),
                                   _group_label(lang, None), _group_label(lang, None)])
-                self.assertEqual([round(r[1], 6) for r in got], [10.0, 90.0, 20.0, 30.0])
-        self.assertEqual((_group_label("ko", "weekly"), _group_label("ko", "5h")),
-                         ("Claude·GPT 주간", "Claude·GPT 5시간"))
+                self.assertEqual([round(r[1], 6) for r in got], [90.0, 10.0, 30.0, 20.0])
+        self.assertEqual((_group_label("ko", "5h"), _group_label("ko", "weekly")),
+                         ("Claude·GPT 세션", "Claude·GPT 주간"))
 
     def test_every_gauge_together_keeps_row_order(self):
-        """셋 다 고르면 0행, 이어 버킷 행이 **서버 순서**로(여기서는 나머지 묶음이 먼저). 0행은 Gemini 묶음의
-        가장 낮은 남은 비율(가운데 버킷 0.25 → 75%)이고 나머지 묶음의 더 낮은 0.1 이 아니다.
-        Rivals: 게이지 순서로 재배열(limits 가 group 앞); 0행에 모든 묶음을 섞음(90%); 한 버킷을 두 번."""
-        got = self.labels([G_OTHER, G_GEMINI], ["group", "limits", "gemini"], "en")
+        """셋 다 고르면 Gemini 묶음의 세션 → 주간, 그 아래 나머지 묶음의 세션 → 주간 — 서버는 나머지 묶음을
+        먼저, 주간을 먼저 줬다. 버킷 일곱에 줄 일곱: 대표 행이 한 버킷을 두 번 보이지 않는다.
+        Rivals: 서버 순서; 게이지를 적은 순서로 재배열; 대표 "Gemini" 행; 한 버킷을 두 번."""
+        got = self.labels([G_OTHER, G_GEMINI], ["group", "weekly", "session"], "en")
         self.assertIsNotNone(got)
         self.assertEqual([r[0] for r in got],
-                         ["Gemini",
-                          _group_label("en", "weekly"), _group_label("en", "5h"),
-                          _group_label("en", None), _group_label("en", None),
-                          _limit_label("en", "weekly"), _limit_label("en", "5h"),
-                          _limit_label("en", "weekly")])
-        self.assertAlmostEqual(got[0][1], 75.0)
+                         [_limit_label("en", "5h"), _limit_label("en", "weekly"),
+                          _limit_label("en", "weekly"),
+                          _group_label("en", "5h"), _group_label("en", "weekly"),
+                          _group_label("en", None), _group_label("en", None)])
+        self.assertEqual([round(r[1], 6) for r in got], [75.0, 40.0, 50.0, 90.0, 10.0, 30.0, 20.0])
         now = datetime.now(UTC)
         self.assertEqual(got[0][3], claude_pet.fmt_countdown(R_HEAD, now))
-        self.assertEqual(got[6][3], claude_pet.fmt_countdown(R_HEAD, now))
-        self.assertIsNone(got[3][3], "리셋이 없는 버킷에 카운트다운을 지어냈다")
+        self.assertIsNone(got[6][3], "리셋이 없는 버킷에 카운트다운을 지어냈다")
 
     def test_a_gemini_group_known_only_by_its_name_still_splits_limits_from_group(self):
-        """버킷 id 에 "gemini-" 가 없으면 Gemini 묶음은 이름으로 찾는다 — 필의 limits/group 도 그 소속을
-        따른다. Rival: 구간이 라벨의 id 접두사("gemini_group:gemini-")만 보고 가름(limits 가 비고 group 에
+        """버킷 id 에 "gemini-" 가 없으면 Gemini 묶음은 이름으로 찾는다 — 필의 세션·주간/group 도 그 소속을
+        따른다. Rival: 구간이 라벨의 id 접두사("gemini_group:gemini-")만 보고 가름(세션·주간이 비고 group 에
         Gemini 묶음이 섞임)."""
         groups = [G_OTHER_SMALL, G_GEMINI_BY_NAME]
-        got = self.labels(groups, ["limits"], "ko")
-        self.assertIsNotNone(got, "이름으로 찾은 Gemini 묶음의 limits 줄이 없다")
-        self.assertEqual([(r[0], round(r[1], 6)) for r in got], [("5시간", 60.0), ("주간", 30.0)])
+        got = self.labels(groups, ["session", "weekly"], "ko")
+        self.assertIsNotNone(got, "이름으로 찾은 Gemini 묶음의 줄이 없다")
+        self.assertEqual([(r[0], round(r[1], 6)) for r in got], [("세션", 60.0), ("주간", 30.0)])
         got = self.labels(groups, ["group"], "ko")
         self.assertIsNotNone(got)
         self.assertEqual([(r[0], round(r[1], 6)) for r in got], [("Claude·GPT 주간", 10.0)])
         got = self.labels(groups, ["gemini"], "ko")
-        self.assertEqual([(r[0], round(r[1], 6)) for r in got], [("Gemini", 60.0)])
+        self.assertEqual([(r[0], round(r[1], 6)) for r in got], [("세션", 60.0), ("주간", 30.0)],
+                         "1.2.1 의 저장값 [\"gemini\"] 는 세션 + 주간이다")
 
     def test_a_logged_out_agy_shows_nothing_in_the_pill(self):
         """v4: 로그인 안 됨의 세 모양(키체인 항목 없음; 항목은 있는데 agy 가 로그인을 요구 — 끝나지 않는
@@ -486,7 +504,7 @@ class GeminiLimitsAndGroupTests(AgyCase):
         """Gemini 묶음만 온 응답에서 "group" 만 고르면 블록 없음, 나머지 묶음만 온 응답에서 "limits"·"gemini"
         만 고르면 블록 없음. Rival: 빈 게이지를 다른 게이지의 행으로 채움; 0% 를 지어냄."""
         self.assertIsNone(self.labels([G_GEMINI], ["group"]))
-        self.assertIsNone(self.labels([G_OTHER], ["limits", "gemini"]))
+        self.assertIsNone(self.labels([G_OTHER], ["session", "weekly", "gemini"]))
 
 
 # ═════════════════════════════ 4·6. 번역 ═════════════════════════════
@@ -564,18 +582,14 @@ class GeminiTranslationTests(unittest.TestCase):
             with self.subTest(lang=lang):
                 table = tr[lang]
                 self.assertEqual(table.get("gemini"), "Gemini")
-                five = table.get("gemini_5h")
-                self.assertTrue(isinstance(five, str) and five.strip(), "gemini_5h 가 없다")
-                self.assertNotEqual(five, table["weekly"])
-                self.assertNotIn("Claude", five)
+                self.assertEqual([k for k in table if "5h" in k], [],
+                                 "5시간 표기의 키가 남아 있다 — 그 창의 이름은 t('session') 하나다(TOK-63)")
                 base = table.get("gemini_group")
-                h5, wk = table.get("gemini_group_5h"), table.get("gemini_group_weekly")
-                self.assertTrue(base and h5 and wk, "그룹 라벨(gemini_group/_5h/_weekly)이 없다")
+                ss, wk = table.get("gemini_group_session"), table.get("gemini_group_weekly")
+                self.assertTrue(base and ss and wk, "그룹 라벨(gemini_group/_session/_weekly)이 없다")
                 self.assertTrue(base.startswith("Claude·GPT"))
-                self.assertTrue(h5.startswith(base + " ") and wk.startswith(base + " "))
-                self.assertNotEqual(h5, wk)
-                self.assertIn(table["weekly"], wk,
-                              "주간 그룹 라벨이 이 로케일의 t('weekly') 표기를 쓰지 않는다")
+                self.assertEqual((ss, wk), (base + " " + table["session"], base + " " + table["weekly"]),
+                                 "그룹 라벨이 이 로케일의 t('session')·t('weekly') 표기를 쓰지 않는다")
                 login = table.get("menu_gemini_login")
                 self.assertTrue(isinstance(login, str) and "Gemini" in login and "agy" in login,
                                 "menu_gemini_login 이 없거나 Gemini·agy 를 말하지 않는다: %r" % login)
@@ -583,10 +597,9 @@ class GeminiTranslationTests(unittest.TestCase):
                     self.assertNotIn(gone, table, "필의 Gemini 상태 줄 TR 이 남아 있다: %s" % gone)
                 self.assertTrue(str(table.get("s_sec_gemini", "")).strip(),
                                 "설정 구역 제목 s_sec_gemini 가 없다")
-        self.assertEqual(tr["ko"].get("gemini_5h"), "5시간")
         self.assertIn("로그인", str(tr["ko"].get("menu_gemini_login")))
-        self.assertEqual((tr["ko"].get("gemini_group_5h"), tr["ko"].get("gemini_group_weekly")),
-                         ("Claude·GPT 5시간", "Claude·GPT 주간"))
+        self.assertEqual((tr["ko"].get("gemini_group_session"), tr["ko"].get("gemini_group_weekly")),
+                         ("Claude·GPT 세션", "Claude·GPT 주간"))
         self.assertEqual(tr["en"].get("gemini_group_weekly"), "Claude·GPT " + tr["en"]["weekly"])
 
     def test_every_gemini_key_the_settings_panel_uses_exists_in_every_locale(self):
@@ -806,7 +819,7 @@ class GeminiSettingsPanelTests(unittest.TestCase):
         self.assertIn("GEMINI_GAUGES", _names(open_settings))
         self.assertNotIn("s_gauge_models", _t_keys(open_settings),
                          "설정 창에 v1 의 모델별 체크박스 제목이 남아 있다")
-        self.assertEqual(_require("GEMINI_GAUGES"), ("gemini", "limits", "group"))
+        self.assertEqual(_require("GEMINI_GAUGES"), ("session", "weekly", "group"))
 
     def test_save_settings_sends_show_gemini_and_gemini_gauges(self):
         """save_settings 의 폼이 두 키를 싣는다(그래야 plan_settings_save 가 저장한다).

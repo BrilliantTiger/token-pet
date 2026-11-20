@@ -203,10 +203,10 @@ class WinGeminiSettingsTests(unittest.TestCase):
         dlg = _class(self.tree, "SettingsDialog")
         self.assertIsNotNone(dlg)
         keys = _t_keys(dlg)
-        for key in ("s_sec_gemini", "s_gauge_gemini", "s_gauge_limits", "s_gauge_group"):
+        for key in ("s_sec_gemini", "s_gauge_session", "s_gauge_weekly", "s_gauge_group"):
             self.assertIn(key, keys)
         self.assertIn("show_gemini", _strs(dlg))
-        self.assertTrue({"GEMINI_GAUGES"} & _names(dlg) or {"gemini", "limits", "group"} <= _strs(dlg),
+        self.assertTrue({"GEMINI_GAUGES"} & _names(dlg) or {"session", "weekly", "group"} <= _strs(dlg),
                         "게이지 체크박스가 cp.GEMINI_GAUGES 의 셋이 아니다")
         pht = [n.value.elts[1].value for n in dlg.body
                if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Tuple)

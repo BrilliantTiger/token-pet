@@ -2417,7 +2417,7 @@ class SettingsDialog(QDialog):
         show_gemini = section(t("s_sec_gemini"), "show_gemini", y)
         y -= 30
         label(t("s_gauges"), 20, y)
-        gemini_title = {"gemini": t("s_gauge_gemini"), "limits": t("s_gauge_limits"),
+        gemini_title = {"session": t("s_gauge_session"), "weekly": t("s_gauge_weekly"),
                         "group": t("s_gauge_group")}
         chosen = set(cp.provider_gauges(R, "gemini"))
         gemini_g = {}

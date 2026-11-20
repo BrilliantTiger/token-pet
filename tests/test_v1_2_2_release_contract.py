@@ -1,4 +1,24 @@
-"""Static release-preparation gates for v1.2.1.
+"""Static release-preparation gates for v1.2.2.
+
+Status as of 2026-11-20 (TOK-63): v1.2.1 is published — tag ``v1.2.1``, GitHub release
+"Token Pet v1.2.1" (not a draft, published 2026-11-19T08:55:39Z).  From the ``**v1.2.1**``
+heading to the end, ``git show v1.2.1:RELEASE_NOTES.md`` and this tree's file are the same
+25742 bytes, so that suffix is frozen and pinned (``PUBLISHED_V121_AND_OLDER_SHA256``) beside
+the older pins.  The single unpublished section above it is ``**v1.2.2**``, and
+``APP_VERSION`` is ``"1.2.2"`` — a fix-level bump: the Gemini line takes Claude's shape
+(the user, 2026-11-20: "claude 처럼 5시간, 주간 순으로 나와야지", "그리고 5시간이 세션이잖아!
+용어 통일좀 해") — session then weekly, no row showing a value twice, one name for the short
+window.
+
+``StagedV121NotesFormatTests`` became ``PublishedV121NotesContractTests`` with its method
+names unchanged; three assertions were re-scoped because they compared against "the current
+version" (the numbers-are-the-version check, the heading check, the Windows version).
+``StagedV122NotesFormatTests`` holds the new section to CLAUDE.md's format and to what it
+must say.  The behaviour itself is gated in tests/test_cli_state_matrix.py.
+
+The paragraphs below are the v1.2.1 module's docstring, kept as it was reviewed.
+
+Static release-preparation gates for v1.2.1.
 
 Status as of 2026-11-19 (TOK-59): v1.2.0 is published — tag ``v1.2.0``, GitHub release
 "ClaudePet v1.2.0" (not a draft, published 2026-11-19T06:33:15Z).  From the ``**v1.2.0**``
@@ -519,6 +539,12 @@ PUBLISHED_V110_AND_OLDER_SHA256 = (
 # v1.2.0-and-older: from the ``**v1.2.0**`` heading through EOF, computed from the tag's tree
 # (`git show v1.2.0:RELEASE_NOTES.md`, suffix 25227 bytes) and identical in the working tree
 # before the v1.2.1 section is staged above it; `gh release view v1.2.0` is not a draft.
+# v1.2.1-and-older: from the ``**v1.2.1**`` heading through EOF, computed from the tag's tree
+# (`git show v1.2.1:RELEASE_NOTES.md`, suffix 25742 bytes) and identical in the working tree
+# before the v1.2.2 section is staged above it; `gh release view v1.2.1` is not a draft.
+PUBLISHED_V121_AND_OLDER_SHA256 = (
+    "bb90ee57d0e026c6fa1076830e1d7443c43342073159981c40137fc0cc3f7584"
+)
 PUBLISHED_V120_AND_OLDER_SHA256 = (
     "731c63d49b1a0fca6731ea324af794a76fd0e80a33262e6f93e9a166a249eb86"
 )
@@ -972,16 +998,16 @@ def _guards(root: ast.AST, node: ast.AST) -> list[ast.AST]:
 
 
 class VersionAndPinContractTests(unittest.TestCase):
-    def test_v121_version_and_final_source_pins_propagate(self):
+    def test_v122_version_and_final_source_pins_propagate(self):
         problems: list[str] = []
 
         versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
-        if versions != ["1.2.1"]:
-            problems.append(f"APP_VERSION must be one literal '1.2.1', got {versions!r}")
+        if versions != ["1.2.2"]:
+            problems.append(f"APP_VERSION must be one literal '1.2.2', got {versions!r}")
 
         verifier_text = RELEASE_VERIFIER.read_text(encoding="utf-8")
-        if "--expect-version 1.2.1" not in verifier_text:
-            problems.append("verify_release_artifact.py usage must show --expect-version 1.2.1")
+        if "--expect-version 1.2.2" not in verifier_text:
+            problems.append("verify_release_artifact.py usage must show --expect-version 1.2.2")
         # A bare version-number substring check would false-positive here: "1.0" is a
         # literal prefix of "1.0.1" (as "0.26" was of "0.26.1", and "1.1" is of "1.1.0"), so a naive
         # `f"--expect-version {stale}" in text` would flag the very string this test just
@@ -992,10 +1018,11 @@ class VersionAndPinContractTests(unittest.TestCase):
         # catches it; "1.2" is the two-part spelling the old scheme would have used — the
         # lookahead below keeps it from firing on "1.2.0"); the rest are the versions before.
         # For 1.2.1 the list gained "1.2.0" (the version before) and the wrong bumps "1.2.2",
-        # "1.2.10" and "1.2.01"; "1.2.1" left it.
-        for stale in ("1.2.0", "1.1.2", "1.1.1", "1.1.0", "1.0.1", "1.0.0", "0.26.1", "0.26",
-                      "0.25", "0.24", "1.0", "1.1", "1.1.3", "1.2", "1.2.2", "1.3.0", "2.0.0",
-                      "1.2.00", "1.2.10", "1.2.01"):
+        # "1.2.10" and "1.2.01"; "1.2.1" left it.  For 1.2.2 "1.2.1" came back (the version
+        # before), "1.2.2" left, and "1.2.3", "1.2.20" and "1.2.02" joined.
+        for stale in ("1.2.1", "1.2.0", "1.1.2", "1.1.1", "1.1.0", "1.0.1", "1.0.0", "0.26.1", "0.26",
+                      "0.25", "0.24", "1.0", "1.1", "1.1.3", "1.2", "1.2.3", "1.3.0", "2.0.0",
+                      "1.2.00", "1.2.10", "1.2.01", "1.2.20", "1.2.02"):
             if re.search(rf"--expect-version {re.escape(stale)}(?!\.?\d)", verifier_text):
                 problems.append(
                     f"verify_release_artifact.py still advertises --expect-version {stale}"
@@ -1158,7 +1185,18 @@ class PublishedNotesImmutabilityTests(unittest.TestCase):
             "published v1.2.0-and-older bytes were rewritten or dropped",
         )
 
-    def test_v121_is_the_only_unpublished_heading_and_sits_directly_above_v120(self):
+    def test_published_v121_and_older_bytes_are_untouched(self):
+        raw = RELEASE_NOTES.read_bytes()
+        published_marker = b"**v1.2.1**"
+        self.assertEqual(raw.count(published_marker), 1, "published v1.2.1 heading changed")
+        published_suffix = raw[raw.index(published_marker) :]
+        self.assertEqual(
+            hashlib.sha256(published_suffix).hexdigest(),
+            PUBLISHED_V121_AND_OLDER_SHA256,
+            "published v1.2.1-and-older bytes were rewritten or dropped",
+        )
+
+    def test_v122_is_the_only_unpublished_heading_and_sits_directly_above_v121(self):
         """Rivals this heading-shape regex must not miss: a stale two-part-only pattern
         (``\\d+\\.\\d+``) silently fails to match a three-part heading like
         ``**v0.26.1**`` at all — a regex bug that would have made every assertion below
@@ -1174,11 +1212,11 @@ class PublishedNotesImmutabilityTests(unittest.TestCase):
         self.assertTrue(headings, "changelog has no release heading")
         self.assertEqual(
             headings[:2],
-            ["1.2.1", "1.2.0"],
-            "the unpublished v1.2.1 section must sit directly above the published "
-            f"v1.2.0 heading, with nothing newer above it; got {headings[:2]!r}",
+            ["1.2.2", "1.2.1"],
+            "the unpublished v1.2.2 section must sit directly above the published "
+            f"v1.2.1 heading, with nothing newer above it; got {headings[:2]!r}",
         )
-        self.assertEqual(headings.count("1.2.1"), 1, "v1.2.1 heading must appear once")
+        self.assertEqual(headings.count("1.2.2"), 1, "v1.2.2 heading must appear once")
 
 
 class PublishedV023NotesContractTests(unittest.TestCase):
@@ -4174,8 +4212,9 @@ class PublishedV112NotesContractTests(unittest.TestCase):
         # staged one (the "APP_VERSION is the heading" check moved to StagedV120NotesFormatTests).
         # Re-scoped again for v1.2.1: v1.2.0 was published above it, so it is the third.
         headings = [h for h, _ in _changelog_sections(self.text)]
-        self.assertEqual(headings[2:3], ["1.1.2"],
-                         f"v1.1.2 must sit directly below v1.2.0; got {headings[:3]!r}")
+        # And for v1.2.2: v1.2.1 was published above that, so it is the fourth.
+        self.assertEqual(headings[3:4], ["1.1.2"],
+                         f"v1.1.2 must sit directly below v1.2.0; got {headings[:4]!r}")
 
     def test_v112_the_quoted_status_is_the_loading_line_the_fix_covers(self):
         """The one quote, "조회 중…", must be ``TR["ko"]["loading"]`` exactly — the global
@@ -4440,7 +4479,8 @@ class PublishedV120NotesContractTests(unittest.TestCase):
         not say."""
         # Re-scoped for v1.2.1: v1.2.0 is published, so it is the second section and
         # APP_VERSION has moved on (StagedV121NotesFormatTests holds that check now).
-        heading = _changelog_sections(self.text)[1][0]
+        # Re-scoped again for v1.2.2: v1.2.1 was published above it, so it is the third.
+        heading = _changelog_sections(self.text)[2][0]
         self.assertEqual(heading, "1.2.0")
 
     def test_v120_gemini_usage_comes_from_antigravity_on_macos_and_windows(self):
@@ -4687,8 +4727,10 @@ class PublishedV120NotesContractTests(unittest.TestCase):
         self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
 
 
-class StagedV121NotesFormatTests(unittest.TestCase):
-    """The unpublished v1.2.1 section: CLAUDE.md's format, and the three things it must say.
+class PublishedV121NotesContractTests(unittest.TestCase):
+    """The published v1.2.1 section (frozen above): CLAUDE.md's format, and the three things it
+    says.  Was ``StagedV121NotesFormatTests``; the version checks are re-scoped to the
+    section's own heading now that ``APP_VERSION`` has moved on.
 
     The behaviour is gated elsewhere — the name and the 1.2.0 update path in
     tests/test_token_pet_rename.py, the Gemini sign-in check in
@@ -4725,19 +4767,16 @@ class StagedV121NotesFormatTests(unittest.TestCase):
             match = re.search(pattern, self.body.replace("`", ""), re.I)
             if match:
                 problems.append(f"remove {label}: {match.group(0)!r}")
-        rest = self.body
-        for version in _literal_assignments(APP_SOURCE, "APP_VERSION"):
-            rest = rest.replace(str(version), " ")
+        rest = self.body.replace("1.2.1", " ")       # re-scoped: the section's own version
         leftover = sorted(set(re.findall(r"\d+(?:\.\d+)*", rest)))
         if leftover:
             problems.append(f"the notes carry numbers this tree cannot audit: {leftover!r}")
         self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
 
     def test_v121_heading_and_version_are_the_bump(self):
-        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
-        heading = _changelog_sections(self.text)[0][0]
-        self.assertEqual(versions, [heading],
-                         f"the staged heading is v{heading}; APP_VERSION is {versions!r}")
+        # Re-scoped for v1.2.2: v1.2.1 is published, so it is the second section and
+        # APP_VERSION has moved on (StagedV122NotesFormatTests holds that check now).
+        heading = _changelog_sections(self.text)[1][0]
         self.assertEqual(heading, "1.2.1")
 
     def test_v121_says_the_name_is_token_pet_and_nothing_is_lost(self):
@@ -4765,6 +4804,99 @@ class StagedV121NotesFormatTests(unittest.TestCase):
         self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
 
     def test_v121_windows_ships_the_same_version(self):
+        problems: list[str] = []
+        windows = self._bullets(r"Windows")
+        versions = ["1.2.1"]                         # re-scoped: the section's own version
+        named = [m.group(1) for b in windows for m in re.finditer(r"(\d+\.\d+(?:\.\d+)?)", b)]
+        if not windows:
+            problems.append("no bullet mentions Windows")
+        elif any([v] != versions for v in named):
+            problems.append(f"the Windows bullet names {named!r}; the section is {versions!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+
+class StagedV122NotesFormatTests(unittest.TestCase):
+    """The unpublished v1.2.2 section: CLAUDE.md's format, and what it must say — the Gemini
+    line reads session then weekly like Claude's, the duplicate "Gemini" line is gone, the
+    short window has one name, nothing for the user to do, and Windows ships the same number.
+
+    The behaviour is gated in tests/test_cli_state_matrix.py (GeminiLikeClaudeTest,
+    SessionThenWeeklyEveryProviderTest, NoFiveHourWordingTest).  This class ties the prose to it.
+    """
+
+    def setUp(self):
+        text = RELEASE_NOTES.read_text(encoding="utf-8")
+        self.text = text
+        self.visible = _notes_block(text, "**v1.2.2**", "**v1.2.1**")
+        self.top_level, self.nested, self.bullets = _bullet_shape(self.visible)
+        self.body = "\n".join(self.bullets)
+
+    def _bullets(self, pattern: str) -> list[str]:
+        return [b for b in self.bullets if re.search(pattern, b)]
+
+    def test_v122_notes_follow_the_three_bullet_450_character_format(self):
+        """Numbers: the version and nothing else."""
+        problems: list[str] = []
+        if len(self.top_level) != 3:
+            problems.append(f"v1.2.2 must have exactly 3 top-level bullets, got {len(self.top_level)}")
+        if self.nested:
+            problems.append("v1.2.2 must not contain nested bullets")
+        normalized_body = " ".join(self.visible.split())
+        if len(normalized_body) > 450:
+            problems.append(f"v1.2.2 Korean body is {len(normalized_body)} Unicode characters; max is 450")
+        for index, bullet in enumerate(self.bullets, 1):
+            if not re.search(r"[가-힣]", bullet):
+                problems.append(f"bullet {index} must be Korean")
+            count = len(_sentences(bullet))
+            if not 1 <= count <= 2:
+                problems.append(f"bullet {index} has {count} sentences; CLAUDE.md allows 1-2")
+        for label, pattern in FORBIDDEN_NOTE_PATTERNS.items():
+            match = re.search(pattern, self.body.replace("`", ""), re.I)
+            if match:
+                problems.append(f"remove {label}: {match.group(0)!r}")
+        rest = self.body
+        for version in _literal_assignments(APP_SOURCE, "APP_VERSION"):
+            rest = rest.replace(str(version), " ")
+        leftover = sorted(set(re.findall(r"\d+(?:\.\d+)*", rest)))
+        if leftover:
+            problems.append(f"the notes carry numbers this tree cannot audit: {leftover!r}")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v122_heading_and_version_are_the_bump(self):
+        versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
+        heading = _changelog_sections(self.text)[0][0]
+        self.assertEqual(versions, [heading],
+                         f"the staged heading is v{heading}; APP_VERSION is {versions!r}")
+        self.assertEqual(heading, "1.2.2")
+
+    def test_v122_gemini_reads_session_then_weekly_and_the_duplicate_line_is_gone(self):
+        """Rivals: notes that give the old order (주간 before 세션); notes silent about the
+        removed line; a window name the app does not show."""
+        problems: list[str] = []
+        gemini = self._bullets(r"Gemini")
+        ordered = [b for b in gemini if re.search(r"세션.*주간", b) and re.search(r"Claude", b)]
+        if not ordered:
+            problems.append("a Gemini bullet must say session then weekly, like Claude")
+        if not any(re.search(r"없어졌|없앴|사라", b) for b in gemini):
+            problems.append("no Gemini bullet says the duplicate line is gone")
+        ko = _tr_table()["ko"]
+        for quote in re.findall(r'"([^"]+)"', self.body):
+            if quote not in ko.values():
+                problems.append(f"quoted {quote!r} is not a Korean UI string")
+        if (ko["session"], ko["weekly"], ko["s_gauge_group"]) != ("세션", "주간", "Claude·GPT"):
+            problems.append("the Korean window names are not the ones the notes use")
+        if re.search(r"5\s*시간", self.body):
+            problems.append("the notes name the short window something other than 세션")
+        self.assertFalse(problems, "\n" + "\n".join(f"- {p}" for p in problems))
+
+    def test_v122_says_there_is_nothing_for_the_user_to_do(self):
+        self.assertTrue(self._bullets(r"할 일은 없|그대로"),
+                        "a bullet must say earlier choices carry over with nothing to do")
+        import claude_pet
+        self.assertEqual(claude_pet.provider_gauges({"gemini_gauges": ["gemini"]}, "gemini"),
+                         ["session", "weekly"], "the notes promise earlier choices carry over")
+
+    def test_v122_windows_ships_the_same_version(self):
         problems: list[str] = []
         windows = self._bullets(r"Windows")
         versions = _literal_assignments(APP_SOURCE, "APP_VERSION")
