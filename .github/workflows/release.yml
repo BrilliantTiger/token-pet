@@ -109,6 +109,9 @@ jobs:
     needs: gate
     runs-on: [self-hosted, Windows, token-pet]
     timeout-minutes: 60
+    # 이 PC 의 콘솔은 cp949 다. build_win.py 가 찍는 줄표(—)·✅ 를 쓰지 못해 첫 줄에서 죽는다(첫 시험 실행).
+    env:
+      PYTHONIOENCODING: utf-8
     outputs:
       sums: ${{ steps.sums.outputs.sums }}
     steps:
