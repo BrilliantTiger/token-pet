@@ -120,7 +120,7 @@ python3 claude_pet.py --report   # terminal report only, no GUI
 
 One small pill next to the pet, two lines:
 
-- **Line 1 — usage**: `Session 42% · Weekly 17% · Fable 12%` — session (5h) / weekly total / weekly per-model, exactly as the
+- **Line 1 — usage**: `Session 42% · Weekly 17% · Fable 12%` — session / weekly total / weekly per-model, exactly as the
   server reports them. Codex gets its own block (with its own mark) next to Claude's. In API mode a provider shows cost instead:
   `Today $3.21 · This month $27.50`.
 - **Line 2 — resets**: `reset Session in 3h 42m · Weekly in 2d 3h`.

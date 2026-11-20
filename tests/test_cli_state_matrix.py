@@ -245,6 +245,7 @@ class Box:
                                       "codex": {"login": "ok"}, "claude": {"login": "ok"}})
         self.write("creds.json", {"gemini": None})
         self.http = {"claude": "ok", "codex": "ok"}
+        self.bodies = {}                                     # 제공자 → 서버 답(없으면 CLAUDE_BODY·CODEX_BODY)
         self.http_calls = {"claude": 0, "codex": 0}
         self.leaks = []            # 대역이 모르는 주소 — 하나라도 있으면 실패
         self.windows = []          # 로그인 창마다 그 창에 찍힌 글자
@@ -377,7 +378,7 @@ class Box:
         token = req.get_header("Authorization") or ""
         mode = "expired" if "expired" in token else self.http[provider]
         if mode == "ok":
-            return _Response(CLAUDE_BODY if provider == "claude" else CODEX_BODY)
+            return _Response(self.bodies.get(provider) or (CLAUDE_BODY if provider == "claude" else CODEX_BODY))
         if mode == "x509":
             raise urllib.error.URLError(ssl.SSLCertVerificationError(
                 1, "certificate verify failed: unable to get local issuer certificate"))
@@ -853,6 +854,129 @@ class GeminiLikeClaudeTest(MatrixCase):
         self.assertNotEqual(mood(["session"]), calm, "세션 66% 를 읽지 않았다")
         self.assertEqual(mood(["weekly"]), calm, "주간 30% 인데 기분이 바뀌었다")
         self.assertNotEqual(mood(["group"]), mood(["weekly"]), "Claude·GPT 80% 를 읽지 않았다")
+
+
+# 세 제공자 모두 — 서버가 주간을 먼저 줘도 화면은 세션 → 주간, 창의 이름은 TR 의 session·weekly.
+# Claude 는 seven_day 를 먼저, Codex 는 7일 창을 primary 에 둔 답을 받는다(관측과 반대 순서).
+CLAUDE_WEEKLY_FIRST = json.dumps({"limits": [
+    {"kind": "seven_day", "percent": 17, "resets_at": None},
+    {"kind": "five_hour", "percent": 42, "resets_at": None},
+]}).encode()
+CODEX_WEEKLY_FIRST = json.dumps({"plan_type": "plus", "rate_limit": {
+    "primary_window": {"used_percent": 12, "limit_window_seconds": 604800, "reset_at": 4102444800},
+    "secondary_window": {"used_percent": 31, "limit_window_seconds": 18000, "reset_at": 4102444800},
+}}).encode()
+WEEKLY_FIRST = {"claude": CLAUDE_WEEKLY_FIRST, "codex": CODEX_WEEKLY_FIRST}
+PROVIDER_VALUES = {"claude": (42.0, 17.0), "codex": (31.0, 12.0), "gemini": (66.0, 30.0)}
+
+
+class SessionThenWeeklyEveryProviderTest(MatrixCase):
+    """Claude·Codex·Gemini(+ Claude·GPT 묶음) × 서버 순서(관측대로·주간 먼저) × 4개 언어 — 화면은 늘
+    세션 → 주간이고 라벨은 그 언어의 t("session")·t("weekly") 다. macOS 전체 잡과 Windows 잡 둘 다에서 돈다."""
+
+    def shown(self, provider, weekly_first, lang):
+        """그 제공자의 필 구간에 보이는 (라벨, 값) — 앱이 구간을 만드는 함수 그대로."""
+        claude_pet.set_lang(lang)
+        self.box.arrange(provider, "logged_in_ok")
+        if provider == "gemini":
+            self.box.behave("agy", groups=SERVER_ORDERS["observed" if weekly_first else "session_first"])
+        elif weekly_first:
+            self.box.bodies[provider] = WEEKLY_FIRST[provider]
+        rows = refresh(provider)
+        self.assertTrue(rows, "값이 없다")
+        runtime = dict(claude_pet.RUNTIME, show_claude=True, claude_gauges=["session", "weekly"],
+                       show_codex=True, codex_mode="sub", codex_gauges=["session", "weekly"],
+                       show_gemini=True, gemini_gauges=list(ALL_GEMINI_GAUGES), mode="sub")
+        if provider == "claude":
+            picked = claude_pet.filter_claude_rows(rows, runtime["claude_gauges"])
+            seg = claude_pet.roam_summary("sub", picked, None, None, None, False)
+        elif provider == "codex":
+            seg = claude_pet.codex_summary_segment(runtime, rows)
+        else:
+            seg = claude_pet.gemini_summary_segment(runtime, rows, buckets=claude_pet.GEMINI_BUCKETS)
+        self.assertIsNotNone(seg)
+        self.assertEqual(seg[0], "exact")
+        return [(r[0], round(float(r[1]), 6)) for r in seg[1]]
+
+    def check(self, provider, weekly_first, lang):
+        tr = claude_pet.TR[lang]
+        session, weekly = PROVIDER_VALUES[provider]
+        want = [(tr["session"], session), (tr["weekly"], weekly)]
+        if provider == "gemini":
+            want += [(tr["gemini_group"] + " " + tr["session"], 80.0),
+                     (tr["gemini_group"] + " " + tr["weekly"], 10.0)]
+        got = self.shown(provider, weekly_first, lang)
+        self.assertEqual(got, want, "%s/%s/%s" % (provider, "weekly_first" if weekly_first else "session_first", lang))
+        for label, _v in got:
+            self.assertIsNone(FIVE_HOUR_WORDS.search(label), label)
+
+
+for _p in PROVIDERS:
+    for _w in (True, False):
+        for _l in LANGS:
+            _add(SessionThenWeeklyEveryProviderTest,
+                 "test_%s__%s__%s" % (_p, "server_weekly_first" if _w else "server_session_first", _l),
+                 SessionThenWeeklyEveryProviderTest.check, _p, _w, _l)
+
+
+class WindowsPortTakesTheOrderFromTheCoreTest(unittest.TestCase):
+    """Windows 포트(windows/claude_pet_win.py)는 구간을 스스로 만들지 않는다 — 세 제공자 모두 코어의 같은
+    함수를 부르므로 위의 순서·라벨이 그대로 Windows 화면이다. 소스로 본다(PySide6 없이 돈다)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import ast
+        with open(os.path.join(ROOT, "windows", "claude_pet_win.py"), encoding="utf-8") as f:
+            cls.source = f.read()
+        cls.tree = ast.parse(cls.source)
+        cls.ast = ast
+
+    def cp_calls(self):
+        ast = self.ast
+        return {n.func.attr for n in ast.walk(self.tree)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and isinstance(n.func.value, ast.Name) and n.func.value.id == "cp"}
+
+    def test_the_port_builds_every_segment_with_the_core(self):
+        calls = self.cp_calls()
+        for fn in ("roam_summary", "filter_claude_rows", "codex_summary_segment", "gemini_summary_segment"):
+            self.assertIn(fn, calls, "포트가 cp.%s 를 부르지 않는다" % fn)
+
+    def test_the_port_does_not_order_or_label_rows_itself(self):
+        ast = self.ast
+        strings = {n.value for n in ast.walk(self.tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+        for own in ("gemini_group:", "gemini_group_session", "gemini_group_weekly", "five_hour", "seven_day"):
+            self.assertFalse(own in strings, "포트가 행 라벨을 스스로 다룬다: %s" % own)
+        sorts = [n for n in ast.walk(self.tree) if isinstance(n, ast.Call)
+                 and ((isinstance(n.func, ast.Name) and n.func.id == "sorted")
+                      or (isinstance(n.func, ast.Attribute) and n.func.attr == "sort"))
+                 and any("row" in ast.dump(a).lower() or "gauge" in ast.dump(a).lower() for a in n.args)]
+        self.assertEqual(sorts, [], "포트가 행을 다시 줄 세운다")
+
+    def test_the_port_shows_no_five_hour_wording_and_titles_gemini_like_claude(self):
+        ast = self.ast
+        for n in ast.walk(self.tree):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value != (ast.get_docstring(self.tree) or ""):
+                hit = FIVE_HOUR_WORDS.search(n.value)
+                self.assertIsNone(hit, "포트의 글자에 5시간 표기: %r" % n.value[:80])
+        t_keys = {n.args[0].value for n in ast.walk(self.tree)
+                  if isinstance(n, ast.Call) and n.args and isinstance(n.args[0], ast.Constant)
+                  and isinstance(n.args[0].value, str)
+                  and ((isinstance(n.func, ast.Name) and n.func.id == "t")
+                       or (isinstance(n.func, ast.Attribute) and n.func.attr == "t"))}
+        self.assertTrue({"s_gauge_session", "s_gauge_weekly", "s_gauge_group"} <= t_keys)
+        self.assertEqual(t_keys & {"s_gauge_limits", "s_gauge_gemini", "gemini_5h", "gemini_group_5h"}, set())
+        self.assertIn("GEMINI_GAUGES", {n.attr for n in ast.walk(self.tree) if isinstance(n, ast.Attribute)})
+
+    def test_the_mac_adapter_uses_the_same_functions(self):
+        """macOS 어댑터(run_gui)도 같은 함수로 구간을 만든다 — 두 화면이 한 코어를 읽는다."""
+        ast = self.ast
+        with open(os.path.join(ROOT, "claude_pet.py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        gui = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_gui")
+        names = {n.func.id for n in ast.walk(gui) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        for fn in ("roam_summary", "filter_claude_rows", "codex_summary_segment", "gemini_summary_segment"):
+            self.assertIn(fn, names, "run_gui 가 %s 를 부르지 않는다" % fn)
 
 
 for _o in SERVER_ORDERS:

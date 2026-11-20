@@ -120,7 +120,7 @@ python3 claude_pet.py --report   # solo informe en terminal, sin GUI
 
 Una píldora pequeña junto a la mascota, en dos líneas:
 
-- **Línea 1 — uso**: `Sesión 42% · Semanal 17% · Fable 12%` — sesión (5h) / total semanal / semanal por modelo, tal como los
+- **Línea 1 — uso**: `Sesión 42% · Semanal 17% · Fable 12%` — sesión / total semanal / semanal por modelo, tal como los
   da el servidor. Codex tiene su propio bloque (con su marca) junto al de Claude. Un proveedor en modo API muestra
   el coste: `Hoy $3.21 · Este mes $27.50`.
 - **Línea 2 — reinicios**: `reinicio Sesión en 3h 42m · Semanal en 2d 3h`.

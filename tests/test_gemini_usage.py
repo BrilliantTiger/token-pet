@@ -170,13 +170,14 @@ def agy_payload(groups=None, status="SUCCESS"):
                                                   "groups": copy.deepcopy(groups)}}}
 
 
+# TOK-63(1.2.2): 버킷 하나에 행 하나 — 대표 "gemini" 행은 없다. Gemini 묶음이 먼저, 묶음 안에서는 창이
+# 짧은 것부터(세션 → 주간 → 그 밖). 서버는 주간을 먼저 준다(위 픽스처).
 EXPECTED_ROWS = [
-    ("gemini", 66.0, _utc(2026, 11, 18, 7, 13, 31), None),
-    ("gemini_group:gemini-weekly", 20.0, _utc(2026, 11, 25, 2, 13, 31), None),
     ("gemini_group:gemini-5h", 66.0, _utc(2026, 11, 18, 7, 13, 31), None),
+    ("gemini_group:gemini-weekly", 20.0, _utc(2026, 11, 25, 2, 13, 31), None),
     ("gemini_group:gemini-monthly", 40.0, _utc(2026, 12, 1), None),
-    ("gemini_group:3p-weekly", 10.0, _utc(2026, 11, 25, 3, 45, 42), None),
     ("gemini_group:3p-5h", 90.0, _utc(2026, 11, 18, 8, 45, 42), None),
+    ("gemini_group:3p-weekly", 10.0, _utc(2026, 11, 25, 3, 45, 42), None),
 ]
 
 
@@ -681,44 +682,61 @@ class ParseAgyUsageTests(unittest.TestCase):
         return _require("parse_agy_usage")(payload)
 
     def test_rows_are_the_lowest_gemini_bucket_then_every_bucket_in_server_order(self):
-        """0행 = Gemini 그룹에서 가장 낮은 남은 비율(gemini-5h 0.34 → 66%), 그 버킷의 리셋. 이어 모든 그룹의
-        모든 버킷, 서버 순서. dict 와 JSON 문자열이 같은 답.
-        Rivals(0행): 첫 버킷(20%); 마지막(40%); 최대(20%); Claude·GPT 그룹까지 섞음(3p-5h → 90%); 남은
-        비율 그대로(34%); ×100 누락. Rivals(나머지): Gemini 그룹만; id 정렬; 버킷 이름을 라벨로;
-        숫자 문자열("0.6") 거부."""
+        """(이름은 옛 계약의 것이다.) TOK-63: 버킷 하나에 행 하나, 대표 "gemini" 행은 없다. Gemini 묶음이 먼저,
+        묶음 안에서는 창이 짧은 것부터 — 서버는 주간을 먼저 줬다. dict 와 JSON 문자열이 같은 답.
+        Rivals: 대표 행을 앞에 둠(같은 66% 가 두 번); 서버 순서(주간이 먼저); 남은 비율 그대로(34%); ×100
+        누락; Gemini 묶음만; id 정렬(3p-5h 가 맨 앞); 버킷 이름을 라벨로; 숫자 문자열("0.6") 거부."""
         assert_rows(self, self.parse(agy_payload()), EXPECTED_ROWS, "dict: ")
         assert_rows(self, self.parse(json.dumps(agy_payload())), EXPECTED_ROWS, "JSON: ")
 
+    def test_the_server_order_never_reaches_the_rows(self):
+        """서버가 묶음·버킷을 어떤 순서로 보내도 행은 같다. Rival: 서버 순서를 따름."""
+        def shuffled(group, order):
+            return dict(group, buckets=[group["buckets"][i] for i in order])
+        for name, groups in (
+                ("groups swapped", [OTHER_GROUP, GEMINI_GROUP]),
+                ("buckets reversed", [shuffled(GEMINI_GROUP, (2, 1, 0)), shuffled(OTHER_GROUP, (1, 0))]),
+                ("both", [shuffled(OTHER_GROUP, (1, 0)), shuffled(GEMINI_GROUP, (1, 2, 0))])):
+            with self.subTest(order=name):
+                assert_rows(self, self.parse(agy_payload(groups)), EXPECTED_ROWS)
+
     def test_a_lowest_fraction_tie_takes_the_earliest_reset(self):
-        """동률 셋 중 가장 이른 리셋을 가운데에(§3). Rivals: first-wins(11:00); last-wins(10:00);
-        비율 무시하고 가장 이른 리셋(08:00 — 0.5 짜리)."""
+        """(이름은 옛 계약의 것이다.) 같은 창 길이의 버킷끼리는 서버 순서가 남고, 더 긴 창은 그 뒤다 —
+        비율이나 리셋 시각으로 다시 줄 세우지 않는다. Rivals: 비율 순; 리셋 순; id 순."""
         g = {"name": "Gemini Models", "buckets": [
-            _bucket("gemini-a", "5h", 0.2, "2026-11-18T11:00:00Z"),
+            _bucket("gemini-c", "5h", 0.2, "2026-11-18T11:00:00Z"),
             _bucket("gemini-w", "weekly", 0.5, "2026-11-18T08:00:00Z"),
-            _bucket("gemini-b", "5h", 0.2, "2026-11-18T09:00:00Z"),
-            _bucket("gemini-c", "5h", 0.2, "2026-11-18T10:00:00Z")]}
+            _bucket("gemini-a", "5h", 0.3, "2026-11-18T09:00:00Z"),
+            _bucket("gemini-b", "5h", 0.1, "2026-11-18T10:00:00Z")]}
         rows = self.parse(agy_payload([g]))
         self.assertIsInstance(rows, list)
-        assert_rows(self, rows[:1], [("gemini", 80.0, _utc(2026, 11, 18, 9), None)])
+        self.assertEqual([r[0] for r in rows], ["gemini_group:gemini-c", "gemini_group:gemini-a",
+                                                "gemini_group:gemini-b", "gemini_group:gemini-w"])
 
     def test_the_gemini_group_is_found_by_bucket_ids_then_by_name(self):
         """id 가 "gemini-" 로 시작하는 그룹이 Gemini 그룹이다 — 이름이 무엇이든. 그런 그룹이 없으면 이름에
-        "Gemini" 가 든 그룹. Rivals: 이름만 봄(첫 경우에 Claude 그룹 이름의 'Gemini' 에 속음); id 만 봄(둘째
-        경우 0행 없음); 첫 그룹을 Gemini 로 봄."""
+        "Gemini" 가 든 그룹. Gemini 그룹의 행이 **먼저** 온다(서버는 둘째로 줬다).
+        Rivals: 이름만 봄(첫 경우에 Claude 그룹 이름의 'Gemini' 에 속음); id 만 봄; 첫 그룹을 Gemini 로 봄."""
         by_id = [{"name": "Gemini-ish partner models", "buckets": [
                      _bucket("p-5h", "5h", 0.05, "2026-11-18T05:00:00Z")]},
                  {"name": "Quota A", "buckets": [
                      _bucket("gemini-5h", "5h", 0.3, "2026-11-18T06:00:00Z")]}]
         rows = self.parse(agy_payload(by_id))
         self.assertIsInstance(rows, list)
-        assert_rows(self, rows[:1], [("gemini", 70.0, _utc(2026, 11, 18, 6), None)], "id: ")
+        assert_rows(self, rows, [("gemini_group:gemini-5h", 70.0, _utc(2026, 11, 18, 6), None),
+                                 ("gemini_group:p-5h", 95.0, _utc(2026, 11, 18, 5), None)], "id: ")
+        self.assertEqual(_require("agy_usage_buckets")(agy_payload(by_id)),
+                         {"gemini-5h": ("5h", True), "p-5h": ("5h", False)})
         by_name = [{"name": "Claude and GPT models", "buckets": [
                        _bucket("3p-5h", "5h", 0.05, "2026-11-18T05:00:00Z")]},
                    {"name": "Gemini Models", "buckets": [
                        _bucket("g-5h", "5h", 0.3, "2026-11-18T06:00:00Z")]}]
         rows = self.parse(agy_payload(by_name))
         self.assertIsInstance(rows, list)
-        assert_rows(self, rows[:1], [("gemini", 70.0, _utc(2026, 11, 18, 6), None)], "name: ")
+        assert_rows(self, rows, [("gemini_group:g-5h", 70.0, _utc(2026, 11, 18, 6), None),
+                                 ("gemini_group:3p-5h", 95.0, _utc(2026, 11, 18, 5), None)], "name: ")
+        self.assertEqual(_require("agy_usage_buckets")(agy_payload(by_name)),
+                         {"g-5h": ("5h", True), "3p-5h": ("5h", False)})
 
     def test_unusable_fractions_are_skipped_and_values_are_clamped(self):
         """없음·null·글자·bool·NaN 은 건너뛴다(0%/100% 를 지어내지 않는다), 범위 밖은 자른다.
@@ -729,7 +747,6 @@ class ParseAgyUsageTests(unittest.TestCase):
             _bucket("gemini-lo", "5h", -0.25, "2026-11-18T06:00:00Z"),
             _bucket("gemini-hi", "weekly", 1.5, "2026-11-25T06:00:00Z")]}
         assert_rows(self, self.parse(agy_payload([g])), [
-            ("gemini", 100.0, _utc(2026, 11, 18, 6), None),
             ("gemini_group:gemini-lo", 100.0, _utc(2026, 11, 18, 6), None),
             ("gemini_group:gemini-hi", 0.0, _utc(2026, 11, 25, 6), None)])
 
@@ -752,7 +769,7 @@ class ParseAgyUsageTests(unittest.TestCase):
                     self.fail("예외: %s" % type(e).__name__)
                 self.assertIsNone(got)
         rows = self.parse(agy_payload([OTHER_GROUP]))
-        assert_rows(self, rows, EXPECTED_ROWS[4:])
+        assert_rows(self, rows, EXPECTED_ROWS[3:])
 
     def test_disabled_buckets_are_skipped_everywhere(self):
         """v3: `"disabled": true` 인 버킷은 0행 계산에서도 행에서도 빠진다. `"disabled": false` 는 보통
@@ -768,9 +785,8 @@ class ParseAgyUsageTests(unittest.TestCase):
             dict(_bucket("3p-off", "weekly", 0, "2026-11-25T03:45:42Z"), disabled=True),
             _bucket("3p-5h", "5h", 0.1, "2026-11-18T08:45:42Z")]}
         assert_rows(self, self.parse(agy_payload([gem, other])), [
-            ("gemini", 66.0, _utc(2026, 11, 18, 7, 13, 31), None),
-            ("gemini_group:gemini-weekly", 20.0, _utc(2026, 11, 25, 2, 13, 31), None),
             ("gemini_group:gemini-5h", 66.0, _utc(2026, 11, 18, 7, 13, 31), None),
+            ("gemini_group:gemini-weekly", 20.0, _utc(2026, 11, 25, 2, 13, 31), None),
             ("gemini_group:3p-5h", 90.0, _utc(2026, 11, 18, 8, 45, 42), None)])
         all_off = {"name": "Gemini Models", "buckets": [
             dict(_bucket("gemini-5h", "5h", 0.5, "2026-11-18T07:13:31Z"), disabled=True)]}
@@ -1085,9 +1101,16 @@ class GeminiMoodTests(AgyCase):
     def rt(self, **over):
         rt = {"mode": "sub", "show_claude": False, "claude_gauges": ["session", "weekly"],
               "show_codex": False, "codex_mode": "sub", "codex_gauges": ["session", "weekly"],
-              "show_gemini": True, "gemini_gauges": ["gemini"]}
+              "show_gemini": True, "gemini_gauges": ["session", "weekly"]}
         rt.update(over)
         return rt
+
+    def setUp(self):
+        super().setUp()
+        # 직접 만든 행이 쓰는 버킷 표(조회 경로가 적는 GEMINI_BUCKETS 의 대역): g-s 는 Gemini 묶음의 세션 창.
+        patcher = mock.patch.dict(claude_pet.GEMINI_BUCKETS, {"g-s": ("5h", True), "x-1": ("5h", False)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def mood(self, rt, gemini_rows, rows=None, codex_rows=None):
         try:
@@ -1101,22 +1124,22 @@ class GeminiMoodTests(AgyCase):
         for pct, want in ((90.0, "failed"), (85.0, "failed"), (84.0, "waiting"), (60.0, "waiting"),
                           (50.0, "waiting"), (49.0, "idle"), (10.0, "idle")):
             with self.subTest(pct=pct):
-                self.assertEqual(self.mood(self.rt(), [("gemini", pct, None, None)]), want)
+                self.assertEqual(self.mood(self.rt(), [("gemini_group:g-s", pct, None, None)]), want)
 
     def test_hidden_gemini_and_unchosen_gauges_do_not_move_the_pet(self):
         """숨긴 Gemini 의 95% 는 기분을 바꾸지 않는다. 고르지 않은 게이지의 행도 그렇다(0행만 골랐는데 묶음
         행이 95%). 다른 제공자와 합치면 가장 높은 것이 이긴다 — 어느 쪽이 높든.
         Rivals: 표시 설정을 안 봄; 게이지 선택을 안 봄(모든 Gemini 행을 셈); Gemini 가 있으면 Claude 행을
         버림; Gemini 를 Codex 행 자리에 넣어 codex_gauges 로 거름(전부 사라짐)."""
-        rows = [("gemini", 20.0, None, None), ("gemini_group:x-1", 95.0, None, None)]
-        self.assertEqual(self.mood(self.rt(show_gemini=False), [("gemini", 95.0, None, None)]), "idle")
-        self.assertEqual(self.mood(self.rt(gemini_gauges=[]), [("gemini", 95.0, None, None)]), "idle")
+        rows = [("gemini_group:g-s", 20.0, None, None), ("gemini_group:x-1", 95.0, None, None)]
+        self.assertEqual(self.mood(self.rt(show_gemini=False), [("gemini_group:g-s", 95.0, None, None)]), "idle")
+        self.assertEqual(self.mood(self.rt(gemini_gauges=[]), [("gemini_group:g-s", 95.0, None, None)]), "idle")
         self.assertEqual(self.mood(self.rt(), rows), "idle")
         both = self.rt(show_claude=True, claude_gauges=["session"])
         session = claude_pet.t("session")     # Claude 행은 번역된 라벨로 분류된다(_label_order)
-        self.assertEqual(self.mood(both, [("gemini", 90.0, None, None)],
+        self.assertEqual(self.mood(both, [("gemini_group:g-s", 90.0, None, None)],
                                    rows=[(session, 10.0, None, None)]), "failed")
-        self.assertEqual(self.mood(both, [("gemini", 10.0, None, None)],
+        self.assertEqual(self.mood(both, [("gemini_group:g-s", 10.0, None, None)],
                                    rows=[(session, 60.0, None, None)]), "waiting")
         self.assertEqual(self.mood(both, None, rows=[(session, 60.0, None, None)]), "waiting")
 
@@ -1130,7 +1153,8 @@ class GeminiMoodTests(AgyCase):
         self.fake.payload = agy_payload([other, gem])
         rows = claude_pet.fetch_gemini_usage()
         self.assertIsInstance(rows, list)
-        self.assertEqual(self.mood(self.rt(gemini_gauges=["limits"]), rows), "idle")
+        self.assertEqual(self.mood(self.rt(gemini_gauges=["session"]), rows), "idle")
+        self.assertEqual(self.mood(self.rt(gemini_gauges=["weekly"]), rows), "idle")
         self.assertEqual(self.mood(self.rt(gemini_gauges=["group"]), rows), "failed")
         self.assertEqual(self.mood(self.rt(gemini_gauges=["gemini"]), rows), "idle")
 

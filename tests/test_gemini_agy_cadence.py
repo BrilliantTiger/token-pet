@@ -345,14 +345,14 @@ class RefreshPathTests(AgyCase):
         state, _claude, _codex = self.drive(show_gemini=True)
         self.assertTrue(wait_for(lambda: bool(state.get("gemini")), 5.0), "Gemini 행이 안 들어왔다")
         self.assertEqual(len(self.fake.calls), 1)
-        self.assertEqual(state["gemini"][0][0], "gemini")
+        self.assertEqual(state["gemini"][0][0], "gemini_group:gemini-5h")
         lang = claude_pet.L.get("lang")
         self.addCleanup(lambda: claude_pet.L.__setitem__("lang", lang))
         claude_pet.L["lang"] = "en"
         seg = app_hook(self, state)()
         self.assertIsNotNone(seg)
         self.assertEqual(seg[0], "exact")
-        self.assertEqual(seg[1][0][0], "Gemini")
+        self.assertEqual(seg[1][0][0], "Session")
         self.assertAlmostEqual(seg[1][0][1], 66.0)
 
     def test_a_logged_out_user_gets_the_menu_flag_and_no_agy(self):

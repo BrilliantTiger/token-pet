@@ -730,10 +730,10 @@ class FetchOnWindowsTests(WinAgyCase):
         self.assertEqual(self.fake.events, [])
         self.assert_nothing_else_ran()
         self.assertTrue(rows)
-        self.assertEqual(rows[0][0], "gemini")
+        # TOK-63: 대표 행 없이 버킷마다 한 행, Gemini 묶음의 세션 → 주간, 그 아래 Claude·GPT.
+        self.assertEqual([r[0] for r in rows],
+                         ["gemini_group:gemini-5h", "gemini_group:gemini-weekly", "gemini_group:3p-5h"])
         self.assertAlmostEqual(rows[0][1], 60.0, places=6)
-        self.assertEqual([r[0] for r in rows[1:]],
-                         ["gemini_group:gemini-weekly", "gemini_group:gemini-5h", "gemini_group:3p-5h"])
         self.assertEqual((self.status().get("last_error"), self.status().get("auth_error")), (None, False))
 
     def test_the_fake_rundll32_is_checked_against_this_machines_systray_before_every_run(self):

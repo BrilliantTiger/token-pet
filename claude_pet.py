@@ -4,7 +4,7 @@ Token Pet — Codex Pets 스타일 투명 오버레이 펫 + Claude 토큰 사�
 =====================================================================
 - 창 프레임/타이틀 없음, 배경 완전 투명 (펫과 게이지만 화면에 떠 있음)
 - 스프라이트: ~/.codex/pet-runs/patch-entp-cat/frames 의 내장 고양이 프레임 사용
-- 게이지 3종: 현재 세션(5h) / 주간 전체 / 주간 Opus — 남은량 + 리셋 카운트다운
+- 게이지 3종: 현재 세션 / 주간 전체 / 주간 Opus — 남은량 + 리셋 카운트다운
 - 한도 도달 정도에 따라 펫 모션이 변함 (모션별 고유 속도/반복 설정)
     <50%  idle(평온)  /  50~85% waiting(초조)  /  ≥85% failed(패닉)
     드래그하면 방향에 맞춰 running-left/right, 더블클릭 waving, 리셋 감지 시 jumping
@@ -960,7 +960,7 @@ def discover_pets():
 SESSION_HOURS = 5
 REFRESH_SEC = 30
 
-APP_VERSION = "1.2.1"                # CFBundleShortVersionString 과 일치해야 한다
+APP_VERSION = "1.2.2"                # CFBundleShortVersionString 과 일치해야 한다
 GITHUB_REPO = "BrilliantTiger/token-pet"  # 자동 업데이트 확인용
 UPDATE_CHECK_SEC = 3600             # 새 릴리즈 확인 주기(1시간). 시작 시엔 확인하지 않고 한 주기 뒤부터 — run_gui 참조
 _upd_cache = {"t": 0.0, "busy": False}
@@ -1027,11 +1027,11 @@ RUNTIME = {
     # OpenAI Admin API 키 — Anthropic Admin 키(admin_key)와 같은 처리: ~/.claude_pet.json 에 평문.
     "openai_admin_key": "",
     "codex_budget": 0.0,        # Codex API 모드 월 예산($), 0이면 예산 표시 없음
-    # Gemini(Antigravity CLI, agy) — 기본은 보이고 게이지는 대표 한 줄("gemini")만(TOK-43 사용자 결정).
-    # 게이지: "gemini"(Gemini 한도 중 가장 많이 쓴 것) / "limits"(Gemini 의 5시간·주간 한도마다) /
-    # "group"(Claude·GPT 묶음 한도).
+    # Gemini(Antigravity CLI, agy) — Claude 와 같은 모양: 세션 → 주간(TOK-63 사용자 결정 2026-11-20).
+    # 게이지: "session"(Gemini 묶음의 세션 창) / "weekly"(Gemini 묶음의 주간 창) /
+    # "group"(Claude·GPT 묶음의 세션·주간). 1.2.1 까지의 "gemini"·"limits" 는 세션 + 주간으로 읽는다.
     "show_gemini": True,
-    "gemini_gauges": ["gemini"],
+    "gemini_gauges": ["session", "weekly"],
 }
 # 사용량 한도·모델 키워드·주간 리셋 설정은 없어졌다(사용자 결정 2026-10-05: "추정 로그치
 # 적는건 이제 없애자"). 옛 ~/.claude_pet.json 에 그 키가 남아 있어도 읽지 않고, 지우지도 않는다.
@@ -1155,10 +1155,9 @@ TR = {
     "no_providers": "Nothing to show — turn on Claude Code or Codex in Settings",
     "codex_need_admin_key": "Codex: right-click → Settings to enter an OpenAI Admin API key",
     "codex_token_expired": "Codex token expired — run codex once to restore usage",
-    "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5h",
-    "gemini_5h": "5h", "menu_gemini_login": "🔑 Sign in to Gemini (agy)…",
-    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
-    "s_gauge_limits": "5h · Weekly", "s_gauge_group": "Claude·GPT",
+    "gemini": "Gemini", "gemini_group": "Claude·GPT",
+    "menu_gemini_login": "🔑 Sign in to Gemini (agy)…",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_group": "Claude·GPT",
     # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
     "ai_sec": "AI connections",
     "ai_not_installed": "Not installed",
@@ -1274,10 +1273,9 @@ TR = {
     "no_providers": "표시할 제공자가 없어요 — 설정에서 Claude Code 나 Codex 를 켜세요",
     "codex_need_admin_key": "Codex: 우클릭 → 설정에서 OpenAI Admin API 키를 입력하세요",
     "codex_token_expired": "Codex 토큰 만료 — codex 한번 실행하면 사용량 복구",
-    "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5시간",
-    "gemini_5h": "5시간", "menu_gemini_login": "🔑 Gemini 로그인(agy)…",
-    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
-    "s_gauge_limits": "5시간·주간", "s_gauge_group": "Claude·GPT",
+    "gemini": "Gemini", "gemini_group": "Claude·GPT",
+    "menu_gemini_login": "🔑 Gemini 로그인(agy)…",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_group": "Claude·GPT",
     # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
     "ai_sec": "AI 연결",
     "ai_not_installed": "설치 안 됨",
@@ -1395,10 +1393,9 @@ TR = {
     "no_providers": "表示するプロバイダがありません — 設定で Claude Code か Codex をオンにしてください",
     "codex_need_admin_key": "Codex: 右クリック → 設定で OpenAI Admin API キーを入力してください",
     "codex_token_expired": "Codex トークン期限切れ — codex を一度実行すると使用量が復帰",
-    "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5時間",
-    "gemini_5h": "5時間", "menu_gemini_login": "🔑 Gemini にログイン(agy)…",
-    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
-    "s_gauge_limits": "5時間・週間", "s_gauge_group": "Claude·GPT",
+    "gemini": "Gemini", "gemini_group": "Claude·GPT",
+    "menu_gemini_login": "🔑 Gemini にログイン(agy)…",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_group": "Claude·GPT",
     # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
     "ai_sec": "AI 接続",
     "ai_not_installed": "未インストール",
@@ -1518,10 +1515,9 @@ TR = {
     "no_providers": "Nada que mostrar — activa Claude Code o Codex en Ajustes",
     "codex_need_admin_key": "Codex: clic derecho → Ajustes para introducir una clave de OpenAI Admin API",
     "codex_token_expired": "Token de Codex expirado — ejecuta codex una vez para restaurar el uso",
-    "gemini": "Gemini", "gemini_group": "Claude·GPT", "gemini_group_5h": "Claude·GPT 5h",
-    "gemini_5h": "5h", "menu_gemini_login": "🔑 Iniciar sesión en Gemini (agy)…",
-    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_gemini": "Gemini",
-    "s_gauge_limits": "5h · Semanal", "s_gauge_group": "Claude·GPT",
+    "gemini": "Gemini", "gemini_group": "Claude·GPT",
+    "menu_gemini_login": "🔑 Iniciar sesión en Gemini (agy)…",
+    "s_sec_gemini": "Gemini (Antigravity)", "s_gauge_group": "Claude·GPT",
     # 설정 "AI 연결" — 세 CLI 를 앱 안에서 받고 로그인(계약 v7-I)
     "ai_sec": "Conexiones de IA",
     "ai_not_installed": "No instalado",
@@ -1587,9 +1583,11 @@ TR = {
 for _lang in TR:
     for _window in ("session", "weekly"):
         TR[_lang]["codex_" + _window] = TR[_lang][_window]
-    # Gemini 의 Claude·GPT 묶음 주간 한도도 같은 이유로 그 로케일의 `weekly` 표기를 물려받는다 — en 에서
-    # "Weekly 17%" 옆에 "Claude·GPT weekly 30%" 가 서지 않게.
-    TR[_lang]["gemini_group_weekly"] = TR[_lang]["gemini_group"] + " " + TR[_lang]["weekly"]
+    # Gemini 의 Claude·GPT 묶음도 같은 이유로 그 로케일의 `session`·`weekly` 표기를 물려받는다 — 창의
+    # 이름은 제공자가 달라도 하나다(TOK-63: "5시간이 세션이잖아! 용어 통일좀 해"). Gemini 묶음의 행은
+    # 접두사 없이 t("session")·t("weekly") 그대로다.
+    for _window in ("session", "weekly"):
+        TR[_lang]["gemini_group_" + _window] = TR[_lang]["gemini_group"] + " " + TR[_lang][_window]
 
 
 # 모션별 (프레임 간격 ms, 반복, 루프 후 휴식 ms) — 평소엔 얌전히!
@@ -1780,16 +1778,28 @@ def _budget_value(raw):
 # 게이지 분류 — 설정의 체크박스와 필의 필터가 같은 이름을 쓴다(claude_gauge_class 참조).
 CLAUDE_GAUGES = ("session", "weekly", "model", "credit")
 CODEX_GAUGES = ("session", "weekly")
-GEMINI_GAUGES = ("gemini", "limits", "group")
-# 게이지 값이 목록이 아닐 때(손으로 고친 설정) 쓰는 기본값. Claude·Codex 는 전부, Gemini 는 대표 한 줄 —
-# 기본값 RUNTIME["gemini_gauges"] 와 같다(한도 줄이 망가진 설정 하나로 쏟아지지 않게).
-PROVIDER_GAUGE_DEFAULTS = {"claude": CLAUDE_GAUGES, "codex": CODEX_GAUGES, "gemini": ("gemini",)}
+GEMINI_GAUGES = ("session", "weekly", "group")
+# 1.2.1 까지 저장된 Gemini 게이지 이름 → 지금 이름. "gemini"(대표 한 줄)와 "limits"(한도마다)는 둘 다
+# Gemini 묶음의 세션 + 주간이다 — 업데이트한 사용자의 줄이 사라지지 않는다.
+GEMINI_GAUGE_LEGACY = {"gemini": ("session", "weekly"), "limits": ("session", "weekly")}
+# 게이지 값이 목록이 아닐 때(손으로 고친 설정) 쓰는 기본값. Claude·Codex 는 전부, Gemini 는 세션 + 주간 —
+# 기본값 RUNTIME["gemini_gauges"] 와 같다(Claude·GPT 묶음이 망가진 설정 하나로 쏟아지지 않게).
+PROVIDER_GAUGE_DEFAULTS = {"claude": CLAUDE_GAUGES, "codex": CODEX_GAUGES, "gemini": ("session", "weekly")}
 
 
 def _gauge_list(value, allowed):
     """폼의 게이지 선택 → allowed 순서의 리스트. 모르는 이름은 버린다(빈 리스트도 유효)."""
     chosen = set(value) if isinstance(value, (list, tuple, set)) else set()
     return [g for g in allowed if g in chosen]
+
+
+def _gemini_gauge_list(value):
+    """Gemini 게이지 선택 → GEMINI_GAUGES 순서의 리스트. 옛 이름(GEMINI_GAUGE_LEGACY)은 지금 이름으로 읽는다."""
+    chosen = set()
+    for g in value if isinstance(value, (list, tuple, set)) else ():
+        if isinstance(g, str):
+            chosen.update(GEMINI_GAUGE_LEGACY.get(g, (g,)))
+    return _gauge_list(chosen, GEMINI_GAUGES)
 
 
 # ─────────── 설정 저장 트랜잭션 (AppKit 없이 검증 가능) ───────────
@@ -1834,7 +1844,7 @@ def plan_settings_save(base_cfg, form):
     if "codex_gauges" in form:
         draft["codex_gauges"] = _gauge_list(form["codex_gauges"], CODEX_GAUGES)
     if "gemini_gauges" in form:
-        draft["gemini_gauges"] = _gauge_list(form["gemini_gauges"], GEMINI_GAUGES)
+        draft["gemini_gauges"] = _gemini_gauge_list(form["gemini_gauges"])
     if form.get("pet"):
         draft["pet"] = form["pet"]
     draft["api_budget"] = api_budget
@@ -4885,9 +4895,42 @@ def _agy_payload(payload):
     return payload if isinstance(payload, dict) else None
 
 
+_GEMINI_WINDOW_WORDS = {"hourly": 3600, "daily": 86400, "weekly": 7 * 86400, "monthly": 30 * 86400}
+_GEMINI_WINDOW_UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
+
+
+def gemini_window_seconds(window):
+    """버킷의 window 글자("5h", "weekly", "7d" …) → 창 길이(초), 모르면 None(순수). bucket id 는 읽지 않는다."""
+    if not isinstance(window, str):
+        return None
+    w = window.strip().lower()
+    if w in _GEMINI_WINDOW_WORDS:
+        return _GEMINI_WINDOW_WORDS[w]
+    m = re.fullmatch(r"(\d{1,6})\s*([mhdw])", w)
+    if not m or int(m.group(1)) <= 0:
+        return None
+    return int(m.group(1)) * _GEMINI_WINDOW_UNITS[m.group(2)]
+
+
+def gemini_window_kind(window):
+    """버킷의 window → "session"(하루보다 짧은 창) | "weekly"(7일 창) | None(그 밖·모르는 창).
+    Claude·Codex 와 같은 창 이름이다 — 짧은 창은 어느 제공자든 세션이다(TOK-63). 월간 같은 창에
+    "주간" 을 붙이지 않는다: 이름을 모르는 창은 묶음 이름만 보인다."""
+    seconds = gemini_window_seconds(window)
+    if seconds is None:
+        return None
+    if seconds < 86400:
+        return "session"
+    return "weekly" if seconds == 7 * 86400 else None
+
+
 def _agy_usage_entries(payload):
-    """SUCCESS 응답의 버킷들 → [(bucket id, Gemini 묶음인가, window 또는 None, 비율 또는 None, 리셋)],
-    서버 순서. SUCCESS 가 아니거나 모양이 다르면 [].
+    """SUCCESS 응답의 버킷들 → [(bucket id, Gemini 묶음인가, window 또는 None, 비율 또는 None, 리셋)].
+    SUCCESS 가 아니거나 모양이 다르면 [].
+
+    순서는 서버 순서가 **아니다**(TOK-63 — agy 는 주간을 먼저 준다): Gemini 묶음이 먼저, 나머지 묶음이
+    그 아래(묶음끼리는 서버 순서), 한 묶음 안에서는 **창이 짧은 것부터**(세션 → 주간), 창을 모르는 버킷은
+    그 묶음의 끝. 같은 창 길이끼리만 서버 순서가 남는다.
 
     Gemini 묶음 = 버킷 id 가 "gemini-" 로 시작하는 버킷을 가진 묶음. 그런 묶음이 응답 어디에도 없을
     때에만 이름에 "Gemini" 가 든 묶음(대소문자 무시)을 Gemini 묶음으로 본다. id 가 문자열이 아니거나
@@ -4912,39 +4955,35 @@ def _agy_usage_entries(payload):
         is_gemini = by_id
     else:
         is_gemini = [isinstance(name, str) and "gemini" in name.lower() for name, _b in parsed]
-    out = []
-    for (_name, buckets), gem in zip(parsed, is_gemini):
-        for b in buckets:
+    keyed = []
+    for gi, ((_name, buckets), gem) in enumerate(zip(parsed, is_gemini)):
+        for bi, b in enumerate(buckets):
             window = b.get("window")
             window = window.strip() if isinstance(window, str) and window.strip() else None
-            out.append((b["id"], bool(gem), window, _gemini_fraction(b.get("remaining_fraction")),
-                        _parse_rfc3339(b.get("reset_time"))))
-    return out
+            seconds = gemini_window_seconds(window)
+            keyed.append(((not gem, gi, seconds is None, seconds or 0, bi),
+                          (b["id"], bool(gem), window, _gemini_fraction(b.get("remaining_fraction")),
+                           _parse_rfc3339(b.get("reset_time")))))
+    keyed.sort(key=lambda pair: pair[0])
+    return [entry for _key, entry in keyed]
 
 
 def parse_agy_usage(payload):
     """`agy -p "/usage" --output-format json` 의 답 → [(label, pct, reset_dt, None)] 또는 None.
 
     순수 함수다 — 모듈 상태를 읽지도 쓰지도 않고, 어떤 입력에도 예외를 내지 않는다. payload 는 dict
-    또는 JSON 문자열. pct 는 **쓴** 비율(0–100), reset_dt 는 aware UTC 또는 None. 순서:
-      · "gemini" — Gemini 묶음의 버킷 중 남은 비율이 가장 낮은 것(동률이면 리셋이 가장 이른 것).
-        다른 묶음의 버킷은 이 행에 섞지 않는다. Gemini 묶음에 쓸 버킷이 없으면 이 행은 없다.
-      · "gemini_group:<bucket id>" — 모든 묶음의 버킷마다 한 행, 서버 순서.
+    또는 JSON 문자열. pct 는 **쓴** 비율(0–100), reset_dt 는 aware UTC 또는 None.
+    **버킷 하나에 행 하나**: "gemini_group:<bucket id>". 대표 "gemini" 행은 없다 — 같은 값을 한 번 더
+    보이게 할 뿐이었다(TOK-63). 순서는 _agy_usage_entries 의 것: Gemini 묶음의 세션 → 주간, 그 아래
+    나머지 묶음의 세션 → 주간. 서버가 어떤 순서로 보내도 같다.
     쓸 수 있는 비율이 없는 버킷은 행을 내지 않는다(0%·100% 를 지어내지 않는다). status 가 "SUCCESS" 가
     아니거나 쓸 버킷이 하나도 없으면 None. 어느 버킷이 Gemini 묶음이고 창이 무엇인지는
     agy_usage_buckets 가 같은 답에서 따로 꺼낸다."""
     usable = [e for e in _agy_usage_entries(payload) if e[3] is not None]
     if not usable:
         return None
-    rows = []
-    gemini = [e for e in usable if e[1]]
-    if gemini:
-        far = datetime.max.replace(tzinfo=timezone.utc)
-        _id, _gem, _window, frac, reset = min(gemini, key=lambda e: (e[3], e[4] or far))
-        rows.append(("gemini", _gemini_used_pct(frac), reset, None))
-    for bucket_id, _gem, _window, frac, reset in usable:
-        rows.append(("gemini_group:" + bucket_id, _gemini_used_pct(frac), reset, None))
-    return rows
+    return [("gemini_group:" + bucket_id, _gemini_used_pct(frac), reset, None)
+            for bucket_id, _gem, _window, frac, reset in usable]
 
 
 def agy_usage_buckets(payload):
@@ -10634,6 +10673,8 @@ def provider_gauges(runtime, provider):
     value = rt.get(provider + "_gauges", None)
     if not isinstance(value, (list, tuple)):
         return list(PROVIDER_GAUGE_DEFAULTS.get(provider, allowed))
+    if provider == "gemini":
+        return _gemini_gauge_list(value)
     return _gauge_list(value, allowed)
 
 
@@ -10742,17 +10783,18 @@ def codex_summary_segment(runtime, rows, spiking=False, cost_today=None, cost_mo
 
 
 def gemini_gauge_class(label, buckets=None):
-    """Gemini 행 라벨 → 게이지 이름("gemini" | "limits" | "group"), 모르는 라벨이면 None.
+    """Gemini 행 라벨 → 게이지 이름("session" | "weekly" | "group"), 모르는 라벨이면 None.
 
-    "gemini" 는 대표 행, "gemini_group:<bucket id>" 는 그 버킷이 Gemini 묶음이면 "limits", 아니면
-    "group". 소속은 버킷 표(buckets — 주지 않으면 GEMINI_BUCKETS)에서 읽고, id 의 모양에서 짐작하지
+    "gemini_group:<bucket id>" 의 버킷이 Gemini 묶음이면 그 창의 종류(gemini_window_kind) — 세션도
+    주간도 아닌 창은 "weekly" 쪽에 둔다(세션 칸만 고른 사용자에게 뜻 모를 줄이 서지 않게). Gemini 묶음이 아니면
+    "group". 소속과 창은 버킷 표(buckets — 주지 않으면 GEMINI_BUCKETS)에서 읽고, id 의 모양에서 짐작하지
     않는다. 표에 없는 버킷은 "group" 이다."""
-    if label == "gemini":
-        return "gemini"
     if isinstance(label, str) and label.startswith("gemini_group:"):
         table = GEMINI_BUCKETS if buckets is None else buckets
         entry = table.get(label[len("gemini_group:"):])
-        return "limits" if entry and entry[1] else "group"
+        if entry and entry[1]:
+            return gemini_window_kind(entry[0]) or "weekly"
+        return "group"
     return None
 
 
@@ -10767,20 +10809,18 @@ def filter_gemini_rows(rows, gauges, buckets=None):
 def gemini_row_label(label, buckets=None):
     """Gemini 행 라벨 → 필에 보일 글자. 창(window)은 버킷 표에서 읽는다 — bucket id 의 모양은 읽지 않는다.
 
-      · "gemini" → t("gemini") ("Gemini", 모든 로케일 같음).
-      · Gemini 묶음의 "gemini_group:<bucket id>" → 창이 "5h" 면 t("gemini_5h"), "weekly" 면 t("weekly"),
-        모르는 창이면 t("gemini").
-      · 나머지 묶음의 "gemini_group:<bucket id>" → t("gemini_group_5h") / t("gemini_group_weekly"),
+    창의 이름은 Claude·Codex 와 **같은 글자**다: 세션 = t("session"), 주간 = t("weekly") (TOK-63).
+      · Gemini 묶음의 "gemini_group:<bucket id>" → t("session") / t("weekly"), 모르는 창이면 t("gemini").
+      · 나머지 묶음의 "gemini_group:<bucket id>" → t("gemini_group_session") / t("gemini_group_weekly"),
         모르는 창이면 t("gemini_group").
     """
-    if label == "gemini":
-        return t("gemini")
-    if label.startswith("gemini_group:"):
+    if isinstance(label, str) and label.startswith("gemini_group:"):
         table = GEMINI_BUCKETS if buckets is None else buckets
         window, is_gemini = table.get(label[len("gemini_group:"):]) or (None, False)
+        kind = gemini_window_kind(window)
         if is_gemini:
-            return t({"5h": "gemini_5h", "weekly": "weekly"}.get(window, "gemini"))
-        return t({"5h": "gemini_group_5h", "weekly": "gemini_group_weekly"}.get(window, "gemini_group"))
+            return t(kind or "gemini")
+        return t("gemini_group_" + kind if kind else "gemini_group")
     return label
 
 
@@ -10788,8 +10828,8 @@ def gemini_summary_segment(runtime, rows, auth_error=False, last_error=None, buc
     """Gemini 구간 하나(표시 설정·게이지 선택 반영). 보일 게 없으면 None — codex_summary_segment 의 짝.
 
     어댑터의 gemini_summary 훅이 부른다(RUNTIME, state["gemini"], GEMINI_STATUS, GEMINI_BUCKETS —
-    buckets 를 주지 않으면 모듈 표). 고른 게이지의 행을 **행 순서대로**(서버 순서 — 게이지 순서로 다시
-    묶지 않는다), 라벨은 gemini_row_label 로, 리셋은 지금 기준 카운트다운으로. Gemini 에는 급증 감지가
+    buckets 를 주지 않으면 모듈 표). 고른 게이지의 행을 **행 순서대로**(파서가 정한 순서: 세션 → 주간,
+    Gemini 묶음 먼저), 라벨은 gemini_row_label 로, 리셋은 지금 기준 카운트다운으로. Gemini 에는 급증 감지가
     없으므로 ▲ 칸은 언제나 False 다. **Gemini 에는 상태 구간이 없다**: 행이 없으면 — 로그인 안 됨
     (auth_error), agy 없음, 일시 실패, 아직 안 받음, 무엇이든 — None 이다. 로그인은 우클릭 메뉴가
     안내한다(대표님: "로그인 안 하면 표시 안 하면 되는 거야"). 0% 블록을 지어내지 않는다. auth_error 와
@@ -12951,7 +12991,7 @@ def run_gui():
         show_gemini = section(t("s_sec_gemini"), "show_gemini", y)
         y -= 30
         label(t("s_gauges"), 20, y)
-        gemini_title = {"gemini": t("s_gauge_gemini"), "limits": t("s_gauge_limits"),
+        gemini_title = {"session": t("s_gauge_session"), "weekly": t("s_gauge_weekly"),
                         "group": t("s_gauge_group")}
         chosen = set(provider_gauges(RUNTIME, "gemini"))
         gemini_g = {}
