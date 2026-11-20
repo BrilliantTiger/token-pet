@@ -91,8 +91,9 @@ invites the reader to reason from it.
 | `verify_release_artifact.py` | Release gate: inspects the zip/dmg **that will be uploaded**, not a build directory. `scan` checks archive safety before any byte is extracted, `app` checks that the bundle's `Contents/Resources/claude_pet.py` is byte-identical to this checkout's and then hands the bundle to the updater's own preflight, `assets` checks the upload list against the updater's asset-name table. The code-hash check is the one the updater cannot do — it has no original to compare against, and a signature says *who built it*, never *what is inside*: a stale bundle re-signed today passes every other check. It **calls** `claude_pet`'s `_zip_members_are_safe` and `validate_update_app` rather than reimplementing them — which is why its diagnostics carry an `[update]` prefix. |
 | `ci/bundle_cli_env_check.py` | CI check run against the **built artifact**, not the source (`macos-bundle` / `windows-bundle` jobs): starts the unsigned `.app` / PyInstaller exe with the hidden `--cli-env-probe <out.json> --agy <fake>` argument (`cli_env_probe_main()`), then requires that `cli_env()` for all three providers, `_agy_env()` and the Gemini sign-in window's script hand the CLI no `SSL_CERT_FILE` / `SSL_CERT_DIR`, and that `curl https://www.google.com` succeeds in each. py2app's boot script sets both variables to a path that does not exist; a source run never has them, which is how 1.2.0 passed CI and failed on a real Mac. |
 | `ci/real_machine_check.py`, `ci/SELF_HOSTED_RUNNERS.md` | The self-hosted jobs (`real-macos` / `real-windows`): the machine's real CLIs and real sign-in state — signed in means usage values are read, the row offers no [Sign in], and nothing opens. They are blocking gates: they run on same-repository pull requests, `main`/`dev` pushes and manual runs (never on a fork's pull request, and not again on a tag push), a release is published only when both are green on `main` for the tagged commit — `release.yml`'s `gate` job checks exactly that — and a machine with no provider signed in fails rather than passing with nothing verified. The runners are the two existing organization runners in the `token-pet` runner group (`token-pet-mac-1`, `token-pet-win-1`); the macOS one must run without `SessionCreate` in its LaunchAgent, or the login keychain reads as locked and nothing can be verified. |
-| `.github/workflows/release.yml`, `ci/release_ci.py`, `ci/release_mac_gate.zsh` | The release, run by CI (TOK-60): a pushed `vX.Y.Z` tag → `gate` (tag == version, notes section, commit on `main`, that commit's `main` CI all green) → `mac` (`release.sh` step by step on `token-pet-mac-1`, then the upload gate) and `win` (`build_win.py` on `token-pet-win-1`) → `publish` (draft, six assets, size and SHA-256 compared, then public). `workflow_dispatch` is a dry run that publishes nothing. `release_mac_gate.zsh` *sources* `release.sh` — inert because of the source guard — to reuse `verify_upload_artifact` and `gen_release_notes` instead of copying them. See [Release procedure](#release-procedure). |
-| `tests/test_release_workflow.py` | Static gates for the two workflow files and the pure decisions in `ci/release_ci.py`: `release.yml` runs on version tags and manual runs only, never on `pull_request`; signing waits for `gate`; `release.sh` is called one subcommand per step and never as `publish` / `all` / `ship`; no repository secret; write permission in `publish` only; no input can turn a manual run into a publication; every self-hosted job in a workflow that runs on pull requests carries the same-repository condition; and what counts as a green `main` run and as identical uploaded assets. No YAML parser — the suite is stdlib only. |
+| `.github/workflows/auto-tag.yml` | The tag, created by CI (TOK-64): runs when `tests.yml` finishes (`workflow_run`), and only for this repository's own successful push run on `main`. `ci/release_ci.py auto-tag` asks the server again and, when every job of that run is `success`, the commit's `APP_VERSION` is greater than the latest published release and the `vX.Y.Z` tag does not exist, creates the tag on that commit and starts `release.yml` on it by `workflow_dispatch` (a tag made with `GITHUB_TOKEN` raises no push event). A merge that does not raise the version ends green with nothing done; a raised version without its release-notes section ends red, untagged. GitHub-hosted runner only; write permission for the tag and the dispatch, nothing else. |
+| `.github/workflows/release.yml`, `ci/release_ci.py`, `ci/release_mac_gate.zsh` | The release, run by CI (TOK-60): a run on a `vX.Y.Z` tag — started by `auto-tag.yml` — → `gate` (tag == version, notes section, commit on `main`, that commit's `main` CI all green) → `mac` (`release.sh` step by step on `token-pet-mac-1`, then the upload gate) and `win` (`build_win.py` on `token-pet-win-1`) → `publish` (draft, six assets, size and SHA-256 compared, then public). `workflow_dispatch` on a branch is a dry run that publishes nothing. `release_mac_gate.zsh` *sources* `release.sh` — inert because of the source guard — to reuse `verify_upload_artifact` and `gen_release_notes` instead of copying them. See [Release procedure](#release-procedure). |
+| `tests/test_release_workflow.py` | Static gates for the three workflow files and the pure decisions in `ci/release_ci.py`: `auto-tag.yml` runs only when `tests` finishes, its job requires this repository's own successful push run on `main`, and it has no self-hosted job; an unbumped merge, a lower version, an existing tag and a red `main` run tag nothing (`auto_tag_decision`); `release.yml` runs on version tags and manual runs only, never on `pull_request`; signing waits for `gate`; `release.sh` is called one subcommand per step and never as `publish` / `all` / `ship`; no repository secret; write permission in `publish` only; no input can turn a manual run into a publication; every self-hosted job in a workflow that runs on pull requests carries the same-repository condition; and what counts as a green `main` run and as identical uploaded assets. No YAML parser — the suite is stdlib only. |
 | `build_app.sh` | Fast local build: assembles `ClaudePet.app` from `claude_pet.py` + `frames/` + `.claude_pet/`. **It does sign** — `sign_app` uses the Developer ID when one is present, ad-hoc otherwise. `build` / `install` / `update` subcommands; anything else prints usage and exits 1. |
 | `release.sh` | Real release: py2app build → Developer ID sign → notarize → staple → zip/dmg. Beyond `build`, its subcommands are run by `release.yml` only. |
 | `setup.py` | py2app configuration. |
@@ -1553,16 +1554,19 @@ shapes ("42 rows, 3 files"), never contents.
 
 ## Release procedure
 
-> **A release is: `main`'s CI green → the tag pushed → `release.yml` to the end.**
+> **A release is: the version bump merged to `main` → `main`'s CI green → CI tags it →
+> `release.yml` to the end.**
 >
-> Since TOK-60 nothing after the tag push is done by a person or an agent. The process
-> rule is [AGENTS.md §6](AGENTS.md#6-release-gate); this section is what the steps are in
-> this repository.
+> Since TOK-60 nothing after the tag is done by a person or an agent, and since TOK-64
+> the tag is not either. The process rule is [AGENTS.md §6](AGENTS.md#6-release-gate);
+> this section is what the steps are in this repository.
 >
-> - **Steps 1–3 are preparation** — the bump, the notes, the release commit, the pull
->   request to `main`. Ordinary work, gated like any merge.
-> - **Step 4, the tag push, is [ASK]** — the user's own, per-instance decision. It is the
->   only human decision in a release, and being asked to *prepare* a release is not it.
+> - **Steps 1–3 are the release** — the bump, the notes, the release commit, the pull
+>   request to `main` and its merge. Gated like any merge. **Merging a commit that raises
+>   `APP_VERSION` is the release decision**; nothing after it asks anyone.
+> - **Step 4 is `.github/workflows/auto-tag.yml`**: when `main`'s CI is green for that
+>   commit it creates the tag and starts the release. **[NEVER] create or push a
+>   `vX.Y.Z` tag by hand.**
 > - **Step 5 is `.github/workflows/release.yml`**: gate → build → sign → notarize →
 >   draft → verify → publish. **[NEVER] do any of step 5 by hand** — not `release.sh
 >   sign` / `notarize` / `universal` / `dmg` / `publish`, not `gh release`, not an upload
@@ -1572,21 +1576,10 @@ shapes ("42 rows, 3 files"), never contents.
 > operator / coordinator record, or collects a sign-off. If a check is missing, it is
 > added to CI.
 >
-> **These documents state how an authorization is recognized. They never record whether
-> one exists.** An authorization status written into a checked-in file rots the way a
-> hardcoded version number does, and it rots asymmetrically — a stale denial blocks
-> legitimate work, while a stale grant licenses a release nobody asked for.
->
-> **You have the authorization to push a tag when all of these hold:**
->
-> - it came from **the user**, in their own words — not an agent's report of them (the
->   one named Mac-relay exception is in
->   [AGENTS.md §0](AGENTS.md#0-how-to-read-the-prohibitions); read it there);
-> - its **scope** covers this version, read literally rather than expansively;
-> - its **conditions** are met — if it was granted "once X", X has actually happened.
->
-> A staged changelog entry is never authorization: a written section for an unreleased
-> version only means the notes were drafted during implementation.
+> **Raise `APP_VERSION` only when the work you were given is a release.** That is the
+> whole authorization question, and it is settled before the bump, not after the merge.
+> A staged changelog entry is not it: a written section for an unreleased version only
+> means the notes were drafted during implementation.
 
 **Version numbers are `major.minor.fix`, three parts, since v1.2.0** (user, 2026-11-18:
 "버전 관리는 이제 major, minor, fix/build 이렇게 가자"):
@@ -1604,7 +1597,8 @@ is a minor. macOS and Windows carry the same number (`windows/build_win.py` read
 may already contain a section for a version that `APP_VERSION` has not yet reached. That
 is the expected state after an implementation phase and before an authorized release: the
 notes are written as part of the work, the bump is not. **Do not "fix" the mismatch by
-bumping `APP_VERSION`** — the mismatch is the signal that step 1 has not been authorized
+bumping `APP_VERSION`** — the bump *is* the release (CI tags and publishes it once it is
+green on `main`), and the mismatch is the signal that no release has been asked for
 yet. To see where things stand, read `APP_VERSION` in `claude_pet.py`, the newest heading
 in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
 
@@ -1612,7 +1606,7 @@ in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
    The in-app updater compares this against the latest GitHub release tag of
    `GITHUB_REPO` (`BrilliantTiger/token-pet`), so a mismatch either suppresses a real update or
    offers a phantom one. This is the commit that makes a change a *release commit* under
-   [AGENTS.md §6](AGENTS.md#release-steps-are-separately-authorized).
+   [AGENTS.md §6](AGENTS.md#the-version-bump-is-the-release).
    The repository moved from `uygnoey/claude-pet` to the `BrilliantTiger` organization on
    2026-10-11, and was renamed from `claude-pet` to `token-pet` on 2026-11-12. Both old addresses
    301-redirect, so copies built with an old constant still reach it — but the constant itself
@@ -1644,7 +1638,7 @@ in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
    ask for a correction to a published entry (a typo, a wrong fact), and that is
    legitimate — which is why this is [ASK] and not [NEVER].
 
-   **An entry is published when the tag is pushed and the GitHub release exists with that
+   **An entry is published when the tag exists and the GitHub release exists with that
    entry as its body** — not when `APP_VERSION` is bumped. The bump is a local edit that
    reaches no user, and it can be reverted or abandoned; publication is the irreversible
    step. Freezing at the bump would permanently lock an entry for a release that was
@@ -1722,33 +1716,52 @@ in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
    real-machine jobs). The gate in step 5 reads **that push run on `main`, for the exact
    commit that is tagged** — a green pull-request run is not it.
 
-4. **Push the tag.** The tag is the version with a `v` prefix — `vX.Y.Z` for
-   `APP_VERSION` `"X.Y.Z"` — on the `main` commit from step 3:
+4. **CI creates the tag.** Nobody pushes one. When the `tests.yml` push run on `main`
+   finishes, `.github/workflows/auto-tag.yml` runs `ci/release_ci.py auto-tag` for that
+   commit, and it creates `vX.Y.Z` there and starts `release.yml` on it only when all of
+   these hold:
 
-   ```sh
-   git tag vX.Y.Z <that commit> && git push origin vX.Y.Z
-   ```
+   - that commit's `tests.yml` push run on `main` is complete and successful, every job
+     in it `success`, both real-machine jobs among them;
+   - the commit's `APP_VERSION` is **greater than** the latest published release
+     (compared as numbers; drafts and pre-releases do not count);
+   - the tag `v` + `APP_VERSION` does not exist yet.
 
-   **[ASK] Push the tag only on the user's explicit, per-instance authorization.** This
-   is the step that makes the release real: it starts `release.yml`, which publishes, and
-   `check_github_update()` polls the repo's latest release tag every hour (never at launch —
+   | The merge | What `auto-tag.yml` does |
+   | --- | --- |
+   | does not raise `APP_VERSION` (almost every merge) | nothing — ends green |
+   | lowers it | nothing — ends green |
+   | raises it to a version whose tag already exists | nothing — a tag is never moved or republished |
+   | `main`'s CI is not green | nothing — the job does not start, and the decision re-checks |
+   | raises it, but `RELEASE_NOTES.md` has no section for it, or it is not `X.Y.Z` | **fails**, without tagging |
+   | raises it, green, notes present | tags the commit and starts `release.yml` |
+
+   **So the merge in step 3 is what makes the release real.** `release.yml` publishes,
+   and `check_github_update()` polls the repo's latest release tag every hour (never at launch —
    the first check comes one interval after start), so **every installed copy of the
    app** then starts offering the update. That cannot be recalled from anyone who has
-   already fetched it — deleting the tag afterwards does not un-ship it.
+   already fetched it — deleting the tag afterwards does not un-ship it. Do not merge a
+   version bump you were not asked to release.
 
-   - The authorization must come from the **user**, not from another agent reporting one.
-   - It is **per-instance**. Approval for one release is not approval for the next.
-   - Absent that authorization, prepare everything through step 3, state the exact
-     command, and hand it over.
+   **[NEVER] create or push a version tag by hand** (`git tag` + `git push`, `git push
+   --tags`, the API). A hand-pushed tag still has to pass `release.yml`'s `gate`, so it
+   cannot publish an unverified commit — but it is a step beside CI, and a tag on the
+   wrong commit blocks the right one, because an existing tag is never moved.
 
-   Push the tag only — never `git push --tags`, which sends every local tag.
+   The tag is created with the workflow's `GITHUB_TOKEN`, and a tag created that way
+   raises no `push` event — which is why `auto-tag.yml` starts `release.yml` itself, by
+   `workflow_dispatch` on the tag. If that start fails, it deletes the tag it just made,
+   so re-running the job begins from a clean state. A fork's pull request cannot reach
+   any of this: the workflow file always comes from `main`, and its job runs only for
+   this repository's own successful `push` run on `main`.
 
-5. **`release.yml` does the rest.** It runs on a pushed `v*.*.*` tag and on
-   `workflow_dispatch`, and never on `pull_request`. Four jobs:
+5. **`release.yml` does the rest.** It runs on `workflow_dispatch` — which is how
+   `auto-tag.yml` starts it, on the tag — and on a pushed `v*.*.*` tag, and never on
+   `pull_request`. Four jobs:
 
    | Job | Runs on | What it does |
    | --- | --- | --- |
-   | `gate` | GitHub-hosted | `ci/release_ci.py gate`. Decides the mode — **publish** only for a pushed tag of the exact form `vX.Y.Z`, **dry run** for everything else. For a publish it requires: tag == `v` + `APP_VERSION`; that version's section in `RELEASE_NOTES.md`; the tagged commit on `origin/main`; and that commit's `tests.yml` push run on `main` complete, successful, every job `success`, both real-machine jobs among them. Otherwise the run ends here and nothing is signed. |
+   | `gate` | GitHub-hosted | `ci/release_ci.py gate`. Decides the mode — **publish** only for a run on a tag ref of the exact form `vX.Y.Z` (started by `auto-tag.yml`, or a pushed tag), **dry run** for everything else, a manual run on a branch included. For a publish it requires: tag == `v` + `APP_VERSION`; that version's section in `RELEASE_NOTES.md`; the tagged commit on `origin/main`; and that commit's `tests.yml` push run on `main` complete, successful, every job `success`, both real-machine jobs among them. Otherwise the run ends here and nothing is signed. |
    | `mac` | `token-pet-mac-1` | `./release.sh build`, `sign`, `notarize`, `universal`, `dmg` — one step each, so a failure stops the job at that step and shows which. Then `ci/release_mac_gate.zsh`: the upload-name check and `verify_upload_artifact` on each of the four files, and the release body (`gen_release_notes`). |
    | `win` | `token-pet-win-1` | `windows\build_win.py` in a fresh venv: PyInstaller build, version marker, layout check, zip, Inno Setup installer, `verify_win_artifact` gate. Unsigned, as before (`CLAUDE_PET_WIN_SIGN` is not set). |
    | `publish` | GitHub-hosted | `ci/release_ci.py publish`. Creates a **draft** release with the six assets, compares each uploaded asset's size and SHA-256 with what the runners built (the sums travel as job outputs, apart from the files), and only then makes it public and latest. A dry run stops before that and deletes the draft. Any failure deletes the draft. |
@@ -1784,17 +1797,17 @@ in `RELEASE_NOTES.md`, and `git tag --sort=-v:refname | head -1`.
 
    **When the workflow fails**, read the failed step, fix the cause, and run it again —
    re-run the failed jobs of that run when the cause was outside the code (a notarization
-   outage, a runner that was offline), or merge the fix to `main` and release from the
-   new commit when it was not. A tag whose run never published can be deleted and
-   re-pushed by whoever holds the step-4 authorization for that version. Do not finish
-   the remaining steps by hand.
+   outage, a runner that was offline), or merge the fix to `main` when it was not — with the next
+   version number, because an existing tag is never moved and `auto-tag.yml` tags only a
+   version that has no tag yet. Do not finish the remaining steps by hand, and do not
+   delete or re-push a tag to get there.
 
-   **Dry run — [ASK].** `gh workflow run release.yml --ref <branch>` runs every job on
-   that ref — the real signing and notarization included — uploads to a draft named
-   `dry-run-<run id>`, verifies it, and deletes it. Nothing is published and no tag is
-   created; there is no input that turns a manual run into a publication. Use it when the
-   release workflow itself changed. It signs and notarizes under the user's Developer ID,
-   which is why it is asked for rather than run at will.
+   **Dry run — a CI test, not a release step.** `gh workflow run release.yml --ref
+   <branch>` runs every job on that branch — the real signing and notarization included —
+   uploads to a draft named `dry-run-<run id>`, verifies it, and deletes it. Nothing is
+   published and no tag is created; there is no input that turns a manual run into a
+   publication, and a run that is not on a `vX.Y.Z` tag cannot publish. Use it when the
+   release workflow itself changed. It needs nobody's authorization.
 
    **`release.sh`'s subcommands, by who may run them:**
 

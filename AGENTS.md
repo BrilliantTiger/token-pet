@@ -65,13 +65,11 @@ two-confirmation requirement is a deliberateness
 gate against a careless one-line relay, not a verification that the human actually said
 it. The user was told this in as many words before choosing to keep the exception anyway.
 
-**This exception reaches the release tag push** (repo owner amendment, 2026-09-21,
-confirmed after the release-steps table in §6 was found to still read as absolute; it was
-written for `push`/`publish`, and since TOK-60 the tag push is the only release step an
-agent performs) — that is `[ASK]`, and this is a general `[ASK]` exception, so it would
-be inconsistent to silently exclude the one case that prompted it. It is deliberately
-**per-instance only**: it authorizes one named tag push, double-confirmed, in the moment,
-and never an advance approval of later releases.
+**This exception no longer has a release step to reach.** It was written for the release
+`push`/`publish` and, after TOK-60, for the tag push. Since TOK-64 (2026-11-20) nobody
+pushes a release tag: CI creates it ([§6](#6-release-gate)), so there is no `[ASK]` left
+in a release for this exception — or the fast path above — to satisfy. It still applies
+to every other `[ASK]`.
 
 **There used to be a third tag, `[ASK-OP]`**, for code signing and notarization: an
 `[ASK]` that only a dedicated release operator could carry out. It was retired with
@@ -500,24 +498,36 @@ preferable; take a copy first when you can.
 
 ## 6. Release gate
 
-**A release is a tag push, and CI does everything after it.** Since TOK-60 (the user,
-2026-11-19: "CI에서 이미 다 쳐해야하는걸 왜 너가 계속 쳐 맞추고 기록한다 지랄인데?! 제대로 CI가
-돌아서 끝나야지", "모든 게이트 및 검토 는 CI로", "릴리스도 가능한 한 CI 로") the sequence is:
+**A release is a version bump merged to `main`, and CI does everything after it — the tag
+included.** Since TOK-60 (the user, 2026-11-19: "CI에서 이미 다 쳐해야하는걸 왜 너가 계속 쳐
+맞추고 기록한다 지랄인데?! 제대로 CI가 돌아서 끝나야지", "모든 게이트 및 검토 는 CI로", "릴리스도
+가능한 한 CI 로") and TOK-64 (2026-11-20 — v1.2.2 had passed all of `main`'s CI and then
+waited 2 hours 40 minutes for someone to push its tag) the sequence is:
 
 1. **Preparation.** The version bump, the release notes and the release commit, merged to
    `main` through the ordinary pull-request path — gated by [§8](#8-merge-checklist) like
-   any other change.
+   any other change. **Merging that pull request is the release decision.** There is no
+   later step at which anyone approves.
 2. **`main`'s CI is green for that commit** — the `tests.yml` push run on `main`,
    including both real-machine jobs.
-3. **The tag `vX.Y.Z` is pushed on that commit.** This is the release decision and it is
-   the user's: **[ASK]**, per-instance.
+3. **`.github/workflows/auto-tag.yml` creates the tag `vX.Y.Z` on that commit** and starts
+   `release.yml` on it. It runs when `tests.yml` finishes on `main`, and tags only when
+   that run is entirely `success`, the commit's `APP_VERSION` is greater than the latest
+   published release, and the tag does not exist yet. Nobody pushes a tag.
 4. **`.github/workflows/release.yml` runs to the end**: `gate` → `mac` and `win` →
    `publish`. Nothing in it is done by hand.
+
+A merge that does not raise `APP_VERSION` releases nothing: `auto-tag.yml` runs, finds the
+version no greater than the latest release, and ends green without a tag. The same goes
+for a lower version, a tag that already exists, and a `main` run that is not green. A
+raised version whose `RELEASE_NOTES.md` section is missing ends **red**, untagged.
 
 ### The gate is a CI job, not a record
 
 `release.yml`'s `gate` job decides whether the tag may be published, and it is the whole
-gate. It fails — and nothing is built, signed or uploaded — unless all of these hold:
+gate — `auto-tag.yml` asks the same questions before it tags, and `gate` asks them again
+for whatever tag it is started on. It fails — and nothing is built, signed or uploaded —
+unless all of these hold:
 
 - the tag is exactly `v` + `APP_VERSION` of the tagged commit;
 - `RELEASE_NOTES.md` has that version's section;
@@ -603,27 +613,42 @@ improving nothing. So:
   because a user who is in the minority reads "rarely" as a statement that their problem
   is not real.
 
-### Release steps are separately authorized
+### The version bump is the release
 
 An approval to implement is never an approval to release.
 
 | Step | Tag | Who |
 | --- | --- | --- |
-| Version bump, release notes, release commit, the pull request to `main` | ordinary authorized work | whoever was given the release to prepare |
-| Pushing the tag `vX.Y.Z` | **[ASK]** | the **user** only — not a Coordinator, not an agent relaying them, **except** the one named Mac-relay path in [§0](#0-how-to-read-the-prohibitions) (double-confirmed, per-instance only) |
+| Version bump, release notes, release commit, the pull request to `main` and its merge | ordinary authorized work — **this is the release** | whoever was given the release to make |
+| Creating the tag `vX.Y.Z` | — | **`auto-tag.yml` only.** By hand it is **[NEVER]** (below) |
 | Release build, signing, notarization, upload, publication | — | **`release.yml` only.** By hand it is **[NEVER]** for an agent (below) |
-| A dry run of `release.yml` (`workflow_dispatch`) | **[ASK]** | the **user** — it signs and notarizes under their Developer ID, though it publishes nothing |
+| A dry run of `release.yml` (`workflow_dispatch` on a branch) | a CI run like any other — no authorization step | whoever changed the release workflow and needs to see it run |
 
-**The tag push is the one human decision in a release, and it is irreversible.** The
-updater polls the latest release, so once `release.yml` publishes, every installed copy
-starts offering the version, and deleting the tag afterwards recalls nothing. That is why
-it stays **[ASK]** from the user, per-instance: approval for one release is not approval
-for the next, and it is never inferred from a finished implementation, a written
-changelog section, or an agent's report that the user approved.
+**Raising `APP_VERSION` on `main` is the one decision in a release, and it is
+irreversible.** Once that commit is green on `main`, CI tags it and publishes it with no
+further question; the updater polls the latest release, so every installed copy then
+starts offering the version, and deleting the tag afterwards recalls nothing. So the
+decision is made where the bump is made: **a change raises the version constant only when
+the work it was given is a release.** It is never inferred from a finished
+implementation or a written changelog section.
 
-Concretely: an agent implementing a fix does not touch the version constant, does not
-create a tag, and does not push one. If you have finished an implementation and believe
-it is ready to ship, say so and stop.
+Concretely: an agent implementing a fix does not touch the version constant. If you have
+finished an implementation and believe it is ready to ship, say so and stop. An agent
+that *was* given a release bumps the version, merges through §8, and is done — it does
+not then wait for, or ask for, a further approval, and it does not tag.
+
+**[NEVER] create or push a `vX.Y.Z` tag by hand** — not `git tag` + `git push`, not the
+API. The tag is how the release starts, and `auto-tag.yml` creates it only after it has
+checked `main`'s CI, the version and the notes. A hand-pushed tag goes through
+`release.yml`'s `gate` too, so it cannot publish something unverified — but it is a step
+performed beside CI, which is what this section rules out, and a tag pushed on the wrong
+commit stays in the way of the right one.
+
+**A dry run is not gated by a person.** `gh workflow run release.yml --ref <branch>` runs
+every job on that branch — the real signing and notarization included — uploads to a
+draft, verifies it, deletes it, and publishes nothing: a run that is not on a `vX.Y.Z`
+tag cannot publish. Use it when the release workflow itself changed; it is a CI test, not
+a release step.
 
 **This does not make ordinary commits require authorization.** An *implementation
 commit* — recording work on a branch as part of the task you were given — is normal
@@ -642,8 +667,10 @@ well find that it *can*. **"Can" is not the question.**
 
 The reason is the order the workflow enforces, which a hand-run sequence does not have:
 
-- **Nothing is signed before the gate passes.** `mac` and `win` wait for `gate`; a tag on
-  a commit whose `main` CI is not green signs nothing.
+- **Nothing is tagged before `main` is green, and nothing is signed before the gate
+  passes.** `auto-tag.yml` tags only a commit whose `main` run is entirely `success`;
+  `mac` and `win` wait for `gate`, so a tag on a commit whose `main` CI is not green signs
+  nothing.
 - **Nothing is public before it is verified.** The six assets go to a draft, are compared
   with what was built, and the release is published in one step — an installed copy's
   updater never sees a release that is missing its asset.
@@ -657,15 +684,19 @@ on the release. The workflow is that party now: it holds no role on any change, 
 same steps for every tag, and cannot be talked into skipping one.
 
 **When `release.yml` fails, fix the cause and run it again** — re-run the failed jobs of
-the same run, or, when the fix is a commit, merge it to `main` and tag the new commit
-with a new version. Do not finish a failed release by hand.
+the same run, or, when the fix is a commit, merge it to `main` with a new version and let
+CI tag that. Do not finish a failed release by hand. (`auto-tag.yml` removes the tag it
+just created when it cannot start `release.yml`, so re-running that job starts clean.)
 
 **Runner safety is part of this gate.** The macOS runner holds the signing certificate,
 so what may run there is pinned by `tests/test_release_workflow.py`: `release.yml` has no
 `pull_request` trigger and no input that could turn a manual run into a publication,
 every self-hosted job in a workflow that does run on pull requests carries the
 same-repository condition, no repository secret is used, and write permission exists only
-in the `publish` job. **[NEVER] move the certificate, its key, or the notarization
+in the `publish` job. `auto-tag.yml` is pinned there too: it runs only when `tests`
+finishes, its one job requires that run to be this repository's own successful push on
+`main` (a fork's pull request reaches none of that), it has no self-hosted job, and its
+write permission is limited to creating the tag and starting `release.yml`. **[NEVER] move the certificate, its key, or the notarization
 credentials into repository or organization secrets, and never print them.**
 `ci/SELF_HOSTED_RUNNERS.md` has the runner side.
 
@@ -779,7 +810,8 @@ when reverting is most expensive.
 
 What a release adds beyond this list is release-specific: the version bump and the
 release notes in the release commit, and then [§6](#6-release-gate) — `main`'s CI green
-for that commit, the user's tag push, and `release.yml`. A merge does not require those.
+for that commit, the tag `auto-tag.yml` creates, and `release.yml`. A merge does not
+require those.
 
 **A change that cannot satisfy item 1 or 2 is not mergeable, and that is an acceptable
 outcome.** See [§7's note on solo agents](#a-solo-agent-cannot-produce-a-mergeable-commit):

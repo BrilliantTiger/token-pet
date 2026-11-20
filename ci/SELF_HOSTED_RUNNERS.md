@@ -59,12 +59,14 @@ gh api repos/BrilliantTiger/token-pet/actions/permissions/fork-pr-contributor-ap
 
 같은 저장소의 PR, `main`·`dev` push, `workflow_dispatch`. 포크의 PR 에서는 돌지 않는다. 태그 push 로는 돌지
 않는다 — 태그는 `main` 에서 이미 초록인 커밋에 붙고, 그 초록은 `release.yml` 의 gate 잡이 확인한다.
+태그는 `auto-tag.yml` 이 단다(TOK-64). 그 워크플로는 GitHub 호스트 러너에서만 돌고 이 두 러너를 쓰지 않는다.
 
 ## 릴리스도 이 두 러너에서 돈다
 
 `release.yml`(TOK-60)의 `mac` 잡은 `token-pet-mac-1` 에서 서명·공증하고, `win` 잡은 `token-pet-win-1` 에서
-zip 과 설치 파일을 만든다. 그 워크플로는 `vX.Y.Z` 태그 push 와 `workflow_dispatch`(시험 — 게시하지 않는다)로만
-돌고 `pull_request` 로는 돌지 않는다. 러너에 있어야 하는 것:
+zip 과 설치 파일을 만든다. 그 워크플로는 `vX.Y.Z` 태그(`auto-tag.yml` 이 달고 `workflow_dispatch` 로 깨운다 —
+게시)와 브랜치에서의 `workflow_dispatch`(시험 — 게시하지 않는다)로만 돌고 `pull_request` 로는 돌지 않는다.
+러너에 있어야 하는 것:
 
 | 러너 | 있어야 하는 것 |
 | --- | --- |

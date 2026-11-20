@@ -1,0 +1,56 @@
+name: auto-tag
+
+# 태그도 CI 가 단다(TOK-64). 릴리스 결정은 **버전을 올린 PR 을 main 에 머지하는 것**이고, 그 뒤에 사람이나
+# 에이전트가 하는 단계는 없다 — 1.2.2 는 main 의 CI 를 다 통과하고도 태그를 올릴 사람을 2시간 40분 기다렸다.
+#
+# tests.yml 의 main push 실행이 끝나면 이 워크플로가 돈다. ci/release_ci.py auto-tag 가 서버에 다시 물어:
+#   · 그 커밋의 tests.yml main push 실행이 실기기 잡 둘을 포함해 전부 success 이고
+#   · 그 커밋의 APP_VERSION 이 공개된 최신 릴리스보다 크고
+#   · 그 vX.Y.Z 태그가 아직 없으면
+# 그 커밋에 태그를 달고 release.yml 을 그 태그에서 깨운다(workflow_dispatch — GITHUB_TOKEN 으로 만든 태그는
+# push 이벤트를 내지 않는다). 게시해도 되는지는 release.yml 의 gate 잡이 한 번 더 같은 조건으로 본다.
+# 버전을 올리지 않은 머지, 내려간 버전, 이미 있는 태그, 빨간 main CI → 아무것도 하지 않는다.
+# 버전은 올렸는데 릴리스 노트의 그 절이 없으면 태그를 달지 않고 빨갛게 끝난다.
+#
+# workflow_run 은 포크 PR 의 tests 실행이 끝났을 때도 깨어나고, `branches: [main]` 은 포크의 'main' 브랜치에도
+# 맞는다. 그래서 잡 조건이 넷을 모두 본다: push 실행 · main · success · 이 저장소. 이 워크플로 파일은 언제나
+# 기본 브랜치(main)의 것이 쓰이므로 PR 이 고칠 수 없다. self-hosted 잡은 없다 — 서명 러너는 release.yml 의
+# mac·win 잡에서만 돈다.
+on:
+  workflow_run:
+    workflows: ["tests"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: Tag a green version bump on main
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # contents: 태그를 단다. actions: release.yml 을 깨운다(+ tests 실행의 잡을 읽는다).
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      # 시험한 그 커밋. 기본 체크아웃은 그때의 main 끝이라 다른 커밋일 수 있다.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Fetch main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      # 이벤트에서 온 값은 env 로만 넘긴다(run: 안에 끼우지 않는다).
+      - name: Tag and start the release, or do nothing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: python3 ci/release_ci.py auto-tag --repo "$REPO" --sha "$HEAD_SHA"
